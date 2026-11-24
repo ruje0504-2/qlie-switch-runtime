@@ -409,6 +409,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  whj2::StateWriter flow;flow.str("WHJ2-flow-2");auto waitState=sentenceWait.save();flow.str(std::string(waitState.begin(),waitState.end()));flow.str(pendingBody);flow.str(pendingSpeaker);flow.str(pendingVoice);flow.str(currentPageKey);qlie::write_file(slotPrefix(slot)+".flow",flow.bytes);
  qlie::write_file(slotPrefix(slot)+".message",messageText->save());
  qlie::write_file(slotPrefix(slot)+".auto",autoPlay.save());
+ if(story.state.awaiting)qlie::write_file(slotPrefix(slot)+".choice",choiceScreen->save());
  qlie::write_file(slotPrefix(slot)+".audio",audio->save());
  whj2::StateWriter settings;
  settings.str("WHJ2-mixer-2");
@@ -442,7 +443,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(std::filesystem::exists(slotPrefix(slot)+".auto"))autoPlay.restore(qlie::file(slotPrefix(slot)+".auto"));else {autoPlay.enabled=false;autoPlay.page(settings.get("AutoClickWait"));}
  history.clear();if(std::filesystem::exists(slotPrefix(slot)+".history"))history=whj2::restoreHistory(qlie::file(slotPrefix(slot)+".history"));
  menu=false;hidden=false;
- normalSkip=false;currentPageWasRead=progress.wasRead(currentPageKey);focus=0;if(story.state.awaiting)choiceScreen->show(story.state.choices,font);
+ normalSkip=false;currentPageWasRead=progress.wasRead(currentPageKey);focus=0;if(story.state.awaiting){choiceScreen->show(story.state.choices,font);if(std::filesystem::exists(slotPrefix(slot)+".choice"))choiceScreen->restore(qlie::file(slotPrefix(slot)+".choice"),font);focus=choiceScreen->selection();}
  warmNextScene();
  status="静止画・音声位置を含む状態を読み込みました。";
  }
@@ -461,8 +462,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  else if(action==whj2::TitleScreen::Back)title->setExtraPage(false);
  else if(action==whj2::TitleScreen::Quit)performUi(whj2::GameMenu::Quit);
  else std::cerr<<"PENDING-TITLE extra modes\n";
- }else if(story.state.awaiting){if(!choiceScreen->ready())return;uiSound("Sys_OnClick");story.choose(unsigned(focus));
- next();
+ }else if(story.state.awaiting){if(choiceScreen->confirm())uiSound("Sys_OnClick");
  }else {if(sentenceWait.blocksClick())return;
  if(settings.get("ClickVoiceStop"))audio->volume(3,0,250,true);
  if(messageText->reveal()){auto action=sentenceWait.prewaiting()?sentenceWait.confirm():whj2::SentenceWait::None;refreshMessage();if(action==whj2::SentenceWait::Next)next();else if(action==whj2::SentenceWait::Resume)next(true);return;}
@@ -642,7 +642,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(!menu&&!hidden&&images->messageVisible()&&std::abs(x-1170)<=14&&std::abs(y-700)<=14){autoPlay.enabled=!autoPlay.enabled;normalSkip=false;uiSound("Sys_OnClick");return;}
  if(!menu&&!hidden&&images->messageVisible()&&std::abs(x-1200)<=14&&std::abs(y-700)<=14){toggleSkip();uiSound("Sys_OnClick");return;}
  if(menu){if(!title->ready()){activate();return;}int target=title->hit(x,y);if(!title->select(target))return;focus=title->selection();
- }else if(story.state.awaiting){int target=choiceScreen->hit(x,y);if(target<0)return;focus=target;if(choiceScreen->select(focus))uiSound("Sys_OnMouse");
+ }else if(story.state.awaiting){if(choiceScreen->exiting()){activate();return;}int target=choiceScreen->hit(x,y);if(target<0)return;focus=target;if(choiceScreen->select(focus))uiSound("Sys_OnMouse");
  }activate();
  }
  void controllerAdded(int index){if(!SDL_IsGameController(index))return;
@@ -696,7 +696,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  else if(!opening&&menu&&!gameMenu.visible())title->update(double(now-lastUpdate));
  if(!menu&&!movie->playing()&&!gameMenu.visible()&&!upperMenu->visible()){
  images->update(double(now-lastUpdate));
- if(story.state.awaiting)choiceScreen->update(double(now-lastUpdate));
+ if(story.state.awaiting){if(fastForward)choiceScreen->skipConfirmation();choiceScreen->update(double(now-lastUpdate));int chosen=choiceScreen->takeConfirmed();if(chosen>=0){story.choose(unsigned(chosen));next();}}
  messageText->update(double(now-lastUpdate));if(messageText->visible()!=lastMessageVisible)refreshMessage();
  transition->update(double(now-lastUpdate));
  autoPlay.tick(double(now-lastUpdate),messageText->visible(),settings.get("AutoTextWait"),settings.get("TextSpeed"),messageText->timedCharacters(autoPlay.countedGlyphs(),messageText->visible()));

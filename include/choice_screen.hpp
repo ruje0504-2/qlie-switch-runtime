@@ -4,11 +4,17 @@
 namespace whj2 {
 class ChoiceScreen {
  qlie::Assets&assets;SceneImages scene;std::vector<std::string> entries;double elapsed=0;int selected=0;
+ int pending=-1;double closingElapsed=0;bool closing=false;
 public:
  explicit ChoiceScreen(qlie::Assets&a):assets(a),scene(a){}
  void show(const std::vector<std::string>&,KFont*);
- void update(double ms){scene.update(ms);elapsed+=ms;}
- bool ready()const{return elapsed>=250;}
+ void update(double ms);
+ bool ready()const{return !closing&&elapsed>=250;}
+ bool exiting()const{return closing;}
+ bool confirm();int takeConfirmed();
+ void skipConfirmation(){if(closing)update(500-closingElapsed);}
+ int selection()const{return selected;}
+ qlie::Bytes save()const;void restore(const qlie::Bytes&,KFont*);
  bool select(int);int hit(float,float)const;
  void draw(qlie::Bytes&pixels)const{scene.draw(pixels);}
  void draw(RenderTarget&target)const{scene.draw(target);}

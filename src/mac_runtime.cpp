@@ -295,7 +295,7 @@ struct Frontend {
  }if(menu){std::vector<std::string>items={"はじめから","ロード","終了"};
  for(int i=0;i<3;i++)line((focus==i?"▶ ":"　 ")+items[size_t(i)],100,210+i*70,30,focus==i?0xffd58b:0xffffff);
  }else if(!hidden){images->drawMessages(pixels);
- line(name,200,570,26,0xffffff);
+ line(whj2::messageDisplayName(name),200,570,26,0xffffff);
  if(story.state.awaiting)for(size_t i=0;i<story.state.choices.size();i++)line((focus==int(i)?"▶ ":"　 ")+story.state.choices[i],80,220+int(i)*50,26,focus==int(i)?0xffd58b:0xffffff);
  }if(!menu&&!hidden)images->drawFaces(pixels);
  line("A: 次へ　B / ＋: メニュー　上下: 選択　X: 保存　Y: 読込　タッチ操作対応",45,675,19,0xb0becf);

@@ -1,77 +1,71 @@
 # WHJ2-Switch
 
-《美少女万華鏡2》日文原版的原生QLIE运行时移植，目标为Horizon NRO，先在Mac验证。**开发候选，尚非完整可玩版本，未通过Switch实机验收。**
+《美少女万華鏡2》日文原版的原生QLIE运行时移植，目标为Nintendo Switch/Horizon NRO，使用Mac作为开发验证平台。**当前是开发候选，尚非完整可玩版本，未通过Switch实机验收。**
 
-仓库不包含游戏资源、密钥、EXE或存档。原版数据只读；移植存档独立保存。
+仓库只包含技术源码、构建脚本和许可。原版游戏资源、EXE、密钥及存档不属于本仓库；游戏数据只读，移植存档单独保存。
 
-参考 kisaku-switch-runtime 固定提交 `95d71d9bcaee9dc7ab48b4bda8d3139a817e6cc7`。QLIE与AI6WIN不同，没有复用AI6WIN的VM。字体/媒体基础按GPL复用，来源见THIRD_PARTY.md。
+## 构建和运行
 
-## Mac构建
-
-需要C/C++17编译器、Python3、SDL2、FreeType、libpng、libjpeg和FFmpeg开发库；默认使用Homebrew pkg-config，可用PKG_CONFIG覆盖。
+Mac需要C/C++17编译器、Python3、SDL2、FreeType、libpng、libjpeg与FFmpeg开发库。默认使用Homebrew pkg-config，可用PKG_CONFIG覆盖。
 
 ```sh
 ./build-host.sh
 build/whj2-runtime /absolute/path/to/game /absolute/path/to/independent-saves
 ```
 
-## Switch候选
-
-需要devkitPro、devkitA64、libnx和Switch portlibs。
+Switch需要devkitPro、devkitA64、libnx和Switch portlibs：
 
 ```sh
 ./build-switch.sh
 ```
 
-生成 `build-switch/whj2-runtime.nro`。该候选直接使用libnx Joy-Con输入和SDL触摸，Switch构建不处理键盘鼠标事件。默认从 `sdmc:/switch/whj2/game` 读取原版文件，在 `sdmc:/switch/whj2/saves` 写移植存档。原版GameData、DLL/key.fkey和日文EXE必须来自本地游戏副本；不会执行EXE。
+产物为`build-switch/whj2-runtime.nro`。默认从`sdmc:/switch/whj2/game`读取原版文件，在`sdmc:/switch/whj2/saves`保存状态。原版GameData、DLL/key.fkey和日文EXE来自本地游戏副本；运行时不会执行EXE。
 
-Joy-Con：A推进/确认，B或＋/－返回菜单，上下方向/摇杆选择，X保存、Y读档。单侧Joy-Con另有SL确认、SR返回、L/R保存、ZL/ZR读档。触摸支持推进、菜单项和分支选择，右上角提供保存、读档与菜单。**这些入口已经接线，仍需要真实Joy-Con和Switch触摸验收。**
+构建输出集中到固定build/build-switch目录，后续更新覆盖产物。同版本已有有效结果可以复用。
+
+## 输入
+
+目标输入为Joy-Con与触摸。A确认/推进，B或＋/－返回菜单，上下方向/摇杆选择，X保存、Y读档；单侧Joy-Con另有SL确认、SR返回、L/R保存、ZL/ZR读档。触摸支持推进、菜单项和分支选择，右上角提供保存、读档与菜单。
+
+这些入口已接线，但仍缺实际Joy-Con和Switch触摸验收。SDL注入事件仅验证输入处理和状态流程。
 
 ## 实现范围
 
-已实现资源解密、日文文字、原始剧情控制流和四个结局路径、段落提交、静态背景与角色、音乐/音效、静态画面及音轨位置存读档。空存档读档会提示并留在菜单。
+- QLIE资源解密/BPE、日文显示、剧情控制流与四结局逻辑、段落提交、空存档正常处理。
+- 全局二维图元排序、变换栈、原版定点混合、矩形、部分周期/随机轨道、上下文尺寸、位图粒子和嵌套动画时钟。
+- 双纹理位图遮罩、蓝通道阈值。动态遮罩和影片帧保有队列内快照，静态图片继续共享。
+- 角色基础动作与独立立绘替换槽、命名/数字动作、直接后向关键帧循环。显式与自动头像选择、逐页/持续显隐、前景层。
+- 图层位置/颜色渐变、相对位移、播放速度。原消息框、逐字正文、姓名别名，以及spd速度标签与pc居中标签。
+- 音乐/音效、顶层动画内嵌音频及独立direct总线、音量和播放位置保存。独立Theora影片按音频采样时钟播放。
+- 场景交叠/cut/catch、点击/固定/正文等待和原生等待续行。图像、音轨、过渡、逐字及等待状态可以保存和恢复。
 
-独立Theora影片按音频采样时钟播放，Mac完整片尾自然结束已有证据。复合动画已接入跨场景图元排序、两套变换栈、周期运动轨道、上下文尺寸、矩形与位图混合（透明、屏幕、乘法、差值、最大/最小、加减）。混合使用原版定点运算规则；普通矩形、震动和闪光有原资源像素验证。位图粒子、嵌套位图时钟和顶层动画内嵌音效已接通。模型、部分运动函数与属性、嵌套音轨和完整对象生命周期尚未完成。对白语音ID映射未闭合。未实现路径显式写入PENDING日志，不作为完整演出通过。
+保存格式仍处于开发阶段。旧版本状态的兼容分支不能替代完整演出恢复验收。
 
-保存格式仍为开发格式；完整动画存档和实机可玩性均未验收。
+## 已知缺口
+
+原版完整UI、部分富文本和禁则排版、精确字体与文本计时对齐、其余缓动/图元/随机/上下文、3D模型和旋转、非位图遮罩、嵌套及影片粒子、条件关键帧跳转、嵌套音轨与完整对象生命周期、规则/马赛克/动画转场、跳过/自动播放和语音seek仍未全部完成。对白ID到实际载荷的映射尚未闭合。
+
+未实现路径通过PENDING日志记录，不作为完整游戏行为通过。Mac验证与Switch构建都不能替代本游戏的Switch实机验收。
 
 ## 验证入口
 
 ```sh
 build/story-probe /absolute/path/to/game 000100
-build/presentation-probe /absolute/path/to/game 000100
-build/presentation-probe /absolute/path/to/game --effect-render
-build/presentation-probe /absolute/path/to/game --rectangle-render
-build/render-queue-probe
-build/animation-stack-probe
+build/presentation-probe /absolute/path/to/game --tween-render
+build/presentation-probe /absolute/path/to/game --chara-base
+build/presentation-probe /absolute/path/to/game --face-render
+build/presentation-probe /absolute/path/to/game --dynamic-instances
+build/embedded-audio-probe /absolute/path/to/game
+build/transition-probe /absolute/path/to/game
+build/wait-probe /absolute/path/to/game
+build/message-probe /absolute/path/to/game
 build/whj2-runtime /absolute/path/to/game /absolute/path/to/empty-test-saves --touch-smoke 120
-build/whj2-runtime /absolute/path/to/game /absolute/path/to/test-saves --movie movie/ed
 ```
 
-触摸冒烟使用SDL注入事件，只验证事件处理和状态流程，不能替代实际触摸屏。资源/媒体/逻辑探针不能替代演出与Switch实机验收。构建输出集中在固定build目录，更新时覆盖，不生成重复版本副本。
+资源、逻辑和像素探针仅证明各自覆盖的路径。实际硬件、完整剧情和交互体验需要独立验证。
 
-源码遵循GPL-2.0-or-later；原始游戏数据不属于源码许可范围。
+## 来源和许可
 
-Bitmap particles (primitive 20) now use the native deterministic random table and viewport-centered depth projection. Scene state version 6 preserves generated resource identities across saves and clears stale future caches when restoring; versions 2 through 5 scene saves remain readable. Nested/video particles, spherical particles, and particles with 3D rotation remain incomplete.
+参考kisaku-switch-runtime固定提交`95d71d9bcaee9dc7ab48b4bda8d3139a817e6cc7`。本作QLIE与参考项目AI6WIN不同，没有复用其VM；适用字体、媒体和构建基础的来源见THIRD_PARTY.md。
 
-Nested bitmap animations select their child motion and interpolate the child timeline from the parent key. Child loop bounds are respected. Zero-sized logical subcanvases are supported; missing dimension context remains reported. Symbolic child timeline inputs and nested embedded audio are still incomplete.
-
-Procedural function 5 uses the native time-quotient random-table lookup and restored per-scene identity seed. Other random functions remain incomplete.
-
-Primitive 10 bitmap gradient masks now use independent source/mask coordinates and native blue-channel threshold arithmetic, including inverse masks and fixed-point edge behavior. Non-bitmap and 3D mask variants remain incomplete; sampling currently follows the CPU renderer’s nearest-neighbor path.
-
-Top-level animation sound events decode embedded ABMP members on 16 direct-sound buses, separate from streamed music, voice and movies. The image dchannel base and fixed-point volume are applied; explicit zero volume stops the configured base bus, matching the script behavior. Looping, event timing, playback positions and pending mute state survive saves. Legacy eight-channel audio saves remain readable. Nested sound events and the remaining native object lifecycle are incomplete.
-
-Image commands support timed position/scale/rotation/priority and per-channel color/opacity transitions, axial offsets, and animation playback speed. Retargeting starts from the displayed value. Active transitions survive saves. Step, linear, outquart and inquart easing are implemented; additional easing modes remain reported as incomplete.
-
-Character base animations use a per-layer portrait in image slot 0 without modifying shared animation resources. Named and numeric motions are supported. Direct backward key jumps preserve their elapsed remainder; conditional key jumps remain incomplete. Empty portrait slots stay empty, and portrait replacements survive saves.
-
-Sentence transitions support captured-scene overlaps, cuts and template durations. Captures and transition progress survive saves; interrupted overlaps start from the currently displayed scene. Rule masks, mosaic and animation transition modes, some transition and face/UI behaviors remain incomplete and reported.
-
-Queued gradient masks and decoded video frames retain an immutable per-queue snapshot until drawing completes, so repeated animated assets cannot overwrite another instance’s pending frame. Static textures continue to use shared references.
-
-Face portraits support explicit files, per-page or persistent display, show/clear controls, and foreground rendering above the text panel. Automatic selection follows project FaceType, name aliases, character IDs and the original replacement tables, with configured fallback filenames. Missing candidates remain reported.
-
-Sentence timing supports fixed waits, interruptible click waits, message waits, automatic fade-duration waits and wait-only continuation. Native script wait and click-wait events suspend parsing without blocking rendering. Remaining wait time and in-progress page assembly survive saves; skip-mode timing and voice-seek behavior remain incomplete.
-
-Dialogue uses the original message-frame container and text slot, with configured text area, font size and color. UTF-8 typewriter progress survives saves; confirming unfinished text reveals it before a later confirmation advances. Original rich-text controls, detailed line-breaking rules and exact native font/timing parity remain incomplete.
+源码遵循GPL-2.0-or-later。原版游戏数据不在源码许可范围内。

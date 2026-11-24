@@ -2,9 +2,11 @@
 #include "image.hpp"
 struct KFont;
 namespace whj2 {
+std::string messageDisplayName(const std::string&);
 struct MessageStyle {unsigned width=920,height=300,fontWidth=26,fontHeight=26;uint32_t color=0xffffff;};
 class MessageText {
- std::string text;std::vector<size_t> boundaries;
+ struct Glyph {uint32_t codepoint;double deadline;size_t centeredRun=0;};
+ std::string text;std::vector<Glyph> glyphs;
  double elapsed=0,speed=10;
  void index();
 public:

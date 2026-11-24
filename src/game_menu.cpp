@@ -52,10 +52,12 @@ bool GameMenu::beginDrag(float x,float y){
   if(x>=230&&x<=1150&&y>=64&&y<656){int visual=std::clamp(int((y-64)/149),0,3),row=3-visual;if(row<historyRows){focus=row;historyDragRow=row;historyDragY=y;historyDragOffset=historyTextOffset[row];return true;}}
   return false;
  }
- if(panel!=Settings||asking||volumeTestAt(x,y)>=0||qualityAt(x,y)>=0)return false;for(int i=0;i<9;i++){const auto&s=sliders[i];if(std::abs(y-s.y)<=18&&x>=s.x-12&&x<=s.x+s.width+12){draggedSlider=i;focus=i+3;drag(x,y);return true;}}return false;}
+ if(panel!=Settings||asking||volumeTestAt(x,y)>=0||qualityAt(x,y)>=0)return false;
+ for(int i=0;i<9;i++){const auto&s=sliders[i];if(std::abs(y-s.y)<=18&&x>=s.x-12&&x<=s.x+s.width+12){draggedSlider=i;focus=i+3;drag(x,y);return true;}}return false;}
 bool GameMenu::drag(float x,float y){
  if(panel==History){if(historyDragRow==-2){historyOffset=int(std::round((1-std::clamp((y-118.5f)/481.f,0.f,1.f))*historyMaxOffset));return true;}if(historyDragRow>=0){historyTextOffset[historyDragRow]=std::clamp(historyDragOffset+int(std::round((historyDragY-y)/26)),0,historyTextMax[historyDragRow]);return true;}return false;}
- if(draggedSlider<0||panel!=Settings||asking)return false;const auto&s=sliders[draggedSlider];int before=settings.get(s.key);setPosition(settings,draggedSlider,int(std::round((x-s.x)*20/s.width)));settingsDirty|=before!=settings.get(s.key);return true;}
+ if(draggedSlider<0||panel!=Settings||asking)return false;
+ const auto&s=sliders[draggedSlider];int before=settings.get(s.key);setPosition(settings,draggedSlider,int(std::round((x-s.x)*20/s.width)));settingsDirty|=before!=settings.get(s.key);return true;}
 GameMenu::Action GameMenu::tap(float x,float y){if(panel==Fonts){if(x>=800&&x<=970&&((y>=155&&y<=200)||(y>=535&&y<=590))){focus=std::clamp(focus+(y<200?-5:5),0,fontCount-1);return Nothing;}if(x>=320&&x<=960&&y>=210&&y<510){int row=int((y-210)/60);int first=focus/5*5;if(first+row<fontCount){focus=first+row;return confirm();}}if(y>=550&&y<=600){if(x>=390&&x<=530)return AcceptFont;if(x>=590&&x<=770)return Close;}return Nothing;}if(asking){if(std::abs(y-325)<=20){if(std::abs(x-550)<=60){focus=0;return Yes;}if(std::abs(x-730)<=60){focus=1;return No;}}return Nothing;}
  if(panel==Settings){const auto&fontButton=resource("script/config/フォント選択_off.png");if(std::abs(x-410)<=fontButton.width*.5f&&std::abs(y-472)<=fontButton.height*.5f){focus=24;return ChooseFont;}int quality=qualityAt(x,y);if(quality>=0){focus=22+quality;return confirm();}int test=volumeTestAt(x,y);if(test>=0){focus=17+test;return confirm();}}
  if(panel==Save||panel==Load){for(int i=0;i<8;i++)if(populatedSlots[i]&&std::abs(x-deleteButtonX[i])<=15&&std::abs(y-(148+(i%4)*135))<=15){focus=8+i;return DeleteSlot;}if(y>=72&&y<=108&&x>=674){page=std::clamp(int((x-674)/40),0,14);focus=0;return Nothing;}if(y>=128&&y<=651){int col=x>=645?1:0;int row=int((y-128)/135);if(row<4){focus=col*4+row;return Slot;}}}

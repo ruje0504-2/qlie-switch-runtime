@@ -6,6 +6,9 @@ cxx=${CXX:-clang++}
 pc=${PKG_CONFIG:-/opt/homebrew/bin/pkg-config}
 mkdir -p build
 common="-O2 -Wall -Wextra -Werror -Iinclude -Isrc"
+revision=$(git rev-parse --verify HEAD 2>/dev/null || printf unversioned)
+if [ "$revision" != unversioned ] && ! git diff --quiet HEAD -- src include shaders build-host.sh build-switch.sh; then revision="$revision-dirty"; fi
+common="$common -DWHJ2_BUILD_REV=\"$revision\""
 vulkan_source=
 if [ "${WHJ2_HOST_VULKAN:-0}" = 1 ]; then
   mesa=${WHJ2_MESA_SDK:-$PWD/local/mesa-sdk/opt/devkitpro/portlibs/switch}

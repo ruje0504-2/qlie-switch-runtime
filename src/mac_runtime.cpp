@@ -1056,6 +1056,9 @@ controllerKey(e.cbutton.button);
  return 0;
  }
 };
+#ifndef WHJ2_BUILD_REV
+#define WHJ2_BUILD_REV "unversioned"
+#endif
 int main(int argc,char**argv){
 #ifdef __SWITCH__
  const char*logPath=std::getenv("WHJ2_LOG");if(!logPath)logPath="sdmc:/switch/whj2/runtime.log";
@@ -1077,6 +1080,7 @@ if(game.empty()){std::cerr<<"usage: whj2-runtime GAME [SAVE_DIR] [--smoke-frames
 #ifdef __SWITCH__
 if(argc<3)saves="sdmc:/switch/whj2/saves";
 #endif
+std::cerr<<"BUILD revision="<<WHJ2_BUILD_REV<<"\n";
 std::cerr<<"INIT game="<<game<<" saves="<<saves<<"\n";
 Frontend f(game,saves);if(argc>4&&std::string(argv[3])=="--restore-autosave"){unsigned index=unsigned(std::stoul(argv[4]));if(index<1||index>Frontend::AutoSaveCount)throw std::runtime_error("Auto save index must be1..5");auto slot=Frontend::AutoSaveBase+index-1;if(!std::filesystem::exists(f.slotPrefix(slot)+".story"))throw std::runtime_error("Auto save slot is empty");f.opening=0;f.load(slot);}
  if(argc>4&&std::string(argv[3])=="--read-skip-smoke"){f.readSkipTest=true;smoke=unsigned(std::stoul(argv[4]));}

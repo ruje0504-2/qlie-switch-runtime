@@ -8,6 +8,9 @@ export PKG_CONFIG_LIBDIR="$dkp/portlibs/switch/lib/pkgconfig"
 pc="$dkp/tools/bin/pkg-config"
 mkdir -p build-switch
 flags="-O2 -Wall -Wextra -Werror -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE -D__SWITCH__ -Iinclude -Isrc -isystem $dkp/libnx/include"
+revision=$(git rev-parse --verify HEAD 2>/dev/null || printf unversioned)
+if [ "$revision" != unversioned ] && ! git diff --quiet HEAD -- src include shaders build-host.sh build-switch.sh; then revision="$revision-dirty"; fi
+flags="$flags -DWHJ2_BUILD_REV=\"$revision\""
 if [ "${1:-}" = "--diagnostic" ]; then
   $cxx -std=c++17 $flags -L"$dkp/libnx/lib" -specs="$dkp/libnx/switch.specs" src/qlie.cpp src/story.cpp src/switch_diagnostic.cpp -lpthread -lnx -o build-switch/whj2-diagnostic.elf
   "$dkp/tools/bin/nacptool" --create "WHJ2 Resource Diagnostic" "WHJ2 port contributors" "0.0.1" build-switch/whj2-diagnostic.nacp

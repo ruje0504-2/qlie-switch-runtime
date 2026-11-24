@@ -4,6 +4,26 @@
 #include <fstream>
 #include <iostream>
 int main(int argc,char**argv){try{if(argc<2)return 2;qlie::Assets a(argv[1]);
+if(argc==3&&std::string(argv[2])=="--tween-render"){
+ auto frame=[](whj2::SceneImages&images){qlie::Bytes result(1280*720*4);images.draw(result);return result;};
+ whj2::SceneImages moving(a),expected(a);
+ moving.command("^bg01,file:cut/c_青空1");expected.command("^bg01,file:cut/c_青空1");
+ moving.command("^bg01,x:740,time:1000");moving.update(500);expected.command("^bg01,x:690,time:0");
+ if(frame(moving)!=frame(expected))throw std::runtime_error("Linear camera midpoint");
+ auto state=moving.save();whj2::SceneImages restored(a);restored.restore(state);
+ moving.update(250);restored.update(250);expected.command("^bg01,x:715,time:0");
+ if(frame(moving)!=frame(expected)||frame(restored)!=frame(expected))throw std::runtime_error("Mid-tween restored continuation");
+ moving.command("^bg01,x:815,time:1000");moving.update(500);expected.command("^bg01,x:765,time:0");
+ if(frame(moving)!=frame(expected))throw std::runtime_error("Retarget must start from current position");
+ moving.command("^bg01,x:640,ax:-30,time:0");expected.command("^bg01,x:610,time:0");
+ if(frame(moving)!=frame(expected))throw std::runtime_error("Axial position offset");
+ moving.command("^bg01,ax:0,time:1000,mulcolor:$000000");moving.update(500);
+ expected.command("^bg01,x:625,mulcolor:$7F7F7F,time:0");
+ if(frame(moving)!=frame(expected))throw std::runtime_error("Color channels and position interpolate independently");
+ whj2::SceneImages slow(a),normal(a);slow.command("^bg01,file:cut/c_冒頭イメージ,motion:c01,speed:50");normal.command("^bg01,file:cut/c_冒頭イメージ,motion:c01");slow.update(2000);normal.update(1000);
+ if(frame(slow)!=frame(normal))throw std::runtime_error("Half-speed animation clock");
+ std::cout<<"PASS original bitmap camera midpoint, retarget, axial offset, color ramp, save continuation and half-speed particles\n";return 0;
+}
 if(argc==3&&std::string(argv[2])=="--nested-render"){
  whj2::SceneImages im(a);im.command("^bg01,file:cut/eyecatch01");im.update(1500);
  qlie::Bytes frame(1280*720*4),restored(frame.size());im.draw(frame);

@@ -218,8 +218,34 @@ std::vector<SceneSoundEvent> SceneImages::takeSoundEvents(){
   }layer.audioMilliseconds=layer.milliseconds;
  }return result;
 }
-void SceneImages::update(double ms){for(auto&l:layers)l.second.milliseconds+=ms;
+float SceneImages::value(const Layer&layer,const std::string&key,float fallback){
+ auto tween=layer.tweens.find(key);
+ if(tween==layer.tweens.end()){auto param=layer.params.find(key);return param==layer.params.end()?fallback:numeric(param->second);}
+ const auto&t=tween->second;double q=t.duration>0?std::clamp(t.elapsed/t.duration,0.,1.):1;
+ double exponent=1+1.4*t.power/100;
+ if(q<1)switch(t.mode){case 0:q=0;break;case 1:break;case 3:q=1-std::pow(1-q,exponent);break;case 4:q=std::pow(q,exponent);break;default:throw std::runtime_error("Unsupported image tween mode");}
+ if(key=="mulcolor"||key=="addcolor"){uint32_t result=0;for(unsigned shift=0;shift<24;shift+=8){int from=(uint32_t(t.from)>>shift)&255,to=(uint32_t(t.to)>>shift)&255;result|=uint32_t(from+(to-from)*q)<<shift;}return float(result);}
+ return float(t.from+(t.to-t.from)*q);
+}
+void SceneImages::transition(Layer&layer,const Layer&before,bool position,bool color){
+ double duration=layer.params.count("time")?numeric(layer.params.at("time")):0;
+ unsigned mode=1;auto m=layer.params.find("move");if(m!=layer.params.end()){
+  if(m->second=="step")mode=0;else if(m->second=="linear")mode=1;else if(m->second=="outquart"||m->second=="square")mode=3;else if(m->second=="inquart"||m->second=="invsqare")mode=4;
+  else {std::cerr<<"PENDING-IMAGE-TWEEN mode="<<m->second<<"\n";mode=0;}
  }
+ float power=layer.params.count("movepow")?numeric(layer.params.at("movepow")):100;
+ auto add=[&](const std::string&key,float fallback){float from=value(before,key,fallback);auto found=layer.params.find(key);float to=found==layer.params.end()?fallback:numeric(found->second);
+  if(key=="x"||key=="y"){auto axial=layer.params.find(key=="x"?"ax":"ay");if(axial!=layer.params.end())to+=numeric(axial->second);}
+  if(duration>0&&from!=to)layer.tweens[key]={from,to,power,0,duration,mode};else {layer.tweens.erase(key);if(key=="x"||key=="y")layer.tweens[key]={to,to,power,0,0,mode};}
+ };
+ if(position){add("x",640);add("y",360);add("scalex",100);add("scaley",100);add("rotz",0);add("pri",0);}
+ if(color){add("alpha",255);add("addcolor",0);add("mulcolor",0xffffff);}
+}
+void SceneImages::update(double ms){for(auto&entry:layers){auto&layer=entry.second;
+ double speed=layer.params.count("speed")?numeric(layer.params.at("speed")):100;
+ layer.milliseconds+=ms*std::max(0.,speed)/100;
+ for(auto&t:layer.tweens)t.second.elapsed=std::min(t.second.duration,t.second.elapsed+ms);
+ }}
 bool SceneImages::command(const std::string&line){auto p=line.find(44);
  auto cmd=line.substr(1,p-1);
  bool chara=cmd.rfind("chara",0)==0;
@@ -227,7 +253,7 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  auto&l=layers[cmd];
  if(l.params.empty())l.params={{"x","640"},{"y",chara?"720":"360"},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri",chara?"500":"0"},{"show","true"},{"align",chara?"center:bottom":cmd=="effect"?"left:top":"center:center"}};
  auto args=split(expand(p==line.npos?"":line.substr(p+1),chara?"chara":"image"),44);
- bool file=false;
+ Layer before=l;bool file=false,position=false,color=false;
  for(auto&s:args){if(s.empty())continue;
  auto c=s.find(58);
  if(c==s.npos)throw std::runtime_error("Unknown image template "+s);
@@ -239,10 +265,13 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  continue;
  }l.params[key]=v;
  if(key=="file")file=true;
+ if(key=="x"||key=="y"||key=="ax"||key=="ay"||key=="scalex"||key=="scaley"||key=="rotz"||key=="pri")position=true;
+ if(key=="alpha"||key=="mulcolor"||key=="addcolor")color=true;
  if(key=="vol"&&std::stof(v)==0)l.audioStopPending=true;
  if(key=="motion"){l.milliseconds=0;l.audioMilliseconds=-1;}
- if(key!="vol"&&key!="dchannel"&&key!="motion"&&key!="file"&&key!="x"&&key!="y"&&key!="scalex"&&key!="scaley"&&key!="alpha"&&key!="show"&&key!="pri"&&key!="align"&&key!="texfilter"&&key!="rotz"&&key!="mulcolor"&&key!="addcolor")std::cerr<<"PENDING-IMAGE-PROPERTY "<<cmd<<" "<<key<<"="<<v<<"\n";
+ if(key!="time"&&key!="speed"&&key!="move"&&key!="movepow"&&key!="ax"&&key!="ay"&&key!="vol"&&key!="dchannel"&&key!="motion"&&key!="file"&&key!="x"&&key!="y"&&key!="scalex"&&key!="scaley"&&key!="alpha"&&key!="show"&&key!="pri"&&key!="align"&&key!="texfilter"&&key!="rotz"&&key!="mulcolor"&&key!="addcolor")std::cerr<<"PENDING-IMAGE-PROPERTY "<<cmd<<" "<<key<<"="<<v<<"\n";
  }
+ transition(l,before,position,color);
  if(file){std::string f=l.params["file"];
  if(f=="none"||f=="none:none"){l.path.clear();
  l.pixels.reset();
@@ -276,9 +305,7 @@ void SceneImages::draw(qlie::Bytes&out)const{
  if(out.size()!=1280*720*4)throw std::runtime_error("Scene canvas size");
  std::vector<const Layer*>sorted;
  for(auto&x:layers)if((x.second.pixels||x.second.composite)&&x.second.params.at("show")!="false")sorted.push_back(&x.second);
- auto get=[](const Layer*l,const std::string&k,float def){auto i=l->params.find(k);
- return i==l->params.end()?def:numeric(i->second);
- };
+ auto get=[](const Layer*l,const std::string&k,float def){return value(*l,k,def);};
  std::stable_sort(sorted.begin(),sorted.end(),[&](auto*a,auto*b){return get(a,"pri",0)<get(b,"pri",0);});
  RenderQueue queue;
  for(auto*l:sorted){
@@ -293,7 +320,7 @@ void SceneImages::draw(qlie::Bytes&out)const{
 }
 
 qlie::Bytes SceneImages::save()const{StateWriter w;
- w.str("WHJ2-images-5");
+ w.str("WHJ2-images-6");
  w.n(particleState);
  w.n(layers.size());
  for(auto&entry:layers){w.str(entry.first);
@@ -303,6 +330,7 @@ qlie::Bytes SceneImages::save()const{StateWriter w;
  w.n(uint64_t(l.milliseconds*1000));
  w.n(l.audioMilliseconds<0?0:uint64_t(l.audioMilliseconds*1000)+1);
  w.n(l.audioStopPending);
+ w.n(l.tweens.size());for(auto&t:l.tweens){w.str(t.first);w.f(t.second.from);w.f(t.second.to);w.f(t.second.power);w.n(uint64_t(t.second.elapsed*1000));w.n(uint64_t(t.second.duration*1000));w.n(t.second.mode);}
  w.n(l.params.size());
  for(auto&p:l.params){w.str(p.first);
  w.str(p.second);
@@ -310,7 +338,7 @@ qlie::Bytes SceneImages::save()const{StateWriter w;
  }return w.bytes;
  }
 void SceneImages::restore(const qlie::Bytes&b){StateReader r{b};
- auto version=r.str();bool v5=version=="WHJ2-images-5",v4=v5||version=="WHJ2-images-4",v3=v4||version=="WHJ2-images-3";
+ auto version=r.str();bool v6=version=="WHJ2-images-6",v5=v6||version=="WHJ2-images-5",v4=v5||version=="WHJ2-images-4",v3=v4||version=="WHJ2-images-3";
  if(!v3&&version!="WHJ2-images-2")throw std::runtime_error("Image state version");
  auto savedParticleState=v3?uint32_t(r.n()):particleState;
  std::map<std::string,Layer>next;
@@ -325,6 +353,7 @@ void SceneImages::restore(const qlie::Bytes&b){StateReader r{b};
  l.milliseconds=r.n()/1000.;
  if(v4){auto cursor=r.n();l.audioMilliseconds=cursor?(cursor-1)/1000.:-1;}else l.audioMilliseconds=l.milliseconds;
  if(v5)l.audioStopPending=r.n()!=0;
+ if(v6){auto count=r.n();if(count>16)throw std::runtime_error("Image tween count");while(count--){auto key=r.str();Tween t;t.from=r.f();t.to=r.f();t.power=r.f();t.elapsed=r.n()/1000.;t.duration=r.n()/1000.;t.mode=unsigned(r.n());l.tweens[key]=t;}}
  auto n=r.n();
  if(n>256)throw std::runtime_error("Image property count");
  while(n--){auto k=r.str();

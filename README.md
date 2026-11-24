@@ -52,7 +52,7 @@ build/whj2-runtime /absolute/path/to/game /absolute/path/to/test-saves --movie m
 
 源码遵循GPL-2.0-or-later；原始游戏数据不属于源码许可范围。
 
-Bitmap particles (primitive 20) now use the native deterministic random table and viewport-centered depth projection. Scene state version 5 preserves generated resource identities across saves and clears stale future caches when restoring; versions 2 through 4 scene saves remain readable. Nested/video particles, spherical particles, and particles with 3D rotation remain incomplete.
+Bitmap particles (primitive 20) now use the native deterministic random table and viewport-centered depth projection. Scene state version 6 preserves generated resource identities across saves and clears stale future caches when restoring; versions 2 through 5 scene saves remain readable. Nested/video particles, spherical particles, and particles with 3D rotation remain incomplete.
 
 Nested bitmap animations select their child motion and interpolate the child timeline from the parent key. Child loop bounds are respected. Zero-sized logical subcanvases are supported; missing dimension context remains reported. Symbolic child timeline inputs and nested embedded audio are still incomplete.
 
@@ -61,3 +61,5 @@ Procedural function 5 uses the native time-quotient random-table lookup and rest
 Primitive 10 bitmap gradient masks now use independent source/mask coordinates and native blue-channel threshold arithmetic, including inverse masks and fixed-point edge behavior. Non-bitmap and 3D mask variants remain incomplete; sampling currently follows the CPU renderer’s nearest-neighbor path.
 
 Top-level animation sound events decode embedded ABMP members on 16 direct-sound buses, separate from streamed music, voice and movies. The image dchannel base and fixed-point volume are applied; explicit zero volume stops the configured base bus, matching the script behavior. Looping, event timing, playback positions and pending mute state survive saves. Legacy eight-channel audio saves remain readable. Nested sound events and the remaining native object lifecycle are incomplete.
+
+Image commands support timed position/scale/rotation/priority and per-channel color/opacity transitions, axial offsets, and animation playback speed. Retargeting starts from the displayed value. Active transitions survive saves. Step, linear, outquart and inquart easing are implemented; additional easing modes remain reported as incomplete.

@@ -11,24 +11,27 @@ SceneTransition::SceneTransition(qlie::Assets&assets){std::istringstream in(qlie
  while(std::getline(in,line)){auto pos=line.find('=');if(pos!=line.npos)templates[trim(line.substr(0,pos))]=trim(line.substr(pos+1));}
 }
 void SceneTransition::reset(){previous.clear();elapsed=duration=0;staged=active=caught=false;}
-bool SceneTransition::command(const std::string&line,const qlie::Bytes&scene){if(line.rfind("^sentence",0)!=0)return false;
+bool SceneTransition::command(const std::string&line,const qlie::Bytes&scene,SentenceWait*wait){if(line.rfind("^sentence",0)!=0)return false;
  auto comma=line.find(',');if(comma==line.npos)return true;auto args=line.substr(comma+1);
  std::vector<std::pair<std::string,std::string>> values(templates.begin(),templates.end());std::sort(values.begin(),values.end(),[](auto&a,auto&b){return a.first.size()>b.first.size();});
  for(unsigned pass=0;pass<12;pass++){bool changed=false;for(auto&item:values){size_t pos=0;while((pos=args.find(item.first,pos))!=args.npos){args.replace(pos,item.first.size(),item.second);pos+=item.second.size();changed=true;}}if(!changed)break;if(pass==11)throw std::runtime_error("Sentence template recursion");}
+ bool explicitWait=false,hasFade=false;double waitFadeTime=0;
  for(auto&arg:split(args,',')){auto fields=split(arg,':');if(fields.empty())continue;
-  if(fields[0]=="fade"){
+  if(wait&&wait->property(fields)){if(fields[0]=="wait")explicitWait=true;continue;}
+  if(fields[0]=="fade"){hasFade=true;
    auto mode=fields.size()>1?fields[1]:"cut";
+   waitFadeTime=fields.size()>2&&!fields[2].empty()?(fields[2][0]=='$'?double(std::stoul(fields[2].substr(1),nullptr,16)):std::stod(fields[2])):0;
    if(mode=="cut"){reset();continue;}
    if(mode=="catch"){previous=scene;staged=false;active=false;caught=true;continue;}
    if(mode!="overlap"){std::cerr<<"PENDING-SENTENCE fade="<<mode<<"\n";continue;}
-   duration=fields.size()>2?std::stod(fields[2]):0;
+   duration=waitFadeTime;
    if(duration<=0){reset();continue;}
    if(scene.size()!=1280*720*4)throw std::runtime_error("Transition scene dimensions");
    if(!caught){previous=scene;}
    caught=false;elapsed=0;staged=true;active=false;
   }else if(fields[0]=="clear"&&fields.size()>1&&fields[1]=="def")reset();
   else if(fields[0]!="")std::cerr<<"PENDING-SENTENCE property="<<fields[0]<<"\n";
- }return true;
+ }if(wait&&hasFade&&!explicitWait)wait->fromFade(waitFadeTime);return true;
 }
 void SceneTransition::present(){if(staged){staged=false;active=true;}}
 void SceneTransition::update(double ms){if(active){elapsed=std::min(duration,elapsed+std::max(0.,ms));if(elapsed>=duration){active=false;previous.clear();}}}

@@ -4,6 +4,7 @@
 #include "audio.hpp"
 #include "scene_images.hpp"
 #include "scene_transition.hpp"
+#include "sentence_wait.hpp"
 #include "state_io.hpp"
 #include "movie.hpp"
 #include "joycon.hpp"
@@ -42,6 +43,8 @@ struct Frontend {
  std::unique_ptr<whj2::Audio>audio;
  std::unique_ptr<whj2::SceneImages>images;
  std::unique_ptr<whj2::SceneTransition>transition;
+ whj2::SentenceWait sentenceWait;
+ std::string pendingBody,pendingSpeaker,pendingVoice;
  std::unique_ptr<whj2::Movie>movie;
  std::unique_ptr<whj2::VoiceResolver>voices;
  bool movieOnly=false,movieCaptured=false,touchOnlyTest=false;
@@ -149,11 +152,11 @@ struct Frontend {
  auto bytes=assets.read(match->request);audio->play(3,bytes,false,voices->gain,0,match->request);
  std::cerr<<"VOICE playing id="<<id<<" source="<<match->source.path<<" offset="<<match->source.offset<<" bytes="<<bytes.size()<<" loose="<<match->source.loose<<"\n";
  }
- void next(){if(menu||story.state.finished)return;
- images->beginPage();
- std::string body,speaker,voiceId;
+ void next(bool resume=false){if(menu||story.state.finished)return;
+ if(!resume){images->beginPage();pendingBody.clear();pendingSpeaker.clear();pendingVoice.clear();}
+ auto&body=pendingBody;auto&speaker=pendingSpeaker;auto&voiceId=pendingVoice;
  for(unsigned guard=0;guard<10000;guard++){auto e=story.next();
- if(e.type=="choice"){transition->present();focus=0;
+ if(e.type=="choice"){sentenceWait.cancel();transition->present();focus=0;
  text=body.empty()?"選択してください":body;
  name=speaker;
  images->selectFace(speaker,voiceId);
@@ -164,6 +167,7 @@ struct Frontend {
  name=speaker;
  images->selectFace(speaker,voiceId);
  playVoice(voiceId);
+ sentenceWait.page(true,audio->playing(3));
  advances++;
  std::cerr<<"PAGE "<<e.file<<":"<<e.line<<"\n";
  return;
@@ -187,11 +191,13 @@ struct Frontend {
  text="";
  name="";
  return;
- }if(e.type=="command"&&e.value.rfind("^sentence",0)==0){qlie::Bytes scene(1280*720*4);for(size_t i=0;i<scene.size();i+=4){scene[i]=35;scene[i+1]=25;scene[i+2]=20;scene[i+3]=255;}images->drawScene(scene);transition->blend(scene);transition->command(e.value,scene);continue;
+ }if(e.type=="command"&&e.value.rfind("^sentence",0)==0){qlie::Bytes scene(1280*720*4);for(size_t i=0;i<scene.size();i+=4){scene[i]=35;scene[i+1]=25;scene[i+2]=20;scene[i+3]=255;}images->drawScene(scene);transition->blend(scene);transition->command(e.value,scene,&sentenceWait);continue;
+ }if(e.type=="wait"||e.type=="click-wait"){sentenceWait.native(e.type=="click-wait",e.value.empty()?0:std::stod(e.value));transition->present();return;
  }if(e.type=="command"&&(audioCommand(e.value)||images->command(e.value)))continue;
  if(e.type=="create"||e.type=="free"){audio->stopAll();
  images->clear();
  transition->reset();
+ sentenceWait=whj2::SentenceWait{};
  }if(e.type=="command"||e.type=="create"||e.type=="free"||e.type=="wait"||e.type=="audio-clear"||e.type=="audio-volume"){
   // Preserve every unrendered event in the frontend trace; these are explicitly
   // pending rendering work, never counted as multimedia acceptance.
@@ -209,6 +215,7 @@ struct Frontend {
  qlie::write_file(saveDir+"/slot01.name",n);
  qlie::write_file(saveDir+"/slot01.images",images->save());
  qlie::write_file(saveDir+"/slot01.transition",transition->save());
+ whj2::StateWriter flow;flow.str("WHJ2-flow-1");auto waitState=sentenceWait.save();flow.str(std::string(waitState.begin(),waitState.end()));flow.str(pendingBody);flow.str(pendingSpeaker);flow.str(pendingVoice);qlie::write_file(saveDir+"/slot01.flow",flow.bytes);
  qlie::write_file(saveDir+"/slot01.audio",audio->save());
  whj2::StateWriter settings;
  settings.str("WHJ2-mixer-1");
@@ -235,6 +242,8 @@ struct Frontend {
  loops[i]=settings.n()!=0;
  audioTimes[i]=unsigned(settings.n());
  }settings.end();
+ if(std::filesystem::exists(saveDir+"/slot01.flow")){auto flowBytes=qlie::file(saveDir+"/slot01.flow");whj2::StateReader flow{flowBytes};if(flow.str()!="WHJ2-flow-1")throw std::runtime_error("Flow state version");auto state=flow.str();sentenceWait.restore(qlie::Bytes(state.begin(),state.end()));pendingBody=flow.str();pendingSpeaker=flow.str();pendingVoice=flow.str();flow.end();}
+ else {sentenceWait=whj2::SentenceWait{};sentenceWait.page();pendingBody=text;pendingSpeaker=name;pendingVoice.clear();}
  menu=false;
  focus=0;
  status="静止画・音声位置を含む状態を読み込みました。";
@@ -251,7 +260,7 @@ struct Frontend {
  else done=true;
  }else if(story.state.awaiting){story.choose(unsigned(focus));
  next();
- }else next();
+ }else {auto action=sentenceWait.confirm();if(action==whj2::SentenceWait::Next)next();else if(action==whj2::SentenceWait::Resume)next(true);}
  }
  void draw(){if(movie->playing()){pixels=movie->image().pixels;
  SDL_UpdateTexture(texture,nullptr,pixels.data(),1280*4);
@@ -345,6 +354,8 @@ struct Frontend {
  if(!menu&&!movie->playing()){
  images->update(double(now-lastUpdate));
  transition->update(double(now-lastUpdate));
+ auto waitAction=sentenceWait.tick(double(now-lastUpdate),audio->playing(3));
+ if(waitAction==whj2::SentenceWait::Next)next();else if(waitAction==whj2::SentenceWait::Resume)next(true);
  for(auto&event:images->takeSoundEvents()){
   if(event.stop)audio->volume(event.channel,0,0,true);
   else audio->play(event.channel,event.bytes,event.loop,event.gain,0,event.source);

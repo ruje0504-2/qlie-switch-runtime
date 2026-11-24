@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+#include "sentence_wait.hpp"
+#include "scene_transition.hpp"
+#include "story.hpp"
+#include <iostream>
+#include <stdexcept>
+void require(bool ok,const char*message){if(!ok)throw std::runtime_error(message);}
+int main(int argc,char**argv){try{if(argc!=2)return 2;qlie::Assets assets(argv[1]);whj2::SceneTransition fade(assets);whj2::SentenceWait wait;qlie::Bytes frame(1280*720*4);
+ fade.command("^sentence,autowait:true",frame,&wait);fade.command("^sentence,$overlap",frame,&wait);wait.page();require(wait.tick(499)==wait.None,"Auto wait ended early");require(wait.confirm()==wait.None,"Click prewait advanced page");require(wait.confirm()==wait.Next,"Message click missing");
+ wait.property({"wait","waitonly","1000"});wait.page();require(wait.tick(999)==wait.None&&wait.confirm()==wait.None,"Fixed wait was skipped");auto state=wait.save();whj2::SentenceWait restored;restored.restore(state);require(restored.tick(1)==wait.Next,"Saved remaining wait");
+ wait.property({"wait","wait","1000"});wait.page();require(wait.tick(1000)==wait.None&&wait.confirm()==wait.Next,"Wait then message");
+ wait.property({"wait","clickonly","1000"});wait.page();require(wait.confirm()==wait.Next,"Click-only wait");
+ fade.command("^sentence,$overlap_long,wait:click:50",frame,&wait);wait.page();require(wait.tick(49)==wait.None,"Explicit wait replaced by auto fade time");require(wait.tick(1)==wait.None&&wait.confirm()==wait.Next,"Explicit click wait boundary");
+ wait.property({"wait","skip"});wait.page();require(wait.tick(0)==wait.Next,"Skip did not continue");
+ wait.native(false,1000);require(wait.confirm()==wait.None&&wait.tick(1000)==wait.Resume,"Native fixed continuation");wait.native(true,1000);require(wait.confirm()==wait.Resume,"Native click continuation");
+ wait.property({"wait","voice","5000"});wait.page(true,false);require(wait.tick(249)==wait.None&&wait.tick(1)==wait.Next,"Missing voice fallback");
+ whj2::Story story(assets);story.state.at={"scenario/ed_movie.s",0};bool fixed=false,click=false;for(unsigned i=0;i<20&&!(fixed&&click);++i){auto event=story.next();if(event.type=="wait"&&event.value=="2000")fixed=true;if(event.type=="click-wait"&&event.value=="1000")click=true;}require(fixed&&click,"Original wait/clk distinction");
+ std::cout<<"PASS original template auto/explicit wait, click consumption, fixed timing, remaining-state restore and native wait/clk continuation\n";return 0;
+}catch(const std::exception&e){std::cerr<<"FAIL "<<e.what()<<"\n";return 1;}}

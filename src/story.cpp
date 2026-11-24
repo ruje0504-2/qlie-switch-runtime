@@ -38,7 +38,7 @@ void Story::native(const Op&o){auto a=split(o.text,44);std::string cmd=lower(a[0
  if(cmd=="\\r"){need(state.scope=="sys");state.finished=true;state.pending.push_back(event("finish","title",o.line));return;}
  if(cmd=="\\i"){need(state.scope.rfind("dsnd[",0)==0);state.pending.push_back(event("audio-clear",state.scope,o.line));return;}
  if(cmd=="\\v"){need(state.scope=="snd[12]");state.pending.push_back(event("audio-volume",o.text,o.line));return;}
- if(cmd=="\\wait"||cmd=="\\clk"){state.pending.push_back(event("wait",value(arg(1)),o.line));return;}
+ if(cmd=="\\wait"||cmd=="\\clk"){state.pending.push_back(event(cmd=="\\clk"?"click-wait":"wait",value(arg(1)),o.line));return;}
  if(cmd=="\\ret"){need(!state.calls.empty());state.at=state.calls.back();state.calls.pop_back();return;}
  if(cmd=="\\sub"){
   auto target=lower(arg(1));

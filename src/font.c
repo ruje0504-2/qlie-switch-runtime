@@ -258,11 +258,7 @@ int kfont_draw(KFont *f,KImage *dst,uint32_t cp,int x,int y,unsigned width,unsig
     }
     return 0;
 }
-int kfont_draw_outline(KFont *f,KImage *dst,uint32_t cp,int x,int y,unsigned width,unsigned height,uint32_t rgb){
-    if(!f||!dst||!dst->pixels||dst->stride<(size_t)dst->width*4)return -1;
-    FT_Bitmap *bitmap=NULL;int64_t left=0,top=0;
-    if(font_load_glyph(f,cp,width,height,&bitmap,&left,&top))return -1;
-    left+=x;top+=y;
+static int font_draw_bitmap_outline(KFont *f,KImage *dst,FT_Bitmap *bitmap,int64_t left,int64_t top,uint32_t rgb){
     if(f->style_set){
         int offsets[9][2];unsigned opacity[9],count=0;
         if(f->style&2){offsets[count][0]=2;offsets[count][1]=2;opacity[count++]=0x66;}
@@ -275,7 +271,11 @@ int kfont_draw_outline(KFont *f,KImage *dst,uint32_t cp,int x,int y,unsigned wid
             const uint8_t *source=bitmap->buffer+(bitmap->pitch>=0?row:bitmap->rows-row-1)*(size_t)abs(bitmap->pitch);
             for(unsigned col=0;col<bitmap->width;col++)font_blend_pixel(dst,left+col+offsets[pass][0],top+row+offsets[pass][1],font_bitmap_alpha(bitmap,source,col)*opacity[pass]/255,f->style_color);
         }
-        return kfont_draw(f,dst,cp,x,y,width,height,rgb);
+        for(unsigned row=0;row<bitmap->rows;row++){
+            const uint8_t *source=bitmap->buffer+(bitmap->pitch>=0?row:bitmap->rows-row-1)*(size_t)abs(bitmap->pitch);
+            for(unsigned col=0;col<bitmap->width;col++)font_blend_pixel(dst,left+col,top+row,font_bitmap_alpha(bitmap,source,col),rgb);
+        }
+        return 0;
     }
     /* One glyph rasterization, a half-alpha one-pixel core, and a faint
        second outward pixel: the edge reads on bright artwork without making
@@ -299,4 +299,16 @@ int kfont_draw_outline(KFont *f,KImage *dst,uint32_t cp,int x,int y,unsigned wid
         for(unsigned col=0;col<bitmap->width;col++)font_blend_pixel(dst,left+(int64_t)col,top+(int64_t)row,font_bitmap_alpha(bitmap,source,col),rgb);
     }
     return 0;
+}
+
+int kfont_draw_outline(KFont *f,KImage *dst,uint32_t cp,int x,int y,unsigned width,unsigned height,uint32_t rgb){
+    if(!f||!dst||!dst->pixels||dst->stride<(size_t)dst->width*4)return -1;
+    FT_Bitmap *bitmap=NULL;int64_t left=0,top=0;
+    if(font_load_glyph(f,cp,width,height,&bitmap,&left,&top))return -1;
+    return font_draw_bitmap_outline(f,dst,bitmap,left+x,top+y,rgb);
+}
+int kfont_draw_mask(KFont *f,KImage *dst,const uint8_t *alpha,unsigned width,unsigned height,int x,int y,uint32_t rgb){
+    if(!f||!dst||!dst->pixels||!alpha||!width||!height||width>256||height>256||dst->stride<(size_t)dst->width*4)return -1;
+    FT_Bitmap bitmap={.rows=height,.width=width,.pitch=(int)width,.buffer=(uint8_t*)alpha,.num_grays=256,.pixel_mode=FT_PIXEL_MODE_GRAY};
+    return font_draw_bitmap_outline(f,dst,&bitmap,x,y,rgb);
 }

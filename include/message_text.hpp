@@ -5,9 +5,12 @@ namespace whj2 {
 std::string messageDisplayName(const std::string&);
 struct MessageStyle {unsigned width=920,height=300,fontWidth=26,fontHeight=26;uint32_t color=0xffffff;};
 class MessageText {
- struct PositionedGlyph {uint32_t codepoint;unsigned x,y,width;};
+ struct PositionedGlyph {uint32_t codepoint;unsigned x,y,width;bool bitmap=false;};
  std::vector<PositionedGlyph> layout(const MessageStyle&)const;
- struct Glyph {uint32_t codepoint;double deadline;size_t centeredRun=0;};
+ struct Glyph {uint32_t codepoint;double deadline;size_t centeredRun=0;bool bitmap=false;};
+ struct BitmapGlyph {uint32_t codepoint;unsigned width,height;qlie::Bytes alpha;mutable unsigned scaledWidth=0,scaledHeight=0;mutable qlie::Bytes scaled;};
+ std::vector<BitmapGlyph> bitmapGlyphs;
+ std::vector<std::pair<std::string,std::string>> replacements;
  std::string text;std::vector<Glyph> glyphs;
  double elapsed=0,speed=10;
  std::vector<uint32_t> lineStartForbidden,lineEndForbidden,noInitialIndent;

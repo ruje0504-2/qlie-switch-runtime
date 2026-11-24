@@ -25,4 +25,6 @@ int kfont_draw(KFont *font,KImage *dst,uint32_t codepoint,int x,int y,unsigned w
    no style was configured. UI panels can use plain kfont_draw instead. */
 int kfont_draw_outline(KFont *font,KImage *dst,uint32_t codepoint,int x,int y,
                        unsigned width,unsigned height,uint32_t rgb);
+/* Already scaled coverage, with the same configured shadow/outline as text. */
+int kfont_draw_mask(KFont*,KImage*,const uint8_t*,unsigned,unsigned,int,int,uint32_t);
 #endif

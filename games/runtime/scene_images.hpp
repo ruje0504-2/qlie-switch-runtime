@@ -15,6 +15,7 @@ class RenderTarget;
 class RenderQueue;
 class AssetReadAhead;
 struct SceneSoundEvent {bool stop=false,loop=false;unsigned channel=0,category=2;float gain=1;std::string source;qlie::Bytes bytes;};
+struct SpeakerStyle {int x=200,y=570;unsigned size=26,color=0xffffff;};
 class SceneImages {
  struct Tween {float from=0,to=0,power=100;double elapsed=0,duration=0;unsigned mode=1;};
  struct FilteredSlot {std::shared_ptr<const Image> source,result;std::string name;};
@@ -25,6 +26,8 @@ class SceneImages {
  mutable bool faceWarning=false;
  mutable std::set<std::string> shownFiles;
  std::map<std::string,std::string> faceRepId,faceRepFile;
+ std::set<std::string> splitCharacters,imageObjects;
+ bool hasCamera=false,hasNameText=false;
  unsigned faceType=0;std::string faceDefaultFile;
  qlie::Assets&assets;
  std::shared_ptr<EyecatchFilm> eyecatchFilm;
@@ -41,6 +44,7 @@ class SceneImages {
  static float value(const Layer&,const std::string&,float);
  void loadReplacement(Layer&,const std::string&);
  void transition(Layer&,const Layer&,bool,bool);
+ bool cameraCommand(const std::string&);
  void render(qlie::Bytes&,unsigned pass,RenderTarget*target=nullptr,float maxPriority=999,bool liveVideo=false,const Affine2D* view=nullptr)const;
  void enqueue(RenderQueue&,unsigned pass,float maxPriority,bool liveVideo)const;
  std::string mappedFace(std::string)const;
@@ -50,7 +54,10 @@ public:
  explicit SceneImages(qlie::Assets&);
  void setReadAhead(AssetReadAhead*loader){readAhead=loader;}
  void setNativeVideoSurfaces(bool enable){prefetchNativeVideo=enable;}
- using CharacterPrefixes=std::map<std::string,std::string>;
+ struct CharacterPrefixes {
+  std::map<std::string,std::string> simple;
+  std::map<std::string,std::map<std::string,std::string>> parts;
+ };
  struct BackgroundBlur {
   std::string layer,name;
   std::shared_ptr<const Image> source;
@@ -84,6 +91,7 @@ public:
  void draw(qlie::Bytes&,bool liveVideo=false,const Affine2D* view=nullptr)const;void drawThumbnail(qlie::Bytes&,float maxPriority)const;void drawScene(qlie::Bytes&,bool liveVideo=false)const;void drawFaces(qlie::Bytes&)const;void drawMessages(qlie::Bytes&)const;
  void setWindowAlpha(unsigned alpha){windowAlpha=alpha>255?255:alpha;}
  bool messageVisible()const;MessageStyle messageStyle()const;void setMessageImage(Image,bool show=false);
+ SpeakerStyle speakerStyle()const;
  void setMessageImage(std::shared_ptr<const Image>,bool show=false);
 };
 }

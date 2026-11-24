@@ -18,6 +18,8 @@ struct StoryProfile {
  std::set<std::string> sceneCommands;
  std::string interludeImage;
  std::map<std::string,std::set<unsigned>> visualWaitParagraphs;
+ std::string selectionPrelude{};
+ bool presentCommandParagraphs=false;
 };
 class Story {
  enum class After {None,Interlude,VisualWait};

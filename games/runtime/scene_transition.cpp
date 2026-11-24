@@ -66,7 +66,7 @@ void mosaic(qlie::Bytes&out,const qlie::Bytes&old,double amount){
  }
 }
 }
-SceneTransition::SceneTransition(qlie::Assets&assets):assets(assets){std::istringstream in(qlie::cp932(assets.read("avg/imoscripter_template_sentence.txt")));std::string line;
+SceneTransition::SceneTransition(qlie::Assets&assets):assets(assets){std::istringstream in(assets.text("avg/imoscripter_template_sentence.txt"));std::string line;
  while(std::getline(in,line)){auto pos=line.find('=');if(pos!=line.npos)templates[trim(line.substr(0,pos))]=trim(line.substr(pos+1));}
 }
 SceneTransition::~SceneTransition()=default;
@@ -140,7 +140,32 @@ std::vector<std::vector<std::string>> SceneTransition::sentenceFields(const std:
  std::vector<std::pair<std::string,std::string>> values(templates.begin(),templates.end());std::sort(values.begin(),values.end(),[](auto&a,auto&b){return a.first.size()>b.first.size();});
  for(unsigned pass=0;pass<12;pass++){bool changed=false;for(auto&item:values){size_t pos=0;while((pos=args.find(item.first,pos))!=args.npos){args.replace(pos,item.first.size(),item.second);pos+=item.second.size();changed=true;}}if(!changed)break;if(pass==11)throw std::runtime_error("Sentence template recursion");}
  std::vector<std::vector<std::string>> fields;
- for(const auto&arg:split(args,','))fields.push_back(split(arg,':'));
+ std::string fadeMode,fadeTimeField,fadeFile,fadePower,waitMode,waitTimeField,skipTime;
+ for(const auto&arg:split(args,',')){
+  auto property=split(arg,':');
+  if(property.size()>1){
+   const auto&key=property[0];
+   auto&value=property[1];
+   if(key=="fademode"){fadeMode=value;continue;}
+   if(key=="fadetime"){fadeTimeField=value;continue;}
+   if(key=="fadefile"){
+    fadeFile=value;
+    if(property.size()>2)fadePower=property[2];
+    continue;
+   }
+   if(key=="fadepow"){fadePower=value;continue;}
+   if(key=="waitmode"){waitMode=value;continue;}
+   if(key=="waittime"){waitTimeField=value=="infinity"?"$FFFFFF":value;continue;}
+   if(key=="skiptime"){skipTime=value;continue;}
+  }
+  fields.push_back(std::move(property));
+ }
+ if(!fadeMode.empty()){
+  std::vector<std::string> fade{"fade",fadeMode,fadeTimeField,fadeFile};
+  if(!fadePower.empty())fade.push_back(fadePower);
+  fields.push_back(std::move(fade));
+ }
+ if(!waitMode.empty())fields.push_back({"wait",waitMode,waitTimeField,skipTime});
  return fields;
 }
 std::vector<std::string> SceneTransition::ruleAssets(const std::string&line)const{

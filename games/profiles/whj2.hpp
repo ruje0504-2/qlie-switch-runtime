@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
 #include "story.hpp"
+#include "profiles/title_layout.hpp"
 
 namespace whj2::profile {
 inline const qlie::ArchiveLayout archives{
  qlie::PackVersion::v30,16,"GameData/data","DLL/key.fkey","DLL/icon.key",
- "美少女万華鏡２.exe","voice/"
+ "美少女万華鏡２.exe","voice/","patch.dat"
 };
 inline const StoryProfile story{
  "scenario/root.s","scenario/select.s","include",
@@ -84,8 +85,21 @@ inline void applySentenceTiming(Event& event){
   event.value="^sentence,$overlap_long,wait:click:1500";
 }
 inline constexpr char gameName[] = "美少女万華鏡２";
+inline constexpr char gameEnv[] = "WHJ2_GAME", saveEnv[] = "WHJ2_SAVES",
+ rendererEnv[] = "WHJ2_RENDERER", logEnv[] = "WHJ2_LOG", hostSaves[] = "local/saves";
 inline constexpr char sdRoot[] = "sdmc:/switch/whj2";
 inline constexpr char sdGame[] = "sdmc:/switch/whj2/game";
 inline constexpr char sdSaves[] = "sdmc:/switch/whj2/saves";
 inline constexpr char sdRenderer[] = "sdmc:/switch/whj2/renderer.cfg";
+inline constexpr char titleMusic[] = "music/wbgm06.ogg";
+inline constexpr char cgMusic[] = "music/wbgm08.ogg";
+inline constexpr char replayMusic[] = "music/wbgm16.ogg";
+inline constexpr char titleStartFade[] = "^sentence,fade:rule:2000:雲.png:4";
+inline constexpr double titleStartWait = 2500, titleMusicFade = 2000, cautionWait = 4500;
+inline constexpr TitleLayout title{};
+inline constexpr bool extendedCgRoots=false;
+inline constexpr const char* extrasFlag=nullptr;
+inline constexpr unsigned storyAudioTracks=3;
+inline constexpr float storyMusicGain=.4f;
+inline constexpr char mixerSignature[]="WHJ2-mixer-2";
 }

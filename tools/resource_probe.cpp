@@ -1,4 +1,4 @@
-#include "whj2/profile.hpp"
+#include "profiles/whj2.hpp"
 #include "qlie.hpp"
 #include "voice.hpp"
 #include <iostream>

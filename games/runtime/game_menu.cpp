@@ -29,6 +29,29 @@ void setPosition(whj2::Settings&s,int i,int step){step=std::clamp(step,0,20);s.s
 }
 void GameMenu::loadHistoryTracks(){
  if(!historyTracks[0].keys.empty())return;
+ if(!assets.inPack("script/log/animation.b")){
+  std::array<AnimationLayer,2> tracks{};
+  std::array<double,2> rate{};
+  for(unsigned i=0;i<tracks.size();++i){
+   const char* file=i==0?"misc/fade_in.b":"misc/fade_out.b";
+   const char* layerName=i==0?"Now":"NoName";
+   for(const auto&member:abmp(assets.read(file))){
+    if(member.type.rfind("abdata",0)!=0)continue;
+    auto definition=animation(member.type,member.data);
+    if(definition.motions.empty()||definition.bounds[3]<=0)throw std::runtime_error("Missing panel fade sequence");
+    auto&layers=definition.motions.front().layers;
+    auto layer=std::find_if(layers.begin(),layers.end(),[&](const auto&entry){
+     return entry.name==layerName&&entry.flags&&!entry.keys.empty();
+    });
+    if(layer==layers.end())throw std::runtime_error("Missing panel fade layer");
+    tracks[i]=std::move(*layer);
+    rate[i]=definition.bounds[3]/PanelZoomMs;
+   }
+   if(tracks[i].keys.empty())throw std::runtime_error("Missing panel fade metadata");
+  }
+  historyTracks=std::move(tracks);historyTrackRate=rate;
+  return;
+ }
  for(const auto&member:abmp(assets.read("script/log/animation.b"))){
   if(member.type!="abdata12"&&member.type!="abdata13")continue;
   auto definition=animation(member.type,member.data);
@@ -66,7 +89,7 @@ void GameMenu::preparePanels(){
  close();
 }
 AnimationSample GameMenu::panelZoom(bool closing,double elapsed)const{
- const auto sample=sampleAnimation(historyTracks[closing?1:0],elapsed);
+ const auto sample=sampleAnimation(historyTracks[closing],elapsed*historyTrackRate[closing]);
  AnimationSample zoom{};
  zoom.kind=16;zoom.scaleX=sample.scaleX;zoom.scaleY=sample.scaleY;
  return zoom;

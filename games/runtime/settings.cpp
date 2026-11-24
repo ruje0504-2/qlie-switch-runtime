@@ -15,7 +15,7 @@ int settingMaximum(const std::string&key){
 }
 
 Settings::Settings(qlie::Assets&a){values={{"SkipMode",1},{"MasterVolume",100},{"MusicModeVolume",100},{"BGMVolume",60},{"VoiceVolume",100},{"SEVolume",100},{"SysSEVolume",50},{"MovieVolume",80},{"WindowAlpha",210},{"TextSpeed",10},{"ClickVoiceStop",0},{"AutoPlayVoiceWait",1},{"AutoTextWait",40},{"AutoClickWait",1200}};
- std::istringstream in(qlie::cp932(a.read("script/config/default.txt")));std::string line;while(std::getline(in,line)){auto pos=line.find('=');if(pos==line.npos)continue;auto key=trim(line.substr(0,pos));if(values.count(key)){auto value=trim(line.substr(pos+1));set(key,std::stoi(value[0]=='$'?value.substr(1):value,nullptr,value[0]=='$'?16:10));}}defaults=values;
+ std::istringstream in(a.text("script/config/default.txt"));std::string line;while(std::getline(in,line)){auto pos=line.find('=');if(pos==line.npos)continue;auto key=trim(line.substr(0,pos));if(values.count(key)){auto value=trim(line.substr(pos+1));set(key,std::stoi(value[0]=='$'?value.substr(1):value,nullptr,value[0]=='$'?16:10));}}defaults=values;
 }
 int Settings::get(const std::string&key)const{return values.at(key);}
 void Settings::set(const std::string&key,int value){if(!values.count(key))throw std::runtime_error("Unknown settings key "+key);values[key]=std::clamp(value,0,settingMaximum(key));}

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#include "whj2/profile.hpp"
+#include "profiles/whj2.hpp"
 #include "sentence_wait.hpp"
 #include "scene_transition.hpp"
 #include "story.hpp"

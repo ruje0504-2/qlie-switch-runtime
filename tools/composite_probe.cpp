@@ -1,4 +1,4 @@
-#include "whj2/profile.hpp"
+#include "profiles/whj2.hpp"
 #include "image.hpp"
 #include <filesystem>
 #include <iostream>

@@ -17,7 +17,8 @@ class CgScreen {
 public:
  void setReadAhead(AssetReadAhead*loader){readAhead=loader;viewScene.setReadAhead(loader);}
  enum Action {None=0,Back=1,Replay=2,Music=3};
- CgScreen(qlie::Assets&a,const Progress&p,KFont*f):progress(p),catalog(a),menuScene(a),viewScene(a),assets(a),font(f),viewFade(a){}
+ CgScreen(qlie::Assets&a,const Progress&p,KFont*f,bool extendedRoots=false)
+  :progress(p),catalog(a,extendedRoots),menuScene(a),viewScene(a),assets(a),font(f),viewFade(a){}
  void prepare();
  void open();void close();bool visible()const{return opened;}bool inView()const{return viewing;}
  void update(double);void draw(qlie::Bytes&,const Affine2D* view=nullptr)const;void move(int,int);Action confirm();Action tap(float,float);Action back();void toggleZoom();void pan(float,float);void panDelta(float,float);

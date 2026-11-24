@@ -14,6 +14,10 @@ class MusicScreen {
  std::optional<float> seekFraction;
  int64_t seekOffsetMs=0;
  std::map<std::string,std::string> motions;
+ enum Control { Previous,Play,Next,Loop,Return,Seek,Volume,Album,Memory };
+ int trackCount()const{return int(tracks.size());}
+ int trackRows()const{return trackCount()==18?6:8;}
+ int control(Control c)const{return trackCount()+c;}
  void setMotion(const std::string&,const char*);
  void highlight();void play(int);void text(const std::string&,unsigned,const std::string&,unsigned,unsigned,unsigned);void refresh();
  void clearSeek(){seekFraction.reset();seekOffsetMs=0;}

@@ -14,6 +14,92 @@ static uint64_t rd(const Bytes& b,size_t p,unsigned n){if(p>b.size()||n>b.size()
 static void wr(Bytes&b,size_t p,uint64_t v){for(int i=0;i<8;i++)b[p+i]=uint8_t(v>>(8*i));}
 static uint64_t padd(uint64_t a,uint64_t b,int n){uint64_t v=0,m=(uint64_t(1)<<n)-1;for(int i=0;i<64;i+=n)v|=(((a>>i)+(b>>i))&m)<<i;return v;}
 uint32_t hash(const Bytes& b){uint64_t h=0,k=0;for(size_t p=0;p+8<=b.size();p+=8){h=padd(h,0x0307030703070307ULL,16);k=padd(k,rd(b,p,8)^h,16);}return uint32_t(k^(k>>32));}
+static uint32_t hash31(const Bytes& bytes){
+ uint64_t counter=0,state=0;
+ for(size_t pos=0;pos+8<=bytes.size();pos+=8){
+  counter=padd(counter,0xa35793a7a35793a7ULL,16);
+  state=padd(state,rd(bytes,pos,8)^counter,16);
+  state=((state<<3)&0xfffffff8fffffff8ULL)|((state>>29)&0x0000000700000007ULL);
+ }
+ const auto signedWord=[&](unsigned shift){
+  int word=int((state>>shift)&0xffff);
+  return word>=0x8000?word-0x10000:word;
+ };
+ return uint32_t(int64_t(signedWord(0))*signedWord(32)+int64_t(signedWord(16))*signedWord(48));
+}
+
+static void putUtf8(std::string& out,uint32_t cp){
+ if(cp<0x80){out+=char(cp);return;}
+ if(cp<0x800){out+=char(0xc0|(cp>>6));out+=char(0x80|(cp&63));return;}
+ if(cp<0x10000)out+=char(0xe0|(cp>>12));
+ else{out+=char(0xf0|(cp>>18));out+=char(0x80|((cp>>12)&63));}
+ out+=char(0x80|((cp>>6)&63));out+=char(0x80|(cp&63));
+}
+
+std::string utf16le(const Bytes& bytes,size_t offset){
+ if(offset>bytes.size()||(bytes.size()-offset)%2)throw std::runtime_error("Truncated UTF-16LE");
+ std::string text;
+ for(size_t pos=offset;pos<bytes.size();pos+=2){
+  uint32_t cp=uint32_t(rd(bytes,pos,2));
+  if(cp>=0xd800&&cp<=0xdbff){
+   pos+=2;
+   const auto low=rd(bytes,pos,2);
+   if(low<0xdc00||low>0xdfff)throw std::runtime_error("Invalid UTF-16LE surrogate pair");
+   cp=0x10000+((cp-0xd800)<<10)+uint32_t(low-0xdc00);
+  }else if(cp>=0xdc00&&cp<=0xdfff)throw std::runtime_error("Invalid UTF-16LE surrogate");
+  putUtf8(text,cp);
+ }
+ return text;
+}
+
+static void decrypt31(Bytes& bytes,uint32_t arc,const std::string& name,unsigned method,const Bytes& keyFile){
+ if(method!=1&&method!=2)throw std::runtime_error("Unsupported QLIE 3.1 entry encryption");
+ const bool secondary=method==2;
+ uint32_t hash=secondary?0x86f7e2u:0x85f532u;
+ uint32_t seed=secondary?0x4437f1u:0x33f641u;
+ for(size_t pos=0;pos<name.size();pos+=2){
+  const uint32_t word=uint8_t(name[pos])|(uint32_t(uint8_t(name[pos+1]))<<8);
+  hash+=word<<((pos/2)&7);
+  seed^=hash;
+ }
+ const uint32_t length=uint32_t(bytes.size()),factor=secondary?13u:7u;
+ const uint32_t lengthConstant=secondary?0x56e213u:0x8f32dcu;
+ seed+=arc^(factor*(length&0xffffff)+length+hash+(hash^length^lengthConstant));
+ seed=factor*(seed&0xffffff);
+ const uint32_t multiplier=secondary?0x8a77f473u:0x8df21431u;
+ uint32_t table[32];
+ for(auto& word:table){
+  const uint64_t product=uint64_t(multiplier)*(seed^multiplier);
+  word=seed=uint32_t((product>>32)+product);
+ }
+ Bytes overlay;
+ if(secondary){
+  overlay.resize(1024);
+  for(int i=0;i<256;++i){
+   const auto word=uint32_t((i+7)*(i+3)*(i%3?-1:1));
+   for(unsigned j=0;j<4;++j)overlay[4*i+j]=uint8_t(word>>(8*j));
+  }
+  if(keyFile.size()>=128){
+   size_t offset=keyFile[49]%73+128;
+   const auto step=keyFile[79]%7+7;
+   for(auto& byte:overlay){offset=(offset+step)%keyFile.size();byte^=keyFile[offset];}
+  }
+ }
+ unsigned index=secondary?8*(table[8]&13u):table[13]&15u;
+ uint64_t state=table[6]|(uint64_t(table[7])<<32);
+ for(size_t pos=0;pos+8<=bytes.size();pos+=8){
+  const unsigned slot=2*(index&15);
+  uint64_t word=table[slot]|(uint64_t(table[slot+1])<<32);
+  if(secondary)word^=rd(overlay,8*index,8);
+  state=padd(state^word,word,32);
+  const uint64_t plain=rd(bytes,pos,8)^state;
+  wr(bytes,pos,plain);
+  state=padd(state,plain,8)^plain;
+  state=padd((state<<1)&0xfffffffefffffffeULL,plain,16);
+  index=(index+1)&(secondary?127:15);
+ }
+}
+
 struct MT {
  uint32_t s[64];unsigned i=64;
  explicit MT(uint32_t seed,const Bytes&k1,const Bytes&k2){s[0]=seed;for(unsigned j=1;j<64;j++)s[j]=0x6611bc19u*(s[j-1]^(s[j-1]>>30))+j;for(auto k:{&k1,&k2})for(size_t j=0;j<std::min<size_t>(k->size()/4,64);j++)s[j]^=uint32_t(rd(*k,4*j,4));}
@@ -27,7 +113,67 @@ std::string canonical(std::string s){for(auto&c:s){if(c==92)c=47;else if(c>=65&&
 Bytes file(const std::string&p){std::ifstream f(p,std::ios::binary);if(!f)throw std::runtime_error("Cannot open "+p);f.seekg(0,std::ios::end);auto n=f.tellg();if(n<0)throw std::runtime_error("Cannot size "+p);f.seekg(0);Bytes b(static_cast<size_t>(n));if(!b.empty()&&!f.read(reinterpret_cast<char*>(b.data()),b.size()))throw std::runtime_error("Cannot read "+p);return b;}
 void write_uncommitted_file(const std::string&p,const Bytes&b){std::ofstream f(p,std::ios::binary|std::ios::trunc);if(!f||!f.write(reinterpret_cast<const char*>(b.data()),b.size()))throw std::runtime_error("Cannot write "+p);f.close();if(!f)throw std::runtime_error("Cannot close "+p);}
 void write_file(const std::string&p,const Bytes&b){write_uncommitted_file(p,b);whj2::commitSavePath(p);}
-Pack::Pack(const std::string&path,const Bytes&a,const Bytes&b,PackVersion expected):fp(path,std::ios::binary),k1(a),k2(b){if(!fp)throw std::runtime_error("Cannot open "+path);fp.seekg(0,std::ios::end);uint64_t n=uint64_t(fp.tellg());if(n<0x41c)throw std::runtime_error("Archive too short");Bytes tail(28),kd(256);fp.seekg(n-28);fp.read(reinterpret_cast<char*>(tail.data()),28);constexpr std::string_view pack30="FilePackVer3.0",pack31="FilePackVer3.1";std::string_view signature(reinterpret_cast<const char*>(tail.data()),pack30.size());if(signature==pack31)throw std::runtime_error("QLIE FilePackVer3.1 is not supported: "+path);if(signature!=pack30)throw std::runtime_error("Unknown QLIE archive version: "+path);if(expected!=PackVersion::v30)throw std::runtime_error("Resource pack version differs from game profile: "+path);unsigned count=unsigned(rd(tail,16,4));uint64_t offset=rd(tail,20,8);if(count>100000||offset>n-28)throw std::runtime_error("Invalid archive index");fp.seekg(n-0x41c);fp.read(reinterpret_cast<char*>(kd.data()),256);key=hash(kd)&0xfffffff;fp.seekg(offset);Bytes toc(n-28-offset);fp.read(reinterpret_cast<char*>(toc.data()),toc.size());size_t p=0;for(unsigned i=0;i<count;i++){size_t len=rd(toc,p,2);p+=2;if(len>256||p+len+28>toc.size())throw std::runtime_error("Invalid entry name");Bytes name(toc.begin()+p,toc.begin()+p+len);unsigned nk=unsigned(len)+(key^0x3e);for(unsigned j=0;j<len;j++)name[j]^=uint8_t(((j+1)^nk)+j+1);p+=len;Entry e{cp932(name),std::string(name.begin(),name.end()),rd(toc,p,8),uint32_t(rd(toc,p+8,4)),uint32_t(rd(toc,p+12,4)),uint32_t(rd(toc,p+16,4)),uint32_t(rd(toc,p+20,4)),uint32_t(rd(toc,p+24,4))};p+=28;if(e.offset+e.size>offset)throw std::runtime_error("Invalid entry range");entries.push_back(e);}for(const auto&e:entries)if(e.name.find("pack_keyfile")!=std::string::npos){key_entry=read(e);k1=key_entry;key_ready=true;break;}}
+Pack::Pack(const std::string& path,const Bytes& a,const Bytes& b,PackVersion expected)
+ :fp(path,std::ios::binary),k1(a),k2(b),version(expected){
+ if(!fp)throw std::runtime_error("Cannot open "+path);
+ fp.seekg(0,std::ios::end);
+ const auto end=fp.tellg();
+ if(end<0x41c)throw std::runtime_error("Archive too short");
+ const uint64_t size=uint64_t(end);
+ Bytes tail(28),keyData(256);
+ fp.seekg(size-tail.size());
+ if(!fp.read(reinterpret_cast<char*>(tail.data()),tail.size()))throw std::runtime_error("Archive footer read failed");
+ constexpr std::string_view signature30="FilePackVer3.0",signature31="FilePackVer3.1";
+ const std::string_view signature(reinterpret_cast<const char*>(tail.data()),signature30.size());
+ if(signature!=signature30&&signature!=signature31)throw std::runtime_error("Unknown QLIE archive version: "+path);
+ const bool unicode=signature==signature31;
+ if(unicode!=(version==PackVersion::v31))throw std::runtime_error("Resource pack version differs from game profile: "+path);
+ const auto count=rd(tail,16,4);
+ const auto index=rd(tail,20,8);
+ if(count>100000||index>size-tail.size())throw std::runtime_error("Invalid archive index");
+ fp.seekg(size-0x41c);
+ if(!fp.read(reinterpret_cast<char*>(keyData.data()),keyData.size()))throw std::runtime_error("Archive seed read failed");
+ key=(unicode?hash31(keyData):hash(keyData))&0xfffffff;
+ fp.seekg(index);
+ Bytes toc(size-tail.size()-index);
+ if(!fp.read(reinterpret_cast<char*>(toc.data()),toc.size()))throw std::runtime_error("Archive index read failed");
+ size_t pos=0;
+ entries.reserve(count);
+ for(unsigned i=0;i<count;++i){
+  const unsigned units=unsigned(rd(toc,pos,2));
+  pos+=2;
+  const size_t length=unicode?units*2:units;
+  if(units>256||pos+length+28>toc.size())throw std::runtime_error("Invalid entry name");
+  Bytes name(toc.begin()+pos,toc.begin()+pos+length);
+  if(unicode){
+   const auto seed=((units*units)^units^0x3e13^(key>>16)^key)&0xffff;
+   unsigned state=seed;
+   for(unsigned j=0;j<units;++j){
+    state=(seed+j+8*state)&0xffff;
+    name[j*2]^=uint8_t(state);
+    name[j*2+1]^=uint8_t(state>>8);
+   }
+  }else{
+   const auto mask=units+(key^0x3e);
+   for(unsigned j=0;j<units;++j)name[j]^=uint8_t(((j+1)^mask)+j+1);
+  }
+  pos+=length;
+  Entry entry{unicode?utf16le(name):cp932(name),std::string(name.begin(),name.end()),rd(toc,pos,8),
+    uint32_t(rd(toc,pos+8,4)),uint32_t(rd(toc,pos+12,4)),uint32_t(rd(toc,pos+16,4)),
+    uint32_t(rd(toc,pos+20,4)),uint32_t(rd(toc,pos+24,4))};
+  pos+=28;
+  if(entry.offset>index||entry.size>index-entry.offset)throw std::runtime_error("Invalid entry range");
+  entries.push_back(std::move(entry));
+ }
+ // WHJ4's method-2 entries use the supplied RESKEY payload. They do not use
+ // the decrypted pack_keyfile entry, which is the convention in version 3.0.
+ if(!unicode){
+  for(const auto& entry:entries){
+   if(entry.name.find("pack_keyfile")==std::string::npos)continue;
+   key_entry=read(entry);k1=key_entry;key_ready=true;break;
+  }
+ }
+}
 Bytes Pack::read(const Entry&e){
  if(key_ready&&e.name.find("pack_keyfile")!=std::string::npos)return key_entry;
  Bytes b(e.size);
@@ -37,10 +183,13 @@ Bytes Pack::read(const Entry&e){
   fp.seekg(e.offset);
   if(!fp.read(reinterpret_cast<char*>(b.data()),b.size()))throw std::runtime_error("Entry read failed: "+e.name);
  }
- if(hash(b)!=e.hash)throw std::runtime_error("Checksum mismatch: "+e.name);
+ if((version==PackVersion::v31?hash31(b):hash(b))!=e.hash)throw std::runtime_error("Checksum mismatch: "+e.name);
  if(e.encrypted){
-  if(e.encrypted!=4)throw std::runtime_error("Unsupported entry encryption");
-  b=decrypt(std::move(b),key,e.rawname,k1,k2);
+  if(version==PackVersion::v31)decrypt31(b,key,e.rawname,e.encrypted,k1);
+  else{
+   if(e.encrypted!=4)throw std::runtime_error("Unsupported entry encryption");
+   b=decrypt(std::move(b),key,e.rawname,k1,k2);
+  }
  }
  if(e.packed)b=decompress(b);
  if(b.size()!=e.unpacked)throw std::runtime_error("Entry size mismatch: "+e.name);
@@ -48,6 +197,10 @@ Bytes Pack::read(const Entry&e){
 }
 std::pair<Bytes,Bytes> game_keys(const std::string&root,const ArchiveLayout&layout){
  Bytes k1=file(root+"/"+layout.fileKey);
+ if(layout.version==PackVersion::v31){
+  if(k1.size()<128)throw std::runtime_error("QLIE 3.1 key file is too short: "+layout.fileKey);
+  return {std::move(k1),{}};
+ }
  auto icon=root+"/"+layout.iconKey;
  if(std::filesystem::is_regular_file(icon)){auto k2=file(icon);if(k2.size()!=256)throw std::runtime_error("icon.key must contain exactly 256 bytes");return {k1,k2};}
 #ifdef __SWITCH__
@@ -80,30 +233,73 @@ std::optional<std::string> looseAudioPath(const std::string&root,const std::stri
  return path.string();
 }
 }
-Assets::Assets(const std::string&directory,const ArchiveLayout&layout):root(directory),looseVoicePrefix(layout.looseVoicePrefix){
+Assets::Assets(const std::string&directory,const ArchiveLayout&layout)
+ :root(directory),looseVoicePrefix(layout.looseVoicePrefix),resourceAliases(layout.resourceAliases){
  auto keys=game_keys(root,layout);
+ const auto addPack=[&](const std::string& path,const Bytes& fileKey,const Bytes& iconKey,PackVersion version){
+  auto pack=std::make_unique<Pack>(path,fileKey,iconKey,version);
+  for(const auto& entry:pack->entries){
+   if(entry.name.find("pack_keyfile")!=std::string::npos)continue;
+   auto key=canonical(entry.name);
+   index[key]={pack.get(),entry};
+   sources[key]={key,path,entry.offset,entry.size,false};
+  }
+  packs.push_back(std::move(pack));
+ };
  for(unsigned slot=0;slot<layout.slotCount;slot++){
   auto path=root+"/"+layout.archivePrefix+std::to_string(slot)+".pack";
-  if(!std::filesystem::is_regular_file(path))continue;
-  auto pack=std::make_unique<Pack>(path,keys.first,keys.second,layout.version);
-  for(const auto&e:pack->entries)if(e.name.find("pack_keyfile")==std::string::npos){auto key=canonical(e.name);index[key]={pack.get(),e};sources[key]={key,path,e.offset,e.size,false};}
-  packs.push_back(std::move(pack));
+  if(std::filesystem::is_regular_file(path))addPack(path,keys.first,keys.second,layout.version);
  }
  if(packs.empty())throw std::runtime_error("No numbered QLIE resource packs in "+root);
+ if(!layout.patchFile.empty()){
+  const auto path=root+"/"+layout.patchFile;
+  if(std::filesystem::is_regular_file(path)){
+   addPack(path,{},{},PackVersion::v30);
+   patchPath=path;
+  }
+ }
+}
+std::string Assets::alternateName(const std::string&name)const{
+ if(auto file=resourceAliases.find(name);file!=resourceAliases.end())return file->second;
+ for(auto alias=resourceAliases.rbegin();alias!=resourceAliases.rend();++alias){
+  const auto&prefix=alias->first;
+  if(!prefix.empty()&&prefix.back()=='/'&&name.rfind(prefix,0)==0)
+   return alias->second+name.substr(prefix.size());
+ }
+ return name;
+}
+bool Assets::inPack(const std::string&name)const{
+ const auto key=canonical(name);
+ return index.count(key)||index.count(alternateName(key));
 }
 std::optional<ResourceLocation> Assets::locate(const std::string&name)const{
- auto key=canonical(name);
- if(auto path=looseAudioPath(root,key,looseVoicePrefix))return ResourceLocation{key,*path,0,std::filesystem::file_size(*path),true};
- auto it=sources.find(key);
- if(it!=sources.end())return it->second;
+ const auto key=canonical(name);
+ const auto alternate=alternateName(key);
+ auto lookup=[&](const std::string&candidate)->std::optional<ResourceLocation>{
+  auto it=sources.find(candidate);
+  if(it!=sources.end()&&it->second.path==patchPath)return it->second;
+  if(auto path=looseAudioPath(root,candidate,looseVoicePrefix))
+   return ResourceLocation{candidate,*path,0,std::filesystem::file_size(*path),true};
+  if(it!=sources.end())return it->second;
+  return {};
+ };
+ if(auto found=lookup(key))return found;
+ if(alternate!=key)return lookup(alternate);
  return {};
 }
 Bytes Assets::read(const std::string&name){
  auto location=locate(name);
  if(!location)throw std::runtime_error("Missing resource: "+name);
  if(location->loose)return file(location->path);
- auto it=index.find(canonical(name));
+ auto it=index.find(location->name);
  try{return it->second.first->read(it->second.second);}catch(const std::exception&e){throw std::runtime_error(name+": "+e.what());}
+}
+std::string Assets::text(const std::string&name){
+ const auto bytes=read(name);
+ if(bytes.size()>=2&&bytes[0]==0xff&&bytes[1]==0xfe)return utf16le(bytes,2);
+ if(bytes.size()>=3&&bytes[0]==0xef&&bytes[1]==0xbb&&bytes[2]==0xbf)
+  return std::string(bytes.begin()+3,bytes.end());
+ return cp932(bytes);
 }
 bool Assets::exists(const std::string&name)const{return locate(name).has_value();}
 std::vector<std::string> Assets::names()const{std::vector<std::string>n;for(const auto&e:index)n.push_back(e.first);return n;}

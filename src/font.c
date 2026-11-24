@@ -1,3 +1,4 @@
+#include <limits.h>
 #include "font.h"
 #include <stdlib.h>
 #include <string.h>
@@ -19,6 +20,7 @@ typedef struct KFontGlyph {
     struct KFontGlyph *hash_next,*newer,*older;
 } KFontGlyph;
 struct KFont {
+    uint8_t *owned_font;
     FT_Library library;FT_Face faces[3];unsigned count,shared,supersample,style,style_set;
     uint32_t style_color;
     KFontGlyph *glyphs[FONT_CACHE_BUCKETS],*newest,*oldest;
@@ -95,6 +97,7 @@ void kfont_close(KFont *f){
 #ifdef __SWITCH__
     if(f->shared)plExit();
 #endif
+    free(f->owned_font);
     free(f);
 }
 int kfont_set_antialias(KFont *f,unsigned factor){
@@ -122,11 +125,23 @@ int kfont_face_info(const char *path,unsigned face_index,char *label,size_t capa
     snprintf(label,capacity,"%s %s",face->family_name?face->family_name:"",face->style_name?face->style_name:"");
     FT_Done_Face(face);FT_Done_FreeType(library);return count;
 }
+static KFont *font_open_data(const char*,unsigned,const uint8_t*,size_t,int);
 KFont *kfont_open(const char *path,int simplified){return kfont_open_face(path,0,simplified);}
-KFont *kfont_open_face(const char *path,unsigned face_index,int simplified){
+KFont *kfont_open_face(const char *path,unsigned face_index,int simplified){return font_open_data(path,face_index,NULL,0,simplified);}
+KFont *kfont_open_memory(const uint8_t *data,size_t size,int simplified){
+    if(!data||!size||size>LONG_MAX)return NULL;
+    return font_open_data(NULL,0,data,size,simplified);
+}
+static KFont *font_open_data(const char *path,unsigned face_index,const uint8_t *data,size_t size,int simplified){
     KFont *f=calloc(1,sizeof(*f));if(!f)return NULL;
     if(FT_Init_FreeType(&f->library)){kfont_close(f);return NULL;}
-    if(path&&*path){
+    if(data){
+        f->owned_font=malloc(size);
+        if(!f->owned_font){kfont_close(f);return NULL;}
+        memcpy(f->owned_font,data,size);
+        if(FT_New_Memory_Face(f->library,f->owned_font,(FT_Long)size,0,&f->faces[0])){kfont_close(f);return NULL;}
+        select_unicode(f->faces[0]);f->count=1;
+    }else if(path&&*path){
         if(FT_New_Face(f->library,path,(FT_Long)face_index,&f->faces[0])){kfont_close(f);return NULL;}
         select_unicode(f->faces[0]);
         f->count=1;

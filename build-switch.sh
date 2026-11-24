@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")"
+. ./games/profile.sh
 dkp=${DEVKITPRO:-/opt/devkitpro}
 cxx="$dkp/devkitA64/bin/aarch64-none-elf-g++"
 cc="$dkp/devkitA64/bin/aarch64-none-elf-gcc"
@@ -17,10 +18,10 @@ build_qlie_archive build-switch "$cxx" "$cc" "$dkp/devkitA64/bin/aarch64-none-el
 if [ "${1:-}" = --engine-only ]; then
   exit 0
 fi
-. ./games/whj2/sources.sh
-flags="$flags -Igames -Igames/whj2"
+. ./games/runtime/sources.sh
+flags="$flags -Igames -Igames/runtime"
 if [ "${1:-}" = --diagnostic ]; then
-  $cxx -std=c++17 $flags -L"$dkp/libnx/lib" -specs="$dkp/libnx/switch.specs" games/whj2/diagnostic.cpp build-switch/libqlie-runtime.a -lpthread -lnx -o build-switch/qlie-runtime-diagnostic.elf
+  $cxx -std=c++17 $flags -L"$dkp/libnx/lib" -specs="$dkp/libnx/switch.specs" games/runtime/diagnostic.cpp build-switch/libqlie-runtime.a -lpthread -lnx -o build-switch/qlie-runtime-diagnostic.elf
   "$dkp/tools/bin/nacptool" --create "QLIE Runtime Diagnostic" "QLIE Switch Runtime contributors" "0.0.1" build-switch/qlie-runtime-diagnostic.nacp
   "$dkp/tools/bin/elf2nro" build-switch/qlie-runtime-diagnostic.elf build-switch/qlie-runtime-diagnostic.nro --nacp=build-switch/qlie-runtime-diagnostic.nacp
   exit 0
@@ -45,10 +46,10 @@ $cxx -std=c++17 $flags $codec_flags -ffp-contract=off -Ibuild-switch -c src/deko
 $cc -std=c11 $flags -c src/switch_stdio.c -o build-switch/switch_stdio.o
 flags="$flags -ffp-contract=off -DWHJ2_WITH_VULKAN -DWHJ2_WITH_DEKO3D"
 
-$cxx -std=c++17 $flags $($pc --cflags sdl2 freetype2 libpng libjpeg) -L"$dkp/libnx/lib" -specs="$dkp/libnx/switch.specs" $whj2_scene_sources games/whj2/joycon.cpp games/whj2/main.cpp build-switch/gpu_raster.o build-switch/deko3d_raster.o build-switch/vulkan_raster.o build-switch/switch_stdio.o build-switch/switch_nak_cache.o build-switch/mesa-scoped-nak.o build-switch/libqlie-runtime.a -Wl,-u,qlie_build_revision,--wrap=nak_debug_flags -L"$mesa/lib" -Wl,--start-group "$mesa/lib/libvulkan.a" "$rust"/*.rlib $($pc --libs sdl2 freetype2 libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -lexpat -lzstd -ldeko3d -lpthread -lnx -Wl,--end-group -o build-switch/qlie-switch-runtime.elf
+$cxx -std=c++17 $flags $qlie_profile_flags $($pc --cflags sdl2 freetype2 libpng libjpeg) -L"$dkp/libnx/lib" -specs="$dkp/libnx/switch.specs" $qlie_scene_sources games/runtime/joycon.cpp games/runtime/main.cpp build-switch/gpu_raster.o build-switch/deko3d_raster.o build-switch/vulkan_raster.o build-switch/switch_stdio.o build-switch/switch_nak_cache.o build-switch/mesa-scoped-nak.o build-switch/libqlie-runtime.a -Wl,-u,qlie_build_revision,--wrap=nak_debug_flags -L"$mesa/lib" -Wl,--start-group "$mesa/lib/libvulkan.a" "$rust"/*.rlib $($pc --libs sdl2 freetype2 libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -lexpat -lzstd -ldeko3d -lpthread -lnx -Wl,--end-group -o "build-switch/$qlie_binary.elf"
 # Installed packages consume the ELF directly.
 if [ "${1:-}" = "--elf-only" ]; then
   exit 0
 fi
-"$dkp/tools/bin/nacptool" --create "QLIE Switch Runtime (Development)" "QLIE Switch Runtime contributors" "0.0.2" build-switch/qlie-switch-runtime.nacp
-"$dkp/tools/bin/elf2nro" build-switch/qlie-switch-runtime.elf build-switch/qlie-switch-runtime.nro --nacp=build-switch/qlie-switch-runtime.nacp
+"$dkp/tools/bin/nacptool" --create "$qlie_nro_title" "QLIE Switch Runtime contributors" "$qlie_nro_version" "build-switch/$qlie_binary.nacp"
+"$dkp/tools/bin/elf2nro" "build-switch/$qlie_binary.elf" "build-switch/$qlie_binary.nro" --nacp="build-switch/$qlie_binary.nacp"

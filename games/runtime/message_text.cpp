@@ -17,19 +17,22 @@ static std::vector<uint32_t> codepoints(const std::string&value){
  return result;
 }
 MessageText::MessageText(qlie::Assets&assets,bool useStoryLineBreaking):storyLineBreaking(useStoryLineBreaking){
- std::istringstream in(qlie::cp932(assets.read("script/config/default.txt")));std::string line;
+ std::istringstream in(assets.text("script/config/default.txt"));std::string line;
  while(std::getline(in,line)){auto p=line.find('=');if(p!=line.npos&&trim(line.substr(0,p))=="TextSpeed")speed=std::stod(trim(line.substr(p+1)));}
  // OF headers and atlas coordinates follow the original bitmap-font loader.
- std::istringstream replacementFile(qlie::cp932(assets.read("avg/imoscripter_reptextlist.txt")));
+ std::istringstream replacementFile(assets.text("avg/imoscripter_reptextlist.txt"));
  while(std::getline(replacementFile,line)){auto p=line.find('=');if(p!=line.npos)replacements.push_back({trim(line.substr(0,p)),trim(line.substr(p+1))});}
+ const auto needsAtlas=[](const auto&replacement){return replacement.second.rfind("[f,6]",0)==0;};
+ if(std::any_of(replacements.begin(),replacements.end(),needsAtlas)){
  auto bitmap=assets.read("system/font/外字.of");
  auto word=[&](size_t at){if(at+2>bitmap.size())throw std::runtime_error("Truncated OF font");return unsigned(bitmap[at])|(unsigned(bitmap[at+1])<<8);};
  if(bitmap.size()<0x1044a)throw std::runtime_error("Truncated OF header");
  unsigned cellWidth=word(0x10440),cellHeight=word(0x10442),atlasWidth=word(0x10445),atlasHeight=word(0x10447),banks=bitmap[0x10444];
  if(!cellWidth||!cellHeight||cellWidth>256||cellHeight>256||!atlasWidth||!atlasHeight||size_t(banks)*atlasWidth*atlasHeight>bitmap.size()-0x1044a)throw std::runtime_error("Invalid OF atlas");
  for(const auto&replacement:replacements){
+  if(!needsAtlas(replacement))continue;
   auto value=replacement.second;
-  if(value.rfind("[f,6]",0)!=0||value.size()<8||value.substr(value.size()-3)!="[f]")throw std::runtime_error("Unsupported external glyph mapping");
+  if(value.size()<8||value.substr(value.size()-3)!="[f]")throw std::runtime_error("Unsupported external glyph mapping");
   auto characters=codepoints(value.substr(5,value.size()-8));
   if(characters.size()!=1||characters[0]<0xff10||characters[0]>0xff19)throw std::runtime_error("Unsupported OF character");
   uint32_t cp=characters[0];unsigned index=0x24f+cp-0xff10,tile=word(0x40+index*2),bank=tile>>8,slot=tile&255;
@@ -42,15 +45,31 @@ MessageText::MessageText(qlie::Assets&assets,bool useStoryLineBreaking):storyLin
   }
   bitmapGlyphs.push_back(std::move(glyph));
  }
+ }
  if(!storyLineBreaking)return;
- std::istringstream rules(qlie::cp932(assets.read("misc/value.s")));
+ std::map<std::string,std::string> project;
+ std::istringstream settings(assets.text("avg/projectsetting.txt"));
+ while(std::getline(settings,line)){
+  const auto p=line.find('=');
+  if(p!=line.npos)project[trim(line.substr(0,p))]=trim(line.substr(p+1));
+ }
+ std::istringstream rules(assets.text("misc/value.s"));
  while(std::getline(rules,line)){
   auto p=line.find('=');if(p==line.npos)continue;
   auto key=trim(line.substr(0,p)),value=trim(line.substr(p+1));
-  if(key=="\\cal,#KinsokuWordLength")lineReserve=unsigned(std::stoul(value));
+  if(key=="\\cal,#KinsokuWordLength"){
+   if(value=="ResultInt[0]")value=project.at("KinsokuLength");
+   lineReserve=unsigned(std::stoul(value));
+  }
   else if(key=="\\cal,#GyoutouKinsokuWord"||key=="\\cal,#GyoumatuKinsokuWord"||key=="\\cal,#IgnoreReturnSpaceWord"){
-   if(value.size()<2||value.front()!='"'||value.back()!='"')throw std::runtime_error("Invalid line breaking configuration");
-   auto chars=codepoints(value.substr(1,value.size()-2));
+   if(value=="ResultStr[0]"){
+    value=project.at(key=="\\cal,#GyoutouKinsokuWord"?"KinsokuGyoutouWord":
+                     key=="\\cal,#GyoumatuKinsokuWord"?"KinsokuGyoumatuWord":"ReturnSpaceWord");
+   }else{
+    if(value.size()<2||value.front()!='"'||value.back()!='"')throw std::runtime_error("Invalid line breaking configuration");
+    value=value.substr(1,value.size()-2);
+   }
+   auto chars=codepoints(value);
    (key=="\\cal,#GyoutouKinsokuWord"?lineStartForbidden:key=="\\cal,#GyoumatuKinsokuWord"?lineEndForbidden:noInitialIndent)=std::move(chars);
   }
  }

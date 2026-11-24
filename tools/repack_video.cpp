@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "image.hpp"
-#include "whj2/profile.hpp"
+#include "profiles/whj2.hpp"
 #include <algorithm>
 #include <array>
 #include <filesystem>

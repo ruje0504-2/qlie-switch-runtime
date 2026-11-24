@@ -9,7 +9,8 @@ struct AudioStats {uint64_t frames,nonzero;};
 struct AudioPosition {uint64_t frame=0,length=0;bool loop=false,playing=false;};
 class Audio {
 public:
- static constexpr unsigned MusicPreviousChannel=4,SettingsTestChannel=5,SystemChannel=24,ChannelCount=25;
+ static constexpr unsigned MusicPreviousChannel=4,SettingsTestChannel=5,SystemChannel=24;
+ static constexpr unsigned StoryEffect3Channel=25,StoryBgvChannel=26,ChannelCount=27;
 private:
  friend struct PreparedAudioRestore;
  struct Channel {DecodedPcm pcm;std::string path;unsigned category=2;size_t pos=0;bool loop=false,stop=false;float gain=0,target=0,step=0;uint64_t fade=0;};

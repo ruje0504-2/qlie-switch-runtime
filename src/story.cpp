@@ -15,7 +15,7 @@ Story::Script&Story::script(const std::string&n){
  auto it=scripts.find(name);
  if(it!=scripts.end())return it->second;
  Script sc;
- std::istringstream in(qlie::cp932(assets.read(name)));
+ std::istringstream in(assets.text(name));
  const auto visualWaits=profile.visualWaitParagraphs.find(name);
  bool pageContent=false,visualWait=false;
  unsigned ln=0;
@@ -37,6 +37,8 @@ Story::Script&Story::script(const std::string&n){
    if(!inc.empty()&&inc[0]==33)inc.erase(0,1);
    if(inc==profile.header||inc==profile.replayHeader)sc.ops.push_back({"!create",ln});
    else if(inc==profile.footer)sc.ops.push_back({"!free",ln});
+   // The direct-label form invokes the already active AVG for its choice.
+   else if(inc==profile.selectionPrelude)continue;
    else throw std::runtime_error("Unsupported story include "+line+" in "+name);
    continue;
   }
@@ -50,7 +52,10 @@ Story::Script&Story::script(const std::string&n){
   }else{
    sc.ops.push_back({line,ln});
    if(line.front()!=94)pageContent=true;
-   else if(visualWaits!=profile.visualWaitParagraphs.end()&&visualWaits->second.count(ln)&&
+   else if(profile.presentCommandParagraphs){
+    const auto command=lower(line.substr(1,line.find(',')-1));
+    if(profile.sceneCommands.count(command)||command=="include")visualWait=true;
+   }else if(visualWaits!=profile.visualWaitParagraphs.end()&&visualWaits->second.count(ln)&&
            line.rfind("^sentence,",0)==0)visualWait=true;
   }
  }
@@ -80,7 +85,16 @@ Story::Script&Story::script(const std::string&n){
  if(!stack.empty())throw std::runtime_error("Unclosed control block in "+name);
  return scripts.emplace(name,std::move(sc)).first->second;
 }
-std::string Story::value(std::string s)const{s=trim(s);if(s.size()>=2&&s.front()==34&&s.back()==34)return s.substr(1,s.size()-2);if(lower(s)=="selffilename")return state.at.file;if(s.empty())return {};auto it=state.vars.find(lower(s));return it==state.vars.end()?s:it->second;}
+std::string Story::value(std::string s)const{
+ s=trim(s);
+ if(s.size()>=2&&s.front()==34&&s.back()==34)return s.substr(1,s.size()-2);
+ const auto name=lower(s);
+ if(name=="selffilename")return state.at.file;
+ auto it=state.vars.find(name);
+ if(it!=state.vars.end())return it->second;
+ if(name=="__rootfile")return profile.root;
+ return s;
+}
 bool Story::condition(const std::string&s)const{for(const auto&op:std::vector<std::string>{"!=","==",">=","<=","<",">"}){auto p=s.find(op);if(p==s.npos)continue;auto a=value(s.substr(0,p)),b=value(s.substr(p+op.size()));if(op=="!=")return a!=b;if(op=="==")return a==b;long x=std::stol(a),y=std::stol(b);return op==">="?x>=y:op=="<="?x<=y:op=="<"?x<y:x>y;}throw std::runtime_error("Unsupported story condition: "+s);}
 void Story::jump(std::string label,std::string file){label=lower(value(label));file=value(file);if(file.empty()||lower(file)=="self")file=state.at.file;else if(file.find(47)==file.npos&&file.find(92)==file.npos){auto p=state.at.file.rfind(47);file=state.at.file.substr(0,p+1)+file;}file=qlie::canonical(file);auto&sc=script(file);auto it=sc.labels.find(label);if(it==sc.labels.end())throw std::runtime_error("Missing label "+label+" in "+file);state.at={file,uint32_t(it->second)};visited.insert(file+":"+label);}
 Event Story::event(std::string t,std::string v,unsigned ln)const{return {std::move(t),std::move(v),state.at.file,ln};}
@@ -88,7 +102,7 @@ void Story::resetState(){state={};state.vars["game_routeflag[0]"]="0";state.vars
 const std::vector<std::string>& Story::includeCommands(const std::string&name){
  auto found=includes.find(name);
  if(found!=includes.end())return found->second;
- std::istringstream in(qlie::cp932(assets.read(profile.includeDirectory+"/"+name+".txt")));
+ std::istringstream in(assets.text(profile.includeDirectory+"/"+name+".txt"));
  std::vector<std::string> lines;
  std::string line;
  while(std::getline(in,line)){
@@ -119,8 +133,9 @@ std::vector<std::string> Story::upcomingAssetCommands(bool opening){
   const bool clearsCharacter=text.rfind("^chara",0)==0&&text.find("clear:def")!=text.npos;
   const bool filtersBackground=text.rfind("^bg",0)==0&&text.find(",imgfilter:blur")!=text.npos;
   const bool resourceCommand=!text.empty()&&text.front()=='^'&&
-    (text.find("file:")!=text.npos||text.find(",$")!=text.npos||text.find(",base:")!=text.npos);
-  const bool rule=text.rfind("^sentence,",0)==0&&text.find("fade:rule:")!=text.npos;
+    (text.find(",file")!=text.npos||text.find(",$")!=text.npos||text.find(",base:")!=text.npos);
+  const bool rule=text.rfind("^sentence,",0)==0&&
+    (text.find("fade:rule:")!=text.npos||text.find("fademode:rule")!=text.npos);
   if(text.rfind("^movie,",0)==0||clearsCharacter||filtersBackground||resourceCommand||rule||text.rfind("％",0)==0)
    out.push_back(text);
  };
@@ -165,6 +180,9 @@ void Story::native(const Op&o){auto a=split(o.text,44);std::string cmd=lower(a[0
  }
  if(cmd=="\\jmp"||cmd=="\\go"){
   auto target=lower(arg(1));
+  if(state.replay&&lower(arg(2))=="__rootfile"){
+   state.finished=true;state.pending.push_back(event("finish","replay",o.line));return;
+  }
   if(target=="@@!selectreturn"){std::string label=state.selectLabel+"_"+std::to_string(state.choice);jump(label,lower(state.routeStr)=="route"?profile.root:state.home);return;}
   if(target=="@@!branchreturn"){jump(state.branchLabel+"_"+std::to_string(state.routeValue),lower(state.routeStr)=="route"?profile.root:state.home);return;}
   if(value(arg(1))=="@@replayreturn"){state.finished=true;state.pending.push_back(event("finish","replay",o.line));return;}
@@ -174,6 +192,33 @@ void Story::native(const Op&o){auto a=split(o.text,44);std::string cmd=lower(a[0
 }
 void Story::caret(const Op&o){auto a=split(o.text,44);std::string cmd=lower(a[0].substr(1));
  if(cmd=="select"){state.choices.assign(a.begin()+1,a.end());state.awaiting=true;state.pending.push_back(event("choice",o.text,o.line));return;}
+ if(cmd=="selectlabel"&&!profile.selectionPrelude.empty()){
+  if(state.choice<0||size_t(state.choice)+1>=a.size())throw std::runtime_error("Missing label for selected option");
+  const auto label=value(a[size_t(state.choice)+1]);
+  state.vars["avg_selectcurlabel"]=label;
+  state.vars["#flag:"+label]="1";
+  return;
+ }
+ if(cmd=="frag"&&a.size()==4&&a[1]=="="){
+  state.vars["#flag:"+value(a[2])]=value(a[3]);
+  return;
+ }
+ if(cmd=="fragcal"&&a.size()==2){
+  const auto expression=value(a[1]);
+  const auto bracket=expression.find(']');
+  if(expression.rfind("([",0)!=0||bracket==expression.npos||bracket+1>=expression.size()||expression.back()!=')')
+   throw std::runtime_error("Unsupported route fragment expression: "+expression);
+  const auto flag=state.vars.find("#flag:"+expression.substr(2,bracket-2));
+  const auto current=flag==state.vars.end()?"0":flag->second;
+  state.vars["fragresultint"]=condition(current+expression.substr(bracket+1,expression.size()-bracket-2))?"1":"0";
+  return;
+ }
+ if(cmd=="fragtrack"&&a.size()==2){
+  const auto label=value(a[1]);
+  state.vars["#flag:"+label]="1";
+  state.vars["resultstr[0]"]=label;
+  return;
+ }
  if(cmd.rfind("selectset",0)==0){state.home=state.at.file;state.selectLabel="@@"+stem(state.at.file)+"_sel"+cmd.substr(9);return;}
  if(cmd=="selectjmp"){jump(state.selectLabel+"_"+std::to_string(state.choice),profile.selection);return;}
  if(cmd=="branchjmp"){jump(state.branchLabel,profile.selection);return;}

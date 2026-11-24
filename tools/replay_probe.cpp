@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#include "whj2/profile.hpp"
+#include "profiles/whj2.hpp"
 #include "replay_catalog.hpp"
 #include <iostream>
 struct Branch {qlie::Bytes state;std::set<std::string> visited;std::string path;unsigned pages=0,events=0;};

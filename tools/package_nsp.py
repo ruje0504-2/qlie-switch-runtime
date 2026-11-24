@@ -68,10 +68,16 @@ def pfs_entries(path):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
+    game_profile = os.environ.get('QLIE_GAME') or 'whj2'
+    if game_profile not in ('whj2', 'whj4'):
+        ap.error('QLIE_GAME must be whj2 or whj4')
+    whj4 = game_profile == 'whj4'
+    binary = 'whj4-switch-runtime' if whj4 else 'qlie-switch-runtime'
+    resources = [f'GameData/data{i}.pack' for i in range(9)] + ['reskey.fkey'] if whj4 else RESOURCES
     ap.add_argument('--game', required=True, type=Path)
-    ap.add_argument('--elf', type=Path, default=ROOT/'build-switch/qlie-switch-runtime.elf')
+    ap.add_argument('--elf', type=Path, default=ROOT/'build-switch'/f'{binary}.elf')
     ap.add_argument('--runtime-revision', help='Fixed source commit embedded in an existing ELF')
-    ap.add_argument('--config', type=Path, default=ROOT/'games/whj2/nsp.json')
+    ap.add_argument('--config', type=Path, default=ROOT/'games/profiles'/game_profile/'nsp.json')
     ap.add_argument('--output', type=Path)
     ap.add_argument('--icon', required=True, type=Path)
     ap.add_argument('--keyset', type=Path, default=Path.home()/'.switch/prod.keys')
@@ -81,12 +87,12 @@ def main():
     title_id = config['title_id'].upper()
     if len(title_id) != 16 or not title_id.startswith('0100') or int(title_id, 16) & 0xfff:
         ap.error('Expected a base application Title ID with low12 bits clear')
-    output = (args.output or ROOT/'delivery'/f'WHJ2-{title_id}-{config["version"]}.nsp').resolve()
+    output = (args.output or ROOT/'delivery'/f'{game_profile.upper()}-{title_id}-{config["version"]}.nsp').resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     if output.exists():
         ap.error('Output already exists; retain or remove the previous package explicitly')
     game, elf = args.game.resolve(), args.elf.resolve()
-    for resource in RESOURCES:
+    for resource in resources:
         if not (game/resource).is_file():
             ap.error('Missing required game resource: '+resource)
     if not elf.is_file() or not args.keyset.is_file() or not args.hacbrewpack.is_file():
@@ -103,7 +109,7 @@ def main():
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2)+'\n')
     save()
     try:
-        with tempfile.TemporaryDirectory(prefix='.whj2-nsp-', dir=output.parent) as temp, log_path.open('w') as log:
+        with tempfile.TemporaryDirectory(prefix=f'.{game_profile}-nsp-', dir=output.parent) as temp, log_path.open('w') as log:
             work = Path(temp)
             for name in ('exefs', 'control', 'romfs', 'output', 'verify'):
                 (work/name).mkdir()
@@ -111,7 +117,8 @@ def main():
                 return subprocess.run([str(x) for x in cmd], cwd=work, stdout=log, stderr=subprocess.STDOUT, check=True)
             run(['/opt/devkitpro/devkitA64/bin/aarch64-none-elf-strip', elf, '-o', work/'main.elf'])
             run(['/opt/devkitpro/tools/bin/elf2nso', work/'main.elf', work/'exefs/main'])
-            npdm = json.loads((ROOT/'games/whj2/nsp-npdm.json').read_text())
+            npdm = json.loads((ROOT/'games/profiles/nsp-npdm.json').read_text())
+            npdm['name'] = game_profile
             for field in ('title_id', 'title_id_range_min', 'program_id', 'program_id_range_min'):
                 npdm[field] = '0x'+title_id
             (work/'npdm.json').write_text(json.dumps(npdm, indent=2))
@@ -136,9 +143,8 @@ def main():
             report['icon_encoding'] = 'baseline JPEG SOF0, 256x256, yuvj420p'
             for language in LANGUAGES:
                 os.link(work/'icon.jpg', work/'control'/('icon_'+language+'.dat'))
-            files = list(RESOURCES)
             report['romfs'] = []
-            for relative in files:
+            for relative in resources:
                 source, target = game/relative, work/'romfs'/relative
                 target.parent.mkdir(parents=True, exist_ok=True)
                 try:
@@ -148,19 +154,20 @@ def main():
                         raise
                     shutil.copyfile(source, target)
                 report['romfs'].append({'name': relative, 'bytes': source.stat().st_size})
-            existing_key = game/'DLL/icon.key'
-            if existing_key.is_file():
-                icon_key = existing_key.read_bytes()
-            else:
-                source = (game/'美少女万華鏡２.exe').read_bytes()
-                marker = source.rfind(bytes([5])+b'TIcon')
-                if marker < 0 or marker+262 > len(source):
-                    raise ValueError('QLIE icon key absent')
-                icon_key = source[marker+6:marker+262]
-            if len(icon_key) != 256:
-                raise ValueError('QLIE icon key must be256 bytes')
-            (work/'romfs/DLL/icon.key').write_bytes(icon_key)
-            report['romfs'].append({'name': 'DLL/icon.key', 'bytes': len(icon_key)})
+            if not whj4:
+                existing_key = game/'DLL/icon.key'
+                if existing_key.is_file():
+                    icon_key = existing_key.read_bytes()
+                else:
+                    source = (game/'美少女万華鏡２.exe').read_bytes()
+                    marker = source.rfind(bytes([5])+b'TIcon')
+                    if marker < 0 or marker+262 > len(source):
+                        raise ValueError('QLIE icon key absent')
+                    icon_key = source[marker+6:marker+262]
+                if len(icon_key) != 256:
+                    raise ValueError('QLIE icon key must be 256 bytes')
+                (work/'romfs/DLL/icon.key').write_bytes(icon_key)
+                report['romfs'].append({'name': 'DLL/icon.key', 'bytes': len(icon_key)})
             run([args.hacbrewpack, '--keyset', args.keyset, '--titleid', title_id,
                  '--titlename', config['title'], '--titlepublisher', config['publisher'],
                  '--nspdir', work/'output', '--nologo'])

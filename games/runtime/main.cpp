@@ -14,7 +14,8 @@
 #endif
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Incremental native frontend: graphics/audio integration remains in progress.
-#include "whj2/profile.hpp"
+#include "profile.hpp"
+#include "ui_locale.hpp"
 #include "story.hpp"
 #ifdef WHJ2_MAC_GAME_PICKER
 #include "mac_game_access.h"
@@ -62,10 +63,10 @@ extern "C" {
 #include <tuple>
 #ifdef WHJ2_WITH_GPU
 static std::string selectedRenderer(){
- if(const char* mode=std::getenv("WHJ2_RENDERER");mode&&*mode)return mode;
+ if(const char* mode=std::getenv(game_profile::rendererEnv);mode&&*mode)return mode;
 #ifdef __SWITCH__
  std::string name;
- if(std::ifstream file{whj2::profile::sdRenderer};file>>name)return name;
+ if(std::ifstream file{game_profile::sdRenderer};file>>name)return name;
  return "deko3d";
 #else
  return "cpu";
@@ -102,8 +103,9 @@ struct Frontend {
  whj2::JoyCon joycon;
 #endif
  qlie::Assets assets;
+ whj2::UiLocale ui{assets};
  whj2::Story story;
- whj2::Progress progress;
+ whj2::Progress progress{game_profile::extrasFlag};
  std::unique_ptr<whj2::ProgressWriter> progressWriter;
  std::unique_ptr<whj2::Audio>audio;
  std::unique_ptr<whj2::SceneImages>images;
@@ -170,11 +172,18 @@ struct Frontend {
  qlie::Bytes touchSavedStory;std::string touchSavedText;
  std::map<std::string,std::map<std::string,std::string>>audioTemplates;
  static constexpr unsigned defaultMusicFadeMs=1000;
- std::array<float,3>volumes{{0.4f,1.f,1.f}};
- std::array<bool,3>loops{{true,false,false}};
- std::array<unsigned,3>audioTimes{{defaultMusicFadeMs,0,0}};
- std::array<unsigned,3>audioTypes{{0,2,2}};
+ std::array<float,5>volumes{{game_profile::storyMusicGain,1.f,1.f,1.f,1.f}};
+ std::array<bool,5>loops{{true,false,false,false,false}};
+ std::array<unsigned,5>audioTimes{{defaultMusicFadeMs,0,0,0,0}};
+ std::array<unsigned,5>audioTypes{{0,2,2,2,1}};
+ static int audioTrack(const std::string&command){
+  constexpr const char* names[]={"music01","se01","se02","se03","sebgv"};
+  for(unsigned i=0;i<game_profile::storyAudioTracks;++i)if(command==names[i])return int(i);
+  return -1;
+ }
  KFont*font=nullptr;
+ std::unique_ptr<KFont,decltype(&kfont_close)> localizedFont{nullptr,kfont_close};
+ KFont* storyFont() const {return localizedFont?localizedFont.get():font;}
  SDL_Window*window=nullptr;
  SDL_Renderer*renderer=nullptr;
  SDL_Texture*texture=nullptr;
@@ -183,8 +192,9 @@ struct Frontend {
 #endif
  qlie::Bytes pixels;
  whj2::RenderTarget*frameTarget=nullptr;
+ enum class GlyphFace { Interface, Dialogue };
  struct CachedGlyph {KFontGlyphBounds bounds{};whj2::Image image;};
- std::map<std::tuple<uint32_t,unsigned,unsigned,uint32_t>,CachedGlyph>uiGlyphs;
+ std::map<std::tuple<bool,uint32_t,unsigned,unsigned,uint32_t>,CachedGlyph>uiGlyphs;
  struct SlotPreview {bool exists=false,damaged=false;whj2::Image thumbnail;std::vector<uint32_t>excerpt;};
  std::map<unsigned,SlotPreview>slotPreviews;
  std::string text,name,status="",saveDir;
@@ -194,7 +204,7 @@ struct Frontend {
  whj2::FramePacer framePacer;
  whj2::FpsOverlay fpsDisplay;
  std::map<SDL_JoystickID,SDL_GameController*>controllers;
- Frontend(const std::string&game,const std::string&saves):assets(game,whj2::profile::archives),story(assets,whj2::profile::story),pixels(1280*720*4),saveDir(saves){unsigned subsystems=SDL_INIT_AUDIO|SDL_INIT_EVENTS;
+ Frontend(const std::string&game,const std::string&saves):assets(game,game_profile::archives),story(assets,game_profile::story),pixels(1280*720*4),saveDir(saves){unsigned subsystems=SDL_INIT_AUDIO|SDL_INIT_EVENTS;
  bool nativeRequested=false;
 #ifdef WHJ2_WITH_GPU
  const std::string gpuMode=selectedRenderer();
@@ -214,7 +224,7 @@ struct Frontend {
   SDL_LogSetAllPriority(SDL_NUM_LOG_PRIORITIES);
  }
  if(SDL_Init(subsystems))throw std::runtime_error(SDL_GetError());
- if(!nativeRequested){window=SDL_CreateWindow(whj2::profile::gameName,SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,1280,720,SDL_WINDOW_RESIZABLE);if(!window)throw std::runtime_error(SDL_GetError());}
+ if(!nativeRequested){window=SDL_CreateWindow(ui.text(game_profile::gameName),SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,1280,720,SDL_WINDOW_RESIZABLE);if(!window)throw std::runtime_error(SDL_GetError());}
 #ifdef WHJ2_WITH_DEKO3D
  if(nativeRequested&&gpuMode!="vulkan"){
   if(gpuMode!="deko3d")QLIE_LOGF("Unknown renderer '%s', selecting deko3d\n",gpuMode.c_str());
@@ -240,13 +250,20 @@ struct Frontend {
  SDL_RenderSetLogicalSize(renderer,1280,720);
  texture=SDL_CreateTexture(renderer,SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STREAMING,1280,720);
  }
- font=kfont_open(nullptr,0);
+ font=kfont_open(nullptr,ui.simplified());
  if(!font||(!nativeGpu&&!texture))throw std::runtime_error("Font/texture initialization failed");
  kfont_set_antialias(font,4);
  kfont_set_style(font,2,0x302020);
+ if(ui.simplified()){
+  const auto data=assets.read("localization/zh-cn/arshanghaisonggbpro_lt.otf");
+  localizedFont.reset(kfont_open_memory(data.data(),data.size(),1));
+  if(!localizedFont)throw std::runtime_error("Chinese story font initialization failed");
+  kfont_set_antialias(localizedFont.get(),4);
+  kfont_set_style(localizedFont.get(),2,0x302020);
+ }
  std::filesystem::create_directories(saveDir);
  {
-  std::istringstream values(qlie::cp932(assets.read("avg/setting.txt")));std::string line;
+  std::istringstream values(assets.text("avg/setting.txt"));std::string line;
   while(std::getline(values,line)){auto pos=line.find('=');if(pos!=line.npos&&whj2::trim(line.substr(0,pos))=="SaveThumPriority")saveThumbnailPriority=std::stoi(whj2::trim(line.substr(pos+1)));}
  }
  audio=std::make_unique<whj2::Audio>();
@@ -262,7 +279,7 @@ struct Frontend {
  gameMenu.prepareHistory();
  gameMenu.preparePanels();
  whj2::MessageText preview(assets);
- preview.start("[spd,0]「サンプルテキスト」");
+ preview.start(ui.text("[spd,0]「サンプルテキスト」"));
  gameMenu.setWindowPreview(preview.render(font,{400,50,20,20,0xffffff}));
  transition=std::make_unique<whj2::SceneTransition>(assets);
  transition->setReadAhead(readAhead.get());
@@ -276,17 +293,17 @@ struct Frontend {
 #endif
  voices=std::make_unique<whj2::VoiceResolver>(assets);
  upperMenu=std::make_unique<whj2::UpperMenu>(assets);
- title=std::make_unique<whj2::TitleScreen>(assets);
+ title=std::make_unique<whj2::TitleScreen>(assets,game_profile::title);
  choiceScreen=std::make_unique<whj2::ChoiceScreen>(assets);
  musicScreen=std::make_unique<whj2::MusicScreen>(assets,*audio,settings,font);
  replayScreen=std::make_unique<whj2::ReplayScreen>(assets,progress);
- cgScreen=std::make_unique<whj2::CgScreen>(assets,progress,font);
+ cgScreen=std::make_unique<whj2::CgScreen>(assets,progress,font,game_profile::extendedCgRoots);
  cgScreen->setReadAhead(readAhead.get());
  if(std::filesystem::exists(saveDir+"/system.progress"))progress.restore(qlie::file(saveDir+"/system.progress"));
  if(std::filesystem::exists(saveDir+"/settings.cfg"))settings.restore(qlie::file(saveDir+"/settings.cfg"));
  applySettings(false);
  prepareExtras();
- for(auto type:{"music","sound"}){std::istringstream in(qlie::cp932(assets.read(std::string("avg/imoscripter_template_")+type+".txt")));
+ for(auto type:{"music","sound"}){std::istringstream in(assets.text(std::string("avg/imoscripter_template_")+type+".txt"));
  std::string l;
  while(std::getline(in,l)){auto p=l.find(61);
  if(p!=l.npos)audioTemplates[type][whj2::trim(l.substr(0,p))]=whj2::trim(l.substr(p+1));
@@ -294,8 +311,8 @@ struct Frontend {
  if(readAhead){
   movie->setReadAhead(readAhead.get());
   movie->warmFile("script/makerlogo/omegastar.ogv");
-  preparedTitleAlternate=title->prepareOpening(readAhead.get());
-  audio->warmFile(assets,"music/wbgm06.ogg");
+  preparedTitleAlternate=title->prepareOpening(readAhead.get(),progress.extras());
+  audio->warmFile(assets,game_profile::titleMusic);
  }
  opening=1;images->command("^ui_caution,file:script/caution/caution.b,x:0,y:0");
  QLIE_LOG_LINE(<<"OPENING caution\n");
@@ -361,7 +378,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    }else if(cmd=="^sentence"){
     try{for(const auto&path:transition->ruleAssets(line))add(path,Kind::Rule);}
     catch(const std::exception&){/* The live command reports invalid rules. */}
-   }else if(cmd=="^music01"||cmd=="^se01"||cmd=="^se02"){
+   }else if(!cmd.empty()&&audioTrack(cmd.substr(1))>=0){
     for(auto&part:whj2::split(line.substr(comma+1),','))if(part.rfind("file:",0)==0){
      auto name=part.substr(5);if(name.empty()||name=="none"||name.find('$')!=name.npos)continue;
      auto path=std::string(cmd=="^music01"?"music/":"se/")+name;if(!assets.inPack(path))path+=".ogg";
@@ -394,7 +411,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  void showTitle(){cancelPendingScene();menuFade.reset();titleStarting=false;titleStartElapsed=0;transition->reset();normalSkip=false;currentPageKey.clear();extrasExit.reset();cgScreen->close();replayActive=false;replayScreen->close();if(musicScreen->visible())musicScreen->close();opening=0;images->clear();syncProgress();prepareExtras();menu=true;hidden=false;focus=0;upperMenu->close();gameMenu.close();
   const bool alternate=preparedTitleAlternate?*preparedTitleAlternate:title->rollAlternate();
   preparedTitleAlternate.reset();
-  title->reset(alternate,progress.extras());audio->stopAll();audio->playFile(assets,0,"music/wbgm06.ogg",true,255.f/256,0,0);warmNextScene(true);
+  title->reset(alternate,progress.extras());audio->stopAll();audio->playFile(assets,0,game_profile::titleMusic,true,255.f/256,0,0);warmNextScene(true);
  }
  void invalidateHistoryRows(){historyRows={};historyViewOffset=-1;}
  void replaceHistory(std::vector<whj2::HistoryEntry> entries={}){
@@ -403,22 +420,43 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }
  void applySettings(bool persist=true){
  audio->setUserGains(settings.gains());images->setWindowAlpha(unsigned(settings.get("WindowAlpha")));messageText->setSpeed(settings.get("TextSpeed"));if(!text.empty())refreshMessage();if(persist)qlie::write_file(saveDir+"/settings.cfg",settings.save());gameMenu.settingsDirty=false;}
- void drawGlyph(uint32_t cp,int x,int y,unsigned width,unsigned height,uint32_t color,whj2::RenderQueue*queue=nullptr){
- if(!frameTarget&&!queue){kfont_draw(font,newImage(),cp,x,y,width,height,color);return;}
- auto key=std::make_tuple(cp,width,height,color);auto at=uiGlyphs.find(key);
- if(at==uiGlyphs.end()){CachedGlyph glyph;if(kfont_glyph_bounds(font,cp,width,height,&glyph.bounds))return;auto&b=glyph.bounds;glyph.image={b.width,b.height,qlie::Bytes(size_t(b.width)*b.height*4)};if(b.width&&b.height){KImage dst{0,0,b.width,b.height,size_t(b.width)*4,glyph.image.pixels.data()};kfont_draw(font,&dst,cp,-b.left,-b.top,width,height,color);}glyph.image.version.publish();at=uiGlyphs.emplace(key,std::move(glyph)).first;}
+ void drawDialogueSpeaker(){
+  if(images->messageVisible()){
+   const auto style=images->speakerStyle();
+   line(whj2::messageDisplayName(name),style.x,style.y,style.size,style.color,nullptr,GlyphFace::Dialogue);
+  }
+ }
+ void drawGlyph(uint32_t cp,int x,int y,unsigned width,unsigned height,uint32_t color,
+                 whj2::RenderQueue*queue=nullptr,GlyphFace face=GlyphFace::Interface){
+ auto* selected=face==GlyphFace::Dialogue?storyFont():font;
+ if(!frameTarget&&!queue){kfont_draw(selected,newImage(),cp,x,y,width,height,color);return;}
+ auto key=std::make_tuple(selected!=font,cp,width,height,color);
+ auto at=uiGlyphs.find(key);
+ if(at==uiGlyphs.end()){
+  CachedGlyph glyph;
+  if(kfont_glyph_bounds(selected,cp,width,height,&glyph.bounds))return;
+  auto& b=glyph.bounds;
+  glyph.image={b.width,b.height,qlie::Bytes(size_t(b.width)*b.height*4)};
+  if(b.width&&b.height){
+   KImage dst{0,0,b.width,b.height,size_t(b.width)*4,glyph.image.pixels.data()};
+   kfont_draw(selected,&dst,cp,-b.left,-b.top,width,height,color);
+  }
+  glyph.image.version.publish();
+  at=uiGlyphs.emplace(key,std::move(glyph)).first;
+ }
  auto&glyph=at->second;x+=glyph.bounds.left;y+=glyph.bounds.top;
  if(queue)queue->image(glyph.image,whj2::Affine2D{1,0,0,1,float(x),float(y)},0,255,0,0xffffff);
  else frameTarget->font(glyph.image,x,y);
  }
- void line(const std::string&s,int x,int y,int size=26,uint32_t color=0xffffff,whj2::RenderQueue*queue=nullptr){
+ void line(const std::string&s,int x,int y,int size=26,uint32_t color=0xffffff,
+           whj2::RenderQueue*queue=nullptr,GlyphFace face=GlyphFace::Interface){
  int start=x;
  for(auto cp:utf8(s)){int width=cp<128?size/2:size;
  if(cp==10||x+width>1230){x=start;
  y+=size+10;
  if(cp==10)continue;
  }if(y+size>710)break;
- drawGlyph(cp,x,y,width,size,color,queue);
+ drawGlyph(cp,x,y,width,size,color,queue,face);
  x+=width;
  }}
  std::string expandAudio(std::string s,const std::string&type){std::vector<std::pair<std::string,std::string>>values(audioTemplates[type].begin(),audioTemplates[type].end());
@@ -433,8 +471,10 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }
  bool audioCommand(const std::string&line){auto p=line.find(44);
  std::string cmd=line.substr(1,p-1);
- if(cmd!="music01"&&cmd!="se01"&&cmd!="se02")return false;
- unsigned ch=cmd=="music01"?0:cmd=="se01"?1:2;
+ const auto ch=audioTrack(cmd);
+ if(ch<0)return false;
+ constexpr unsigned channels[]={0,1,2,whj2::Audio::StoryEffect3Channel,whj2::Audio::StoryBgvChannel};
+ const auto output=channels[ch];
  std::string type=ch==0?"music":"sound";
  auto tokens=whj2::split(expandAudio(p==line.npos?"":line.substr(p+1),type),44);
  std::map<std::string,std::string>attrs;
@@ -450,28 +490,38 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   attrs["time"]=std::to_string(defaultMusicFadeMs);
   attrs["voltype"]="bgm";
  }else attrs[std::move(key)]=std::move(value);
- }for(auto&v:attrs)if(v.first!="file"&&v.first!="loop"&&v.first!="vol"&&v.first!="voltype"&&v.first!="time"&&v.first!="clear")throw std::runtime_error("Unsupported audio property "+v.first);
+ }
+ for(auto&v:attrs){
+  if(v.first=="file"||v.first=="loop"||v.first=="vol"||v.first=="voltype"||v.first=="time"||
+     v.first=="clear"||v.first=="oncetime")continue;
+  if(game_profile::storyAudioTracks>3){
+   if(v.first=="pan"&&v.second=="50")continue;
+   if(v.first=="delay"&&v.second=="0")continue;
+   if(v.first=="id"||v.first=="mode")continue;
+  }
+  throw std::runtime_error("Unsupported audio property "+v.first);
+ }
  // Imo_Sound_Refresh_Main resets per-file playback properties before overrides.
  if(ch!=0&&(attrs.count("file")||(attrs.count("clear")&&attrs["clear"]=="def"))){
   loops[ch]=false;volumes[ch]=1;audioTimes[ch]=0;
-  if(attrs.count("clear"))audioTypes[ch]=2;
+  if(attrs.count("clear"))audioTypes[ch]=cmd=="sebgv"?1:2;
  }
- if(attrs.count("clear")){audio->volume(ch,0,0,true);if(ch==0)audio->volume(whj2::Audio::MusicPreviousChannel,0,0,true);
+ if(attrs.count("clear")){audio->volume(output,0,0,true);if(ch==0)audio->volume(whj2::Audio::MusicPreviousChannel,0,0,true);
  return true;
- }if(attrs.count("loop"))loops[ch]=attrs["loop"]=="true";
- if(attrs.count("vol"))volumes[ch]=std::stof(attrs["vol"])/100.f*(ch==0?0.4f:1.f);
+ }if(attrs.count("loop"))loops[ch]=attrs["loop"]=="true"||attrs["loop"]=="infinity";
+ if(attrs.count("vol"))volumes[ch]=std::stof(attrs["vol"])/100.f*(ch==0?game_profile::storyMusicGain:1.f);
  if(attrs.count("time"))audioTimes[ch]=unsigned(std::stoul(attrs["time"]));
  if(attrs.count("voltype")){auto type=attrs["voltype"];if(type=="bgm")audioTypes[ch]=0;else if(type=="voice")audioTypes[ch]=1;else if(type=="se")audioTypes[ch]=2;else QLIE_LOG_LINE(<<"PENDING audio volume type "<<type<<"\n");}
- unsigned ms=audioTimes[ch];
+ const unsigned ms=attrs.count("oncetime")?unsigned(std::stoul(attrs["oncetime"])):audioTimes[ch];
  if(attrs.count("file")){auto f=attrs["file"];
- if(f=="none"){if(ch==0)audio->stopMusic(ms,audioTypes[ch]);else audio->volume(ch,0,ms,true);
+ if(f=="none"){if(ch==0)audio->stopMusic(ms,audioTypes[ch]);else audio->volume(output,0,ms,true);
  return true;
- }if(ch!=0&&normalSkip&&!loops[ch]){audio->stop(ch);return true;}
+ }if(ch!=0&&normalSkip&&!loops[ch]){audio->stop(output);return true;}
  std::string path=(ch==0?"music/":"se/")+f;
  if(!assets.exists(path))path+=".ogg";
- if(ch==0)audio->playMusicFile(assets,path,loops[ch],volumes[ch],ms,audioTypes[ch],attrs.count("time")!=0);
- else audio->playFile(assets,ch,path,loops[ch],volumes[ch],ms,audioTypes[ch]);
- }else audio->volume(ch,volumes[ch],ms);
+ if(ch==0)audio->playMusicFile(assets,path,loops[ch],volumes[ch],ms,audioTypes[ch],attrs.count("time")||attrs.count("oncetime"));
+ else audio->playFile(assets,output,path,loops[ch],volumes[ch],ms,audioTypes[ch]);
+ }else audio->volume(output,volumes[ch],ms);
  return true;
  }
  void playSceneSounds(){
@@ -493,7 +543,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }
  void refreshMessage(bool show=false){
   const auto started=qlie::diagnostics?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
-  images->setMessageImage(messageText->renderIncremental(font,images->messageStyle(),messageSurface),show);
+  images->setMessageImage(messageText->renderIncremental(storyFont(),images->messageStyle(),messageSurface),show);
   lastMessageVisible=messageText->visible();
   if constexpr (qlie::diagnostics){
    const auto elapsed=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
@@ -573,8 +623,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  auto e=pendingScene?std::move(*pendingScene):story.next();
  pendingScene.reset();pendingSceneAssets.clear();
  syncProgress();
- if(e.type=="choice"){normalSkip=false;sentenceWait.cancel();transition->present();focus=0;choiceScreen->show(story.state.choices,font);
- text=body.empty()?"選択してください":body;
+ if(e.type=="choice"){normalSkip=false;sentenceWait.cancel();transition->present();focus=0;choiceScreen->show(story.state.choices,storyFont());
+ text=body.empty()?ui.text("選択してください"):body;
  messageText->start(text);messageText->reveal();refreshMessage(true);
  name=speaker;
  images->selectFace(speaker,voiceId);
@@ -605,7 +655,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  return;
  }if(e.type=="finish"||e.type=="finished"){if(replayActive){openReplay(replayPage);return;}showTitle();
  text="";
- status="物語の終了地点に到達しました。";
+ status=ui.text("物語の終了地点に到達しました。");
  return;
  }if(e.type=="text"){
   if(e.value.rfind("【",0)==0){speaker=e.value;
@@ -623,7 +673,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  name="";
  return;
  }if(e.type=="command"&&e.value.rfind("^sentence",0)==0){
-  whj2::profile::applySentenceTiming(e);
+  game_profile::applySentenceTiming(e);
   std::vector<std::string> rules;
   for(const auto&path:transition->ruleAssets(e.value)){
    transition->warmRule(path,true);
@@ -732,8 +782,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    if(story.state.awaiting)output.write(".choice",choiceScreen->save());
    output.write(".audio",audio->save());
    whj2::StateWriter mixer;
-   mixer.str("WHJ2-mixer-2");
-   for(unsigned i=0;i<3;i++){
+   mixer.str(game_profile::mixerSignature);
+   for(unsigned i=0;i<game_profile::storyAudioTracks;++i){
     mixer.f(volumes[i]);
     mixer.n(loops[i]);
     mixer.n(audioTimes[i]);
@@ -744,13 +794,13 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    output.write(".story",story.save());
    output.publish();
   }catch(const std::exception&e){
-   status="保存できませんでした。";
+   status=ui.text("保存できませんでした。");
    QLIE_LOGF("SAVE slot %u failed: %s\n",slot,e.what());
    return false;
   }
   slotPreviews.erase(slot);
   if(slot<AutoSaveBase){latestManualSlot=slot;manualSlotsScanned=true;}
-  status="現在の状態を保存しました。";
+  status=ui.text("現在の状態を保存しました。");
   return true;
  }
  void refreshSlotFlags(){using UI=whj2::GameMenu;if(gameMenu.panel!=UI::Save&&gameMenu.panel!=UI::Load)return;for(unsigned i=0;i<8;i++)gameMenu.populatedSlots[i]=slotPreview(unsigned(gameMenu.page)*8+i+1).exists;if(!gameMenu.asking&&gameMenu.focus>=8&&!gameMenu.populatedSlots[unsigned(gameMenu.focus)%8])gameMenu.focus%=8;}
@@ -760,9 +810,9 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   try{
    std::filesystem::remove(slotPrefix(slot)+".story");removed=true;
    for(auto ext:{".text",".name",".images",".transition",".flow",".message",".auto",".choice",".audio",".mixer",".history",".thumbnail"})std::filesystem::remove(slotPrefix(slot)+ext);
-   status="データを削除しました。";
-  }catch(const std::exception&e){QLIE_LOG_LINE(<<"DELETE FAIL "<<e.what()<<"\n");status=removed?"データを削除しましたが、一部のファイルが残っています。":"削除できませんでした。";}
-  try{whj2::commitSavePath(saveDir+"/");}catch(const std::exception&e){QLIE_LOG_LINE(<<"DELETE COMMIT FAIL "<<e.what()<<"\n");status="削除結果を保存できませんでした。";}
+   status=ui.text("データを削除しました。");
+  }catch(const std::exception&e){QLIE_LOG_LINE(<<"DELETE FAIL "<<e.what()<<"\n");status=removed?ui.text("データを削除しましたが、一部のファイルが残っています。"):ui.text("削除できませんでした。");}
+  try{whj2::commitSavePath(saveDir+"/");}catch(const std::exception&e){QLIE_LOG_LINE(<<"DELETE COMMIT FAIL "<<e.what()<<"\n");status=ui.text("削除結果を保存できませんでした。");}
   slotPreviews.erase(slot);if(latestManualSlot==slot)manualSlotsScanned=false;refreshSlotFlags();
  }
  void autoSaveChoice(){
@@ -787,7 +837,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
     return whj2::Audio::prepareRestore(qlie::file(path),assets);
   },true);
   pendingLoadSlot=slot;
-  status="読み込み中…";
+  status=ui.text("読み込み中…");
  }
  void cancelLoad(){
   readAhead->discard(loadSceneKey);
@@ -806,7 +856,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   }catch(const std::exception&e){
    cancelLoad();
    if(scene)readAhead->retire(std::move(scene));
-   status=preparingScene?"画面データを読み込めませんでした。":"音声データを読み込めませんでした。";
+   status=preparingScene?ui.text("画面データを読み込めませんでした。"):ui.text("音声データを読み込めませんでした。");
    QLIE_LOGF("LOAD %s restore failed: %s\n",preparingScene?"scene":"audio",e.what());
    return;
   }
@@ -821,9 +871,9 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  struct SavedSlotState {
   whj2::StoryState story;
   std::string text,name,body,speaker,voice,page;
-  std::array<float,3> volumes;
-  std::array<bool,3> loops;
-  std::array<unsigned,3> times,types;
+  std::array<float,5> volumes{};
+  std::array<bool,5> loops{};
+  std::array<unsigned,5> times{},types{};
   whj2::SentenceWait wait;
   whj2::AutoPlay autoPlay;
   std::unique_ptr<whj2::MessageText> message;
@@ -841,12 +891,13 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   const auto mixerBytes=qlie::file(path+".mixer");
   whj2::StateReader mixer{mixerBytes};
   const auto mixerVersion=mixer.str();
-  if(mixerVersion!="WHJ2-mixer-1"&&mixerVersion!="WHJ2-mixer-2")throw std::runtime_error("Mixer version");
-  for(unsigned i=0;i<3;i++){
+  const bool legacy=game_profile::storyAudioTracks==3&&mixerVersion=="WHJ2-mixer-1";
+  if(!legacy&&mixerVersion!=game_profile::mixerSignature)throw std::runtime_error("Mixer version");
+  for(unsigned i=0;i<game_profile::storyAudioTracks;++i){
    result.volumes[i]=mixer.f();
    result.loops[i]=mixer.n()!=0;
    result.times[i]=unsigned(mixer.n());
-   result.types[i]=mixerVersion=="WHJ2-mixer-2"?unsigned(mixer.n()):i==0?0:2;
+   result.types[i]=legacy?(i==0?0:2):unsigned(mixer.n());
   }
   mixer.end();
   if(std::filesystem::exists(path+".flow")){
@@ -875,8 +926,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   if(std::filesystem::exists(path+".history"))result.history=whj2::restoreHistory(qlie::file(path+".history"));
   if(result.story.awaiting){
    result.choice=std::make_unique<whj2::ChoiceScreen>(assets);
-   result.choice->show(result.story.choices,font);
-   if(std::filesystem::exists(path+".choice"))result.choice->restore(qlie::file(path+".choice"),font);
+   result.choice->show(result.story.choices,storyFont());
+   if(std::filesystem::exists(path+".choice"))result.choice->restore(qlie::file(path+".choice"),storyFont());
   }
   return result;
  }
@@ -886,7 +937,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   const auto path=slotPrefix(slot);
   SavedSlotState saved;
   try{
-   if(!std::filesystem::exists(path+".story")){status="保存データがありません。";return false;}
+   if(!std::filesystem::exists(path+".story")){status=ui.text("保存データがありません。");return false;}
    saved=readSlotState(path);
    if(!preparedScene){
     preparedScene=std::make_shared<whj2::PreparedSceneRestore>(*images);
@@ -896,7 +947,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   }catch(const std::exception&e){
    if(preparedScene)readAhead->retire(std::move(preparedScene));
    if(preparedAudio)soundReadAhead->retire(std::move(preparedAudio));
-   status="保存データを読み込めませんでした。";
+   status=ui.text("保存データを読み込めませんでした。");
    QLIE_LOGF("LOAD slot %u restore failed: %s\n",slot,e.what());
    return false;
   }
@@ -936,14 +987,15 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    focus=choiceScreen->selection();
   }
   warmNextScene();
-  status="静止画・音声位置を含む状態を読み込みました。";
+  status=ui.text("静止画・音声位置を含む状態を読み込みました。");
   return true;
  }
  void finishTitleStart(){titleStarting=false;audio->stopAll();transition->reset();replaceHistory();autoPlay.enabled=false;story.start();progress.apply(story);menu=false;name="";focus=0;QLIE_LOG_LINE(<<"TITLE START complete elapsed_ms="<<titleStartElapsed<<"\n");next();}
  void beginTitleStart(){
   qlie::Bytes captured(1280*720*4,0);for(size_t i=3;i<captured.size();i+=4)captured[i]=255;
-  title->draw(captured);transition->reset();transition->command("^sentence,fade:rule:2000:雲.png:4",captured);transition->present();
-  titleStarting=true;titleStartElapsed=0;audio->volume(0,0,2000);QLIE_LOG_LINE(<<"TITLE START cloud_ms=2000 wait_ms=2500 rule=fade/雲.png\n");
+  title->draw(captured);transition->reset();transition->command(game_profile::titleStartFade,captured);transition->present();
+  titleStarting=true;titleStartElapsed=0;audio->volume(0,0,game_profile::titleMusicFade);
+  QLIE_LOG_LINE(<<"TITLE START wait_ms="<<game_profile::titleStartWait<<'\n');
   if(skipTitleExitForTest)finishTitleStart();
  }
  void activate(){if(titleStarting){finishTitleStart();return;}if(normalSkip){normalSkip=false;return;}if(opening){if(opening==1)makerLogo();else {movie->stop();showTitle();}return;}if(!menu&&hidden){hidden=false;return;}if(movie->playing()){movie->stop();
@@ -1010,10 +1062,10 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   gameMenu.beginClose();return;
  }
  if(action==UI::Quit||action==UI::Title||action==UI::ResetSettings){gameMenu.ask(action);return;}
- if(action==UI::DeleteSlot){selectedSlot=unsigned(gameMenu.slot());if(std::filesystem::exists(slotPrefix(selectedSlot)+".story"))gameMenu.ask(UI::DeleteSlot);else status="保存データがありません。";return;}
+ if(action==UI::DeleteSlot){selectedSlot=unsigned(gameMenu.slot());if(std::filesystem::exists(slotPrefix(selectedSlot)+".story"))gameMenu.ask(UI::DeleteSlot);else status=ui.text("保存データがありません。");return;}
  if(action==UI::Slot){selectedSlot=unsigned(gameMenu.slot());
  if(gameMenu.panel==UI::Save){if(std::filesystem::exists(slotPrefix(selectedSlot)+".story")){gameMenu.ask(UI::Slot);return;}save(selectedSlot);}
- else if(gameMenu.panel==UI::Load){auto&preview=slotPreview(selectedSlot);if(!preview.exists)status="保存データがありません。";else if(preview.damaged)status="保存データが不完全です。削除または上書きしてください。";else gameMenu.ask(UI::Slot);}
+ else if(gameMenu.panel==UI::Load){auto&preview=slotPreview(selectedSlot);if(!preview.exists)status=ui.text("保存データがありません。");else if(preview.damaged)status=ui.text("保存データが不完全です。削除または上書きしてください。");else gameMenu.ask(UI::Slot);}
  }
  }
  void changeSlotPage(int page,int focus){
@@ -1069,9 +1121,9 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   else if(replayScreen->visible())replayScreen->draw(target,transform);
   else musicScreen->draw(target,transform);
  }
- void openCg(){extrasElapsed=0;cgScreen->open();menu=true;audio->stopAll();audio->playFile(assets,0,"music/wbgm08.ogg",true,255.f/256,0,0);}
+ void openCg(){extrasElapsed=0;cgScreen->open();menu=true;audio->stopAll();audio->playFile(assets,0,game_profile::cgMusic,true,255.f/256,0,0);}
  void openMusic(){extrasElapsed=0;musicScreen->open();}
- void openReplay(unsigned page=0){cancelPendingScene();normalSkip=false;currentPageKey.clear();replayActive=false;menu=true;hidden=false;gameMenu.close();upperMenu->close();images->clear();transition->reset();sentenceWait=whj2::SentenceWait{};replaceHistory();text.clear();name.clear();pendingBody.clear();pendingSpeaker.clear();pendingVoice.clear();autoPlay.enabled=false;messageText->start("");audio->stopAll();extrasElapsed=0;replayScreen->open(page);audio->playFile(assets,0,"music/wbgm16.ogg",true,255.f/256,0,0);}
+ void openReplay(unsigned page=0){cancelPendingScene();normalSkip=false;currentPageKey.clear();replayActive=false;menu=true;hidden=false;gameMenu.close();upperMenu->close();images->clear();transition->reset();sentenceWait=whj2::SentenceWait{};replaceHistory();text.clear();name.clear();pendingBody.clear();pendingSpeaker.clear();pendingVoice.clear();autoPlay.enabled=false;messageText->start("");audio->stopAll();extrasElapsed=0;replayScreen->open(page);audio->playFile(assets,0,game_profile::replayMusic,true,255.f/256,0,0);}
  void cgAction(whj2::CgScreen::Action action){
   using CG=whj2::CgScreen;
   if(action==CG::None)return;
@@ -1109,7 +1161,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   else if(musicScreen->visible())musicScreen->close();
   switch(exit.destination){
   case ExtrasDestination::Title:
-   title->returnToExtras(exit.alternateBackdrop);audio->playFile(assets,0,"music/wbgm06.ogg",true,255.f/256,0,0);break;
+   title->returnToExtras(exit.alternateBackdrop);audio->playFile(assets,0,game_profile::titleMusic,true,255.f/256,0,0);break;
   case ExtrasDestination::CG:openCg();break;
   case ExtrasDestination::Music:openMusic();break;
   case ExtrasDestination::Replay:openReplay();break;
@@ -1131,7 +1183,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    if(!preview.damaged){if(std::filesystem::exists(slotPrefix(slot)+".thumbnail")){preview.thumbnail={160,90,qlie::file(slotPrefix(slot)+".thumbnail")};if(preview.thumbnail.pixels.size()!=160*90*4)throw std::runtime_error("Thumbnail size");preview.thumbnail.version.publish();}auto content=qlie::file(slotPrefix(slot)+".text");preview.excerpt=utf8(std::string(content.begin(),content.end()));}
   }
  }catch(const std::exception&e){QLIE_LOG_LINE(<<"SAVE PREVIEW FAIL slot="<<slot<<" "<<e.what()<<"\n");preview.exists=true;preview.damaged=true;}
- if(preview.damaged){preview.thumbnail={};preview.excerpt=utf8("保存データが不完全です");}
+ if(preview.damaged){preview.thumbnail={};preview.excerpt=utf8(ui.text("保存データが不完全です"));}
  return slotPreviews.emplace(slot,std::move(preview)).first->second;
  }
  void drawPanel(){if constexpr (qlie::diagnostics) ++panelDraws;using UI=whj2::GameMenu;
@@ -1189,14 +1241,14 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }
  refreshSlotFlags();
  submit([&](whj2::RenderQueue&queue){
-  if(gameMenu.asking){auto prompt=gameMenu.requested==UI::Quit?"ゲームを終了しますか？":gameMenu.requested==UI::Title?"タイトルに戻りますか？":gameMenu.requested==UI::ResetSettings?"設定を初期状態に戻しますか？":gameMenu.requested==UI::DeleteSlot?"データを削除しますか？":gameMenu.panel==UI::Load?"データをロードしますか？":"データを上書き保存しますか？";line(prompt,440,275,28,0xffffff,&queue);return;}
-  if(gameMenu.panel==UI::Settings&&gameMenu.allowSceneReturn)line("回想を終了",520,680,26,gameMenu.focus==16?0xffff88:0xffffff,&queue);
+  if(gameMenu.asking){auto prompt=gameMenu.requested==UI::Quit?ui.text("ゲームを終了しますか？"):gameMenu.requested==UI::Title?ui.text("タイトルに戻りますか？"):gameMenu.requested==UI::ResetSettings?ui.text("設定を初期状態に戻しますか？"):gameMenu.requested==UI::DeleteSlot?ui.text("データを削除しますか？"):gameMenu.panel==UI::Load?ui.text("データをロードしますか？"):ui.text("データを上書き保存しますか？");line(prompt,440,275,28,0xffffff,&queue);return;}
+  if(gameMenu.panel==UI::Settings&&gameMenu.allowSceneReturn)line(ui.text("回想を終了"),520,680,26,gameMenu.focus==16?0xffff88:0xffffff,&queue);
   if(gameMenu.panel==UI::Save||gameMenu.panel==UI::Load)for(int i=0;i<8;i++){
    unsigned slot=unsigned(gameMenu.page*8+i+1);
    int x=i<4?198:834,y=136+(i%4)*135;
    line("No."+std::to_string(slot),x,y,16,0xff5555,&queue);
    const auto&preview=slotPreview(slot);
-   if(!preview.exists){line("NO DATA",x,y+24,18,0x999999,&queue);continue;}
+   if(!preview.exists){line(ui.text("NO DATA"),x,y+24,18,0x999999,&queue);continue;}
    if(!preview.thumbnail.pixels.empty())
     queue.image(preview.thumbnail,whj2::imagePlacement(i<4?27:660,137+(i%4)*135,1,1,0,0,0,160,90),0,255,0,0xffffff);
    int px=x;
@@ -1238,7 +1290,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   else{
    images->drawScene(*frameTarget,true);transition->blend(*frameTarget);
    if(!hidden&&gameMenu.panel!=whj2::GameMenu::History){
-    images->drawMessages(*frameTarget);if(images->messageVisible())line(whj2::messageDisplayName(name),200,570,26,0xffffff);
+    images->drawMessages(*frameTarget);drawDialogueSpeaker();
     if(messageCursorMotion!="None")messageCursor->draw(*frameTarget);
     if(story.state.awaiting)choiceScreen->draw(*frameTarget);
     images->drawFaces(*frameTarget);if(images->messageVisible()){gameMenu.drawAutoButton(*frameTarget,autoPlay.enabled);gameMenu.drawSkipButton(*frameTarget,normalSkip);}
@@ -1291,7 +1343,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    title->draw(pixels);
   }
  }else if(!hidden&&gameMenu.panel!=whj2::GameMenu::History){images->drawMessages(pixels);
- if(images->messageVisible())line(whj2::messageDisplayName(name),200,570,26,0xffffff);
+ drawDialogueSpeaker();
  if(messageCursorMotion!="None")messageCursor->draw(pixels);
  if(story.state.awaiting)choiceScreen->draw(pixels);
  }if(!menu&&!hidden&&gameMenu.panel!=whj2::GameMenu::History){images->drawFaces(pixels);if(images->messageVisible()){gameMenu.drawAutoButton(pixels,autoPlay.enabled);gameMenu.drawSkipButton(pixels,normalSkip);}}
@@ -1446,8 +1498,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
 #if defined(__SWITCH__) && QLIE_DIAGNOSTICS
  audio->reportMixerBinding();
 #endif
- if(opening==1){openingElapsed+=double(now-lastUpdate);images->update(double(now-lastUpdate));if(openingElapsed>=4500)makerLogo();}
- if(titleStarting){titleStartElapsed+=double(now-lastUpdate);transition->update(double(now-lastUpdate));if(titleStartElapsed>=2500)finishTitleStart();}
+ if(opening==1){openingElapsed+=double(now-lastUpdate);images->update(double(now-lastUpdate));if(openingElapsed>=game_profile::cautionWait)makerLogo();}
+ if(titleStarting){titleStartElapsed+=double(now-lastUpdate);transition->update(double(now-lastUpdate));if(titleStartElapsed>=game_profile::titleStartWait)finishTitleStart();}
  if(titleViewActive()&&!fingerActive){titlePointer=std::clamp(titlePointer+titleAxis*double(now-lastUpdate)*.6,0.,1280.);title->view(titlePointer);}
  if(extrasVisible())updateExtras(double(now-lastUpdate));
  else if(!opening&&menu&&!titleStarting&&!gameMenu.visible())title->update(double(now-lastUpdate));
@@ -1789,7 +1841,7 @@ controllerKey(e.cbutton.button);
 extern "C" const char qlie_build_revision[]=WHJ2_BUILD_REV;
 int main(int argc,char**argv){
  if constexpr (qlie::diagnostics){
-  const char*logPath=argc<2?std::getenv("WHJ2_LOG"):nullptr;
+  const char*logPath=argc<2?std::getenv(game_profile::logEnv):nullptr;
   if(logPath){
    if(auto*file=std::fopen(logPath,"a")){
     std::fclose(file);
@@ -1801,21 +1853,27 @@ try{whj2::SwitchStorage storage;
 #ifdef __SWITCH__
  fsdevMountSdmc();
 #endif
-std::string game=argc>1?argv[1]:(std::getenv("WHJ2_GAME")?std::getenv("WHJ2_GAME"):"");
+std::string game=argc>1?argv[1]:(std::getenv(game_profile::gameEnv)?std::getenv(game_profile::gameEnv):"");
 #ifdef __SWITCH__
-if(game.empty())game=whj2::profile::sdGame;
+if(game.empty())game=game_profile::sdGame;
 #endif
 if(game.empty()){QLIE_LOG_LINE(<<"usage: qlie-switch-runtime GAME [SAVE_DIR] [--smoke-frames N]\n");
  return 2;
  }unsigned smoke=0;
- std::string saves=argc>2?argv[2]:(std::getenv("WHJ2_SAVES")?std::getenv("WHJ2_SAVES"):"local/saves");
+ std::string saves=argc>2?argv[2]:(std::getenv(game_profile::saveEnv)?std::getenv(game_profile::saveEnv):game_profile::hostSaves);
  if(qlie::diagnostics&&argc>4&&std::string(argv[3])=="--smoke-frames")smoke=unsigned(std::stoul(argv[4]));
 #ifdef __SWITCH__
-if(argc<3)saves=whj2::profile::sdSaves;
+if(argc<3)saves=game_profile::sdSaves;
 #endif
 storage.mount(game,saves);
 #ifdef WHJ2_MAC_GAME_PICKER
-if(!whj2_mac_can_read_game(game.c_str())){char *chosen=whj2_mac_choose_game(game.c_str());if(!chosen)return 0;game=chosen;std::free(chosen);}
+const auto*keyPath=game_profile::archives.fileKey.c_str();
+if(!whj2_mac_can_read_game(game.c_str(),keyPath)){
+ char *chosen=whj2_mac_choose_game(game.c_str(),keyPath);
+ if(!chosen)return 0;
+ game=chosen;
+ std::free(chosen);
+}
 #endif
 QLIE_LOG_LINE(<<"BUILD revision="<<qlie_build_revision<<"\n");
 QLIE_LOG_LINE(<<"INIT game="<<game<<" saves="<<saves<<"\n");

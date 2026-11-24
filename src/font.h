@@ -9,6 +9,8 @@ typedef struct {
 /* A user font path, or platform font (macOS / Switch shared font). */
 KFont *kfont_open(const char *path,int simplified);
 KFont *kfont_open_face(const char *path,unsigned face_index,int simplified);
+/* Copies font bytes owned by an optional resource patch; no temporary file. */
+KFont *kfont_open_memory(const uint8_t *data,size_t size,int simplified);
 /* Returns the number of faces, or -1 on error; label is family and style. */
 int kfont_face_info(const char *path,unsigned face_index,char *label,size_t capacity);
 void kfont_close(KFont *font);

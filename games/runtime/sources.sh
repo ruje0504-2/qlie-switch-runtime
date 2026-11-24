@@ -1,0 +1,2 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+qlie_scene_sources="games/runtime/scene_images.cpp games/runtime/voice.cpp games/runtime/message_text.cpp games/runtime/scene_transition.cpp games/runtime/upper_menu.cpp games/runtime/game_menu.cpp games/runtime/settings.cpp games/runtime/title_screen.cpp games/runtime/choice_screen.cpp games/runtime/progress.cpp games/runtime/music_screen.cpp games/runtime/replay_catalog.cpp games/runtime/replay_screen.cpp games/runtime/cg_catalog.cpp games/runtime/cg_screen.cpp"

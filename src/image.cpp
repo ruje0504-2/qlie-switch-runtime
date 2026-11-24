@@ -80,14 +80,28 @@ std::vector<Member> abmp(const qlie::Bytes&b){
   if(section!="abimage10"&&section!="absound10")throw std::runtime_error("Unsupported ABMP section "+section);
   unsigned count=r.n(1);
   for(unsigned i=0;i<count;i++){
-   auto type=r.tag();auto name=qlie::cp932(r.data(r.n(2)));
-   if(type!="abimgdat10"&&type!="absnddat10"){
+   auto type=r.tag();
+   std::string name;
+   if(type=="abimgdat15"||type=="absnddat12"){
+    const auto version=r.n(4);
+    if(version!=1&&!(version==2&&type=="abimgdat15"))
+     throw std::runtime_error("Unsupported ABMP member revision "+std::to_string(version));
+    name=qlie::utf16le(r.data(size_t(r.n(2))*2));
+    const auto alternateLength=r.n(2);
+    if(name.empty())name=qlie::cp932(r.data(alternateLength));
+    else r.skip(alternateLength);
+    r.n(1);
+    if(type=="abimgdat15")r.skip(version==2?0x1d:0x11);
+   }else{
+    name=qlie::cp932(r.data(r.n(2)));
+    if(type!="abimgdat10"&&type!="absnddat10"){
     r.skip(r.n(2));
     if(type=="abimgdat13")r.skip(12);
     else if(type=="abimgdat14")r.skip(76);
     else if(type!="abimgdat11"&&type!="abimgdat12"&&type!="absnddat11")throw std::runtime_error("Unsupported ABMP member "+type);
+    }
+    r.n(1);
    }
-   r.n(1);
    add(std::move(type),std::move(name));
   }
  }

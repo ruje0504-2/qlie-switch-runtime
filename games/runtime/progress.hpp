@@ -9,9 +9,12 @@
 #include <thread>
 namespace whj2 {
 class Progress {
+ const char* extrasFlag=nullptr;
  std::array<bool,4> cleared{};
  std::set<std::string> labels,files,readPages;
 public:
+ Progress()=default;
+ explicit Progress(const char*flag):extrasFlag(flag){}
  bool capture(const Story&);
  bool markRead(const std::string&key){return !key.empty()&&readPages.insert(key).second;}
  bool wasRead(const std::string&key)const{return !key.empty()&&readPages.count(key)!=0;}

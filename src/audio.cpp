@@ -255,10 +255,12 @@ qlie::Bytes Audio::save(){StateWriter w;
  };
  const auto queued=std::count_if(pending.begin(),pending.end(),[](const auto&clip){return clip&&!clip->channel.path.empty();});
  w.str(queued?"WHJ2-audio-4":"WHJ2-audio-3");
- w.n(channels.size());
  // Keep the audible tracks and their cursors, even while a replacement is queued.
  SDL_LockAudioDevice(device);
- for(const auto&channel:channels)writeChannel(channel);
+ size_t count=channels.size();
+ while(count>StoryEffect3Channel&&channels[count-1].path.empty()&&!pending[count-1])--count;
+ w.n(count);
+ for(size_t i=0;i<count;++i)writeChannel(channels[i]);
  SDL_UnlockAudioDevice(device);
  if(queued){
   w.n(queued);

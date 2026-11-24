@@ -6,7 +6,7 @@
 namespace whj2 {
 VoiceResolver::VoiceResolver(qlie::Assets&a):assets(a){
  for(auto name:{"avg/setting.txt","avg/projectsetting.txt"}){
-  std::istringstream in(qlie::cp932(assets.read(name)));std::string line;
+  std::istringstream in(assets.text(name));std::string line;
   while(std::getline(in,line)){
    auto p=line.find('=');if(p==line.npos)continue;
    auto key=qlie::canonical(trim(line.substr(0,p))),value=trim(line.substr(p+1));

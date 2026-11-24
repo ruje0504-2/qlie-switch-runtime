@@ -30,6 +30,34 @@ std::string characterImageName(const std::string&name,std::string&prefix){
  if(parts.size()>1)prefix=parts[1];
  return parts[0].find('/')==std::string::npos?prefix+parts[0]:parts[0];
 }
+bool characterPart(const std::string&key){
+ return key.size()==5&&key.compare(0,4,"file")==0&&key.back()>='0'&&key.back()<='7';
+}
+bool collectCharacterParts(std::vector<std::string>&args,std::map<std::string,std::string>&parts){
+ bool changed=false;
+ auto end=std::remove_if(args.begin(),args.end(),[&](const std::string&field){
+  if(field=="clear:def"){parts.clear();changed=false;return false;}
+  const auto sep=field.find(':');
+  if(sep==field.npos||!characterPart(field.substr(0,sep)))return false;
+  parts[field.substr(0,sep)]=field.substr(sep+1);
+  changed=true;
+  return true;
+ });
+ args.erase(end,args.end());
+ return changed;
+}
+std::string characterPartsName(std::map<std::string,std::string>&params){
+ std::string name;
+ bool ended=false;
+ for(unsigned i=0;i<8;++i){
+  auto part=params.find("file"+std::to_string(i));
+  if(part==params.end()){ended=true;continue;}
+  ended=ended||part->second=="none";
+  if(ended)params.erase(part);
+  else name+=part->second;
+ }
+ return name.empty()?"none":name;
+}
 
 // Scene asset and UI-slot owners replace the entire image on change.
 std::shared_ptr<const Image> sceneBitmap(Image pixels){
@@ -195,6 +223,8 @@ struct Composite {
  std::shared_ptr<const qlie::Bytes> video;
  };
  Animation definition;
+ std::array<float,16> externalDefaults{};
+ uint16_t externalDefaultMask=0;
  bool hasVideo=false;
  uint32_t identity=0;std::vector<uint32_t>motionIdentities;
  std::vector<Element>members;
@@ -232,6 +262,24 @@ struct Composite {
    else if(m.type.rfind("absnd",0)==0)sounds.push_back(std::move(m.data));
   }
   if(!metadata)throw std::runtime_error("Composite lacks animation metadata "+name);
+  bool wideKeys=false;
+  for(const auto&motion:definition.motions)
+   for(const auto&layer:motion.layers)wideKeys=wideKeys||layer.version>=21;
+  if(wideKeys){
+   std::istringstream comment(definition.comment);
+   std::string line;
+   while(std::getline(comment,line)){
+    line=trim(std::move(line));
+    if(line.rfind("*value[",0)!=0)continue;
+    const auto end=line.find("]=",7);
+    if(end==line.npos||end+2==line.size())continue;
+    const auto index=std::stoul(line.substr(7,end-7));
+    if(index<externalDefaults.size()){
+     externalDefaults[index]=numeric(line.substr(end+2));
+     externalDefaultMask|=uint16_t(1u<<index);
+    }
+   }
+  }
   for(auto&motion:definition.motions)for(auto&layer:motion.layers){if(layer.mode>2)warn("layer-mode="+std::to_string(layer.mode));
  for(auto&k:layer.keys)if(k[4]!=0&&k[4]!=1&&k[4]!=4&&k[4]!=6&&k[4]!=10&&k[4]!=15&&k[4]!=16&&k[4]!=17&&k[4]!=18&&k[4]!=20)warn("primitive="+std::to_string(k[4]));
  }
@@ -267,7 +315,9 @@ struct Composite {
   std::vector<PreparedEmbeddedOpening::Source> sources;
   if(definition.motions.empty())return sources;
   const auto&motion=definition.motions.front();
-  const auto keys=sampleMotion(motion,0,1280,720,false);
+  AnimationContext context;
+  context.external=externalDefaults;context.externalMask=externalDefaultMask;
+  const auto keys=sampleMotion(motion,0,1280,720,false,context);
   for(size_t layer=0;layer<keys.size();++layer){
    const auto&key=keys[layer];
    if(!motion.layers[layer].flags||key.kind!=4||key.alpha<=0||key.resource>=members.size())continue;
@@ -290,7 +340,12 @@ struct Composite {
   auto randomSeed=0x35246u^identity^motionIdentities[size_t(motion-&definition.motions[0])];
   randomSeed=((randomSeed&0xffff)*(randomSeed>>16))&1023;
   AnimationContext context{unsigned(definition.bounds[0]),unsigned(definition.bounds[1]),1280,720,randomSeed};
-  if(external){context.external=external->external;context.externalMask=external->externalMask;context.randomCursor=external->randomCursor;}
+  context.external=externalDefaults;context.externalMask=externalDefaultMask;
+  if(external){
+   for(unsigned i=0;i<context.external.size();++i)
+    if(external->externalMask&(1u<<i))context.external[i]=external->external[i];
+   context.externalMask|=external->externalMask;context.randomCursor=external->randomCursor;
+  }
   auto samples=sampleMotion(*motion,ms,1280,720,false,context);
   for(size_t index=0;index<samples.size();index++){
  auto&k=samples[index];if(filterOverride)k.textureFilter=filterOverride;
@@ -522,13 +577,25 @@ std::vector<std::string> SceneImages::warmPaths(const std::string&line,Character
  std::vector<std::string> result;auto comma=line.find(',');if(comma==line.npos)return result;
  auto cmd=line.substr(1,comma-1);
  bool chara=cmd.rfind("chara",0)==0,face=cmd=="face",message=cmd=="message";
- if(!chara&&!face&&!message&&cmd.rfind("bg",0)!=0&&cmd.rfind("effect",0)!=0)return result;
+ if(!chara&&!face&&!message&&cmd.rfind("bg",0)!=0&&cmd.rfind("effect",0)!=0&&!imageObjects.count(cmd))return result;
  auto layer=layers.find(cmd);
+ const bool multipart=splitCharacters.count(cmd)!=0;
  std::string stem=chara&&layer!=layers.end()?layer->second.prefix:"";
- if(chara&&future){auto saved=future->find(cmd);if(saved!=future->end())stem=saved->second;}
+ if(chara&&future){auto saved=future->simple.find(cmd);if(saved!=future->simple.end())stem=saved->second;}
+ std::map<std::string,std::string> parts;
+ if(multipart){
+  if(future&&future->parts.count(cmd))parts=future->parts.at(cmd);
+  else if(layer!=layers.end()){
+   for(const auto&param:layer->second.params)if(characterPart(param.first))parts.insert(param);
+  }
+ }
  std::string base;
  // An authored template can supply the window, effect or actor's motion file.
- auto args=split(expand(line.substr(comma+1),chara?"chara":face?"face":message?"message":"image"),',');
+ auto args=split(expand(line.substr(comma+1),multipart?"chara8e":chara?"chara":face?"face":message?"message":"image"),',');
+ if(multipart){
+  if(collectCharacterParts(args,parts))args.push_back("file:"+characterPartsName(parts));
+  if(future)future->parts.insert_or_assign(cmd,std::move(parts));
+ }
  for(auto&field:args){
   if(field=="clear:def"){base.clear();if(chara)stem.clear();}
   auto sep=field.find(':');if(sep==field.npos)continue;
@@ -555,15 +622,32 @@ std::vector<std::string> SceneImages::warmPaths(const std::string&line,Character
   if(!assets.inPack(path))path+=".b";
   if(assets.inPack(path)&&needsWarmFile(path,future!=nullptr))result.push_back(std::move(path));
  }
- if(chara&&future)future->insert_or_assign(cmd,std::move(stem));
+ if(chara&&future)future->simple.insert_or_assign(cmd,std::move(stem));
  return result;
 }
-SceneImages::SceneImages(qlie::Assets&a):assets(a),eyecatchFilm(std::make_shared<EyecatchFilm>()){for(auto type:{"image","chara","face","message"}){std::istringstream in(qlie::cp932(a.read(std::string("avg/imoscripter_template_")+type+".txt")));
+SceneImages::SceneImages(qlie::Assets&a):assets(a),eyecatchFilm(std::make_shared<EyecatchFilm>()){
+ if(a.inPack("avg/projectobjects.txt")){
+  std::istringstream objects(a.text("avg/projectobjects.txt"));
+  std::string line;
+  while(std::getline(objects,line)){
+   const auto fields=split(line,',');
+   if(fields.size()<2)continue;
+   if(fields.front()=="chara8e")splitCharacters.insert(fields[1]);
+   if(fields.front()=="image")imageObjects.insert(fields[1]);
+   if(fields.front()=="camera"&&fields[1]=="camera")hasCamera=true;
+   if(fields.front()=="nametext"&&fields[1]=="name")hasNameText=true;
+  }
+ }
+ std::vector<const char*> templateTypes{"image","chara","face","message"};
+ if(!splitCharacters.empty())templateTypes.push_back("chara8e");
+ if(hasCamera)templateTypes.push_back("camera");
+ if(hasNameText)templateTypes.push_back("nametext");
+ for(auto type:templateTypes){std::istringstream in(a.text(std::string("avg/imoscripter_template_")+type+".txt"));
  std::string s;
  while(std::getline(in,s)){auto p=s.find(61);
  if(p!=s.npos)templates[type][trim(s.substr(0,p))]=trim(s.substr(p+1));
  }}
- auto table=[&](const std::string&path){std::map<std::string,std::string> out;std::istringstream in(qlie::cp932(a.read(path)));std::string line;while(std::getline(in,line)){auto pos=line.find('=');if(pos!=line.npos)out[trim(line.substr(0,pos))]=trim(line.substr(pos+1));}return out;};
+ auto table=[&](const std::string&path){std::map<std::string,std::string> out;std::istringstream in(a.text(path));std::string line;while(std::getline(in,line)){auto pos=line.find('=');if(pos!=line.npos)out[trim(line.substr(0,pos))]=trim(line.substr(pos+1));}return out;};
  faceRepId=table("avg/imoscripter_face_repid.txt");faceRepFile=table("avg/imoscripter_face_repfile.txt");auto project=table("avg/projectsetting.txt");
  if(project.count("FaceType"))faceType=unsigned(std::stoul(project.at("FaceType")));
  if(project.count("FaceDefaultFile"))faceDefaultFile=project.at("FaceDefaultFile");
@@ -723,10 +807,68 @@ void SceneImages::update(double ms){for(auto&entry:layers){auto&layer=entry.seco
   if(ms>=1000.0/60)QLIE_LOGF("LOAD video_cleanup_ms=%.3f clips=%zu\n",ms,closed);
  }
 }
+bool SceneImages::cameraCommand(const std::string&arguments){
+ auto&camera=layers["camera"];
+ if(camera.params.empty())camera.params={{"show","false"},{"x","0"},{"y","0"},{"z","0"},
+  {"scalex","100"},{"scaley","100"},{"rotz","0"},{"pri1","-100"},{"pri2","999"},{"move","linear"}};
+ auto before=camera;
+ const char*sourceKeys[]={"ax","ay","az","zoomx","zoomy","rotz"};
+ const char*transformKeys[]={"x","y","z","scalex","scaley","rotz"};
+ auto duration=camera.params["time"];
+ bool moved=false;
+ for(const auto&field:split(expand(arguments,"camera"),',')){
+  const auto colon=field.find(':');
+  if(colon==field.npos)throw std::runtime_error("Unknown camera template "+field);
+  const auto key=field.substr(0,colon),value=field.substr(colon+1);
+  if(key=="genfilter"){
+   camera.milliseconds=0;
+   camera.params["wave_mode"]="none";
+   const auto recipe=value.size()>=2&&value.front()=='"'&&value.back()=='"'?value.substr(1,value.size()-2):value;
+   for(const auto&item:split(recipe,',')){
+    const auto separator=item.find(':');
+    if(separator!=item.npos)camera.params["wave_"+item.substr(0,separator)]=item.substr(separator+1);
+   }
+   continue;
+  }
+  if(key=="time")camera.params[key]=duration=value;
+  if(key=="movetime")duration=value;
+  if(key=="pri1"||key=="pri2"||key=="move"||key=="movepow")camera.params[key]=value;
+  for(unsigned i=0;i<6;++i){
+   if(key==sourceKeys[i]){camera.params[transformKeys[i]]=value;moved=true;}
+   if(key=="b"+std::string(sourceKeys[i])){before.params[transformKeys[i]]=value;before.tweens.erase(transformKeys[i]);moved=true;}
+  }
+ }
+ if(moved){
+  const auto baseTime=camera.params["time"];
+  camera.params["time"]=duration.empty()?"0":duration;
+  transition(camera,before,true,false);
+  camera.params["time"]=baseTime.empty()?"0":baseTime;
+ }
+ return true;
+}
+SpeakerStyle SceneImages::speakerStyle()const{
+ const auto found=layers.find("name");
+ if(found==layers.end())return {};
+ const auto&layer=found->second;
+ return {int(value(layer,"x",200)),int(value(layer,"y",570)),
+         unsigned(value(layer,"fontsizeh",26)),unsigned(value(layer,"fontcolor",0xffffff))};
+}
 bool SceneImages::command(const std::string&line){auto p=line.find(44);
  auto cmd=line.substr(1,p-1);
+ if(p!=line.npos&&hasCamera&&cmd=="camera")return cameraCommand(line.substr(p+1));
+ if(p!=line.npos&&hasNameText&&cmd=="name"){
+  auto&name=layers[cmd];
+  name.params["show"]="false";
+  for(const auto&field:split(expand(line.substr(p+1),"nametext"),',')){
+   const auto colon=field.find(':');
+   if(colon==field.npos)throw std::runtime_error("Unknown name template "+field);
+   name.params[field.substr(0,colon)]=field.substr(colon+1);
+  }
+  return true;
+ }
  bool chara=cmd.rfind("chara",0)==0,face=cmd=="face",message=cmd=="message",ui=cmd.rfind("ui_",0)==0;
- if(!ui&&!chara&&!face&&!message&&cmd.rfind("bg",0)!=0&&cmd!="effect"&&cmd!="env")return false;
+ if(!ui&&!chara&&!face&&!message&&cmd.rfind("bg",0)!=0&&cmd!="effect"&&cmd!="env"&&!imageObjects.count(cmd))return false;
+ const bool multipart=splitCharacters.count(cmd)!=0;
  auto&l=layers[cmd];
  const std::map<std::string,std::string> faceDefaults{{"mode","auto"},{"disp","once"},{"show","false"},{"x","0"},{"y","0"},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri","0"},{"align","left:top"},{"@face-active","false"}};
  // Imo_Image_DefaultParam is merged by clear:def, including animation state.
@@ -756,7 +898,17 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  if(message&&l.params.empty())l.params={{"mode","cls"},{"show","false"},{"x","0"},{"y","720"},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri","1100"},{"align","left:top"},{"textarea","920:300"},{"fontsize","26:26"},{"fontcolor","$FFFFFF"}};
  if(l.params.empty())l.params={{"x",ui?"0":"640"},{"y",ui?"0":chara?"720":"360"},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri",chara?"500":"0"},{"show","true"},{"align",chara?"center:bottom":(ui||cmd=="effect")?"left:top":"center:center"}};
  if(chara){auto motion=l.params.find("motion");if(motion!=l.params.end()&&motion->second!="def"&&motion->second!="0"&&motion->second.find('+')==std::string::npos){motion->second="def";l.milliseconds=0;l.audioMilliseconds=-1;}}
- auto args=split(expand(p==line.npos?"":line.substr(p+1),chara?"chara":face?"face":message?"message":"image"),44);
+ auto args=split(expand(p==line.npos?"":line.substr(p+1),multipart?"chara8e":chara?"chara":face?"face":message?"message":"image"),44);
+ if(multipart){
+  std::map<std::string,std::string> parts;
+  for(const auto&param:l.params)if(characterPart(param.first))parts.insert(param);
+  if(collectCharacterParts(args,parts)){
+   const auto name=characterPartsName(parts);
+   for(unsigned i=0;i<8;++i)l.params.erase("file"+std::to_string(i));
+   args.push_back("file:"+name);
+   for(const auto&part:parts)args.push_back(part.first+":"+part.second);
+  }
+ }
  Layer before=l;bool file=false,baseChanged=false,position=false,color=false,messageShow=false;bool replacementChanged[4]={};
  if(std::any_of(args.begin(),args.end(),[](const std::string&arg){return arg.rfind("file:",0)==0;})){
   l.scriptReplacement.reset();l.params.erase("@replacement");for(unsigned i=0;i<4;i++)l.params.erase("rep"+std::to_string(i));
@@ -765,6 +917,11 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  auto c=s.find(58);
  if(c==s.npos)throw std::runtime_error("Unknown image template "+s);
  auto key=s.substr(0,c),v=s.substr(c+1);
+ if(multipart&&characterPart(key)){
+  if(v=="none")l.params.erase(key);
+  else l.params[key]=v;
+  continue;
+ }
  if(key.size()==4&&key.rfind("rep",0)==0&&key[3]>='0'&&key[3]<='3')replacementChanged[key[3]-'0']=true;
  if(key=="clear"&&v=="def"&&!face&&!ui){
   l=Layer{};
@@ -911,9 +1068,49 @@ void SceneImages::render(qlie::Bytes&out,unsigned pass,RenderTarget*target,float
  if(target)queue.draw(*target,1280,720);else queue.draw(out,1280,720);
 }
 void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool liveVideo)const{
+ const auto priority=[](const Layer&layer){return value(layer,"pri",0)+value(layer,"addpri",0);};
+ const auto camera=layers.find("camera");
+ Affine2D view;
+ float nearPriority=1,farPriority=0,viewZ=0;
+ if(camera!=layers.end()){
+  const auto&layer=camera->second;
+  float x=value(layer,"x",0),y=value(layer,"y",0);
+  viewZ=value(layer,"z",0);
+  const auto mode=layer.params.find("wave_mode");
+  const double waveTime=layer.milliseconds-value(layer,"wave_delay",0);
+  const double waveDuration=value(layer,"wave_time",0);
+  const bool repeat=layer.params.count("wave_infinity")&&layer.params.at("wave_infinity")=="true";
+  if(mode!=layer.params.end()&&mode->second!="none"&&waveTime>=0&&(repeat||waveTime<waveDuration)){
+   const auto phase=waveTime/std::max(1.f,value(layer,"wave_cycle",100));
+   const auto fade=layer.params.find("wave_fade");
+   const auto elapsed=std::clamp(waveTime/std::max(1.,waveDuration),0.,1.);
+   const double envelope=fade==layer.params.end()?1:fade->second=="in"?elapsed:fade->second=="out"?1-elapsed:1;
+   auto amplitude=[&](unsigned axis){
+    if(mode->second=="sin"||mode->second=="abssin"){
+     constexpr double tau=6.283185307179586;
+     const auto sine=std::sin(phase*tau);
+     return mode->second=="abssin"?std::abs(sine):sine;
+    }
+    static const auto random=particleRandomTable();
+    const auto step=unsigned(std::fmod(std::floor(phase),1024.));
+    const auto sample=[&](unsigned offset){return double(random[(step+axis*239+offset)&1023]&0xffff)/32767.5-1;};
+    if(mode->second=="randombezier"){
+     const auto u=phase-std::floor(phase),t=u*u*(3-2*u);
+     return sample(0)+(sample(1)-sample(0))*t;
+    }
+    return sample(0);
+   };
+   x+=float(amplitude(0)*envelope*value(layer,"wave_x",0));
+   y+=float(amplitude(1)*envelope*value(layer,"wave_y",0));
+   viewZ+=float(amplitude(2)*envelope*value(layer,"wave_z",0));
+  }
+  view=imagePlacement(640+x,360+y,value(layer,"scalex",100)/100,value(layer,"scaley",100)/100,
+                      value(layer,"rotz",0),.5f,.5f,1280,720);
+  nearPriority=value(layer,"pri1",-100);farPriority=value(layer,"pri2",999);
+ }
  std::vector<const Layer*>sorted;
  for(auto&x:layers){auto&layer=x.second;bool face=x.first=="face",message=x.first=="message";
- if((pass==1&&(face||message))||(pass==2&&!face)||(pass==3&&!message)||(pass==4&&value(layer,"pri",0)>maxPriority))continue;
+ if((pass==1&&(face||message))||(pass==2&&!face)||(pass==3&&!message)||(pass==4&&priority(layer)>maxPriority))continue;
  if(face&&layer.params.at("disp")!="keep"&&layer.params.at("@face-active")!="true"){
  if(layer.params.at("show")=="true"&&layer.params.at("mode")=="auto"&&!faceWarning){QLIE_LOG_LINE(<<"PENDING-FACE automatic portrait selection\n");faceWarning=true;}continue;
  }
@@ -921,17 +1118,30 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
  if(base!=layer.params.end()&&!base->second.empty()&&base->second!="none"&&!layer.params.count("@portrait"))continue;
  if((layer.pixels||layer.composite)&&layer.params.at("show")!="false")sorted.push_back(&layer);
  }
- auto get=[](const Layer*l,const std::string&k,float def){return value(*l,k,def);};
+ auto get=[&](const Layer*l,const std::string&k,float def){return k=="pri"?priority(*l):value(*l,k,def);};
  std::stable_sort(sorted.begin(),sorted.end(),[&](auto*a,auto*b){return get(a,"pri",0)<get(b,"pri",0);});
  for(auto*l:sorted){
  auto beforeImages=queue.imageCount();
  auto align=l->params.at("align");
+ if(l->params.count("alignx")||l->params.count("aligny")){
+  const auto pieces=split(align,':');
+  const auto x=l->params.count("alignx")?l->params.at("alignx"):pieces[0];
+  const auto y=l->params.count("aligny")?l->params.at("aligny"):pieces.size()>1?pieces[1]:"top";
+  align=x+":"+y;
+ }
  float ax=align.rfind("center",0)==0?0.5f:align.rfind("right",0)==0?1.f:0.f,ay=align.find(":bottom")!=align.npos?1.f:align.find(":center")!=align.npos?0.5f:0.f;
  unsigned w=l->composite?unsigned(l->composite->definition.bounds[0]):l->pixels->width,h=l->composite?unsigned(l->composite->definition.bounds[1]):l->pixels->height;
  auto placement=imagePlacement(get(l,"x",640),get(l,"y",360),get(l,"scalex",100)/100,get(l,"scaley",100)/100,get(l,"rotz",0),ax,ay,w,h);
  AnimationSample transform;transform.x=get(l,"x",640);transform.y=get(l,"y",360);transform.z=get(l,"z",0);transform.scaleX=get(l,"scalex",100);transform.scaleY=get(l,"scaley",100);transform.scaleZ=get(l,"scalez",100);transform.rotationX=get(l,"rotx",0);transform.rotationY=get(l,"roty",0);transform.rotationZ=get(l,"rotz",0);transform.anchorX=ax*100;transform.anchorY=ay*100;
+ const auto depth=priority(*l);
+ const bool cameraAffects=depth>=nearPriority&&depth<=farPriority;
+ if(cameraAffects){
+  placement=affine(view,placement);
+  transform.z+=viewZ;
+ }
  bool spatial=transform.z!=0||transform.rotationX!=0||transform.rotationY!=0||transform.scaleZ!=100;
  Matrix3D matrix;if(spatial)matrix=placement3D(transform,w,h);
+ if(spatial&&cameraAffects)matrix=combine(from2D(view),matrix);
  std::map<unsigned,const Image*> uiSlots;for(auto&slot:l->uiSlots)uiSlots[slot.first]=slot.second.get();if(l->scriptReplacement)uiSlots[0]=l->scriptReplacement.get();
  if(l->path==eyecatchPath&&l->composite&&!uiSlots.count(0))
   l->composite->loadEyecatchFallback();
@@ -980,7 +1190,9 @@ qlie::Bytes SceneImages::save()const{StateWriter w;
  }
 SceneImages::SceneImages(const SceneImages&live,RestoreTarget)
  :windowAlpha(live.windowAlpha),particleState(live.particleState),
-  faceRepId(live.faceRepId),faceRepFile(live.faceRepFile),faceType(live.faceType),faceDefaultFile(live.faceDefaultFile),
+  faceRepId(live.faceRepId),faceRepFile(live.faceRepFile),splitCharacters(live.splitCharacters),imageObjects(live.imageObjects),
+  hasCamera(live.hasCamera),hasNameText(live.hasNameText),
+  faceType(live.faceType),faceDefaultFile(live.faceDefaultFile),
   assets(live.assets),eyecatchFilm(live.eyecatchFilm),templates(live.templates),cache(live.cache),
   prefetchNativeVideo(live.prefetchNativeVideo){}
 std::unique_ptr<SceneImages> SceneImages::makeRestoreTarget()const{

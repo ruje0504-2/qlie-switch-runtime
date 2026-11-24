@@ -16,7 +16,9 @@ struct AnimReader {const qlie::Bytes&b;
  qlie::Bytes d(b.begin()+p,b.begin()+p+size);
  p+=size;
  return d;
- }std::string str(){return qlie::cp932(data(n(2)));
+ }std::string str(bool wide=false){
+  const auto length=n(2);
+  return wide?qlie::utf16le(data(length*2)):qlie::cp932(data(length));
  }std::string tag(){auto b0=data(16);
  size_t n0=0;
  while(n0<16&&b0[n0])n0++;
@@ -32,39 +34,88 @@ double nestedAnimationTime(const Animation&a,double milliseconds){
 }
 Animation animation(const std::string&type,const qlie::Bytes&b){AnimReader r{b};
  Animation a;
- a.name=r.str();
+ const bool wide=type=="abdata14";
+ a.name=r.str(wide);
  uint32_t version=0;
- if(type=="abdata13")version=r.n();
+ if(type=="abdata13"||wide)version=r.n();
  else if(type!="abdata12")throw std::runtime_error("Unsupported animation metadata "+type);
+ if(wide&&version!=1)throw std::runtime_error("Unsupported abdata14 revision");
  for(auto&v:a.bounds)v=int32_t(r.n());
- if(type=="abdata13"&&version>=1)a.flags=r.n();
- a.comment=r.str();
+ if(version>=1)a.flags=r.n();
+ a.comment=r.str(wide);
  unsigned motions=r.n(1);
- while(motions--){if(r.tag()!="abmotion10")throw std::runtime_error("Unknown animation motion header");
+ while(motions--){
+ const auto motionTag=r.tag();
+ const bool wideMotion=motionTag=="abmotion11";
+ if(!wideMotion&&motionTag!="abmotion10")throw std::runtime_error("Unknown animation motion header");
+ if(wideMotion&&r.n()!=1)throw std::runtime_error("Unsupported abmotion11 revision");
  Motion m;
- m.name=r.str();
+ m.name=r.str(wideMotion);
+ if(wideMotion){r.n();r.n();}
  unsigned layers=r.n(1);
  while(layers--){AnimationLayer l;
  auto tag=r.tag();
- if(tag!="ablayer18"&&tag!="ablayer17"&&tag!="ablayer16"&&tag!="ablayer15")throw std::runtime_error("Unsupported animation layer "+tag);
+ if(tag!="ablayer22"&&tag!="ablayer21"&&tag!="ablayer18"&&tag!="ablayer17"&&tag!="ablayer16"&&tag!="ablayer15")
+  throw std::runtime_error("Unsupported animation layer "+tag);
  l.version=unsigned(std::stoi(tag.substr(7)));
- l.name=r.str();
+ l.name=r.str(l.version==22);
  l.flags=uint8_t(r.n(1));
  unsigned count=r.n(1);
  l.mode=uint8_t(r.n(1));
- for(unsigned i=0;i<count;i++){l.keys.push_back(r.data(l.version==15?92:l.version==16?145:162));
+ const auto keyBytes=l.version>=21?440:l.version==15?92:l.version==16?145:162;
+ for(unsigned i=0;i<count;i++){l.keys.push_back(r.data(keyBytes));
  }m.layers.push_back(std::move(l));
  }a.motions.push_back(std::move(m));
  }if(r.p!=b.size())throw std::runtime_error("Trailing animation bytes");
  return a;
  }
 namespace {
-uint32_t keyU32(const qlie::Bytes&k,size_t p){if(p+4>k.size())throw std::runtime_error("Animation field outside key");
+// WHJ4 PE 0x591df0 expands the earlier 0xa2 key to 0x1b8.
+constexpr auto wideKeyOffsets=[]{
+ std::array<uint16_t,0xa2> offsets{};
+ constexpr std::pair<unsigned,unsigned> fields[]={
+  {4,4},{5,8},{6,0x24},{7,0x28},{0x8,0x50},{0xa,0x54},{0xc,0x58},{0xe,0x5c},
+  {0x10,0x34},{0x14,0x38},{0x18,0x84},{0x1a,0x88},{0x1c,0x90},{0x1e,0x94},
+  {0x20,0xa8},{0x22,0xa4},{0x24,0xbc},{0x28,0xc0},{0x2d,0x48},{0x2e,0x4c},
+  {0x30,0x7c},{0x31,0x80},{0x33,0xb4},{0x34,0xd0},{0x35,0xc4},{0x37,0xc8},
+  {0x3a,0xcc},{0x3b,0xb8},{0x3c,0x2c},{0x3d,0x30},
+  {0x40,0x60},{0x42,0x64},{0x44,0x68},{0x46,0x6c},{0x48,0x9c},{0x4a,0xa0},{0x4d,0x8c},
+  {0x81,0x3c},{0x83,0x40},{0x85,0x70},{0x87,0x74},{0x89,0xd4},{0x8b,0xd8},
+  {0x8d,0xdc},{0x8f,0xe0},{0x91,0x0c},{0x93,0xb0},{0x96,0x98}
+ };
+ for(const auto&field:fields)offsets[field.first]=uint16_t(field.second);
+ for(unsigned wave=0;wave<4;++wave){
+  const auto from=0x51+12*wave,to=0xe4+32*wave;
+  for(unsigned i=0;i<4;++i){
+   offsets[from+i]=uint16_t(to+4*i);
+   offsets[from+4+2*i]=uint16_t(to+16+4*i);
+  }
+ }
+ return offsets;
+}();
+
+bool wideKey(const qlie::Bytes&key){return key.size()==0x1b8;}
+uint32_t keyU32(const qlie::Bytes&k,size_t p){
+ if(wideKey(k)&&p){
+  p=wideKeyOffsets.at(p);
+  if(!p)throw std::runtime_error("Unmapped wide animation key field");
+ }
+ if(p+4>k.size())throw std::runtime_error("Animation field outside key");
  return uint32_t(k[p])|(uint32_t(k[p+1])<<8)|(uint32_t(k[p+2])<<16)|(uint32_t(k[p+3])<<24);
- }
-int keyI16(const qlie::Bytes&k,size_t p){if(p+2>k.size())throw std::runtime_error("Animation field outside key");
+}
+unsigned keyCode(const qlie::Bytes&key,size_t offset){
+ return wideKey(key)?keyU32(key,offset):key.at(offset);
+}
+int numericReference(int value){
+ if(value>=0x10000000&&value<0x10000010)return 32700+value-0x10000000;
+ if(value>=0x10000100&&value<0x10000110)return 32720+value-0x10000100;
+ return value;
+}
+int keyI16(const qlie::Bytes&k,size_t p){
+ if(wideKey(k))return numericReference(int32_t(keyU32(k,p)));
+ if(p+2>k.size())throw std::runtime_error("Animation field outside key");
  return int16_t(uint16_t(k[p])|(uint16_t(k[p+1])<<8));
- }
+}
 // PE offsets efcb0/efcd2 select the position/scale mode at 0x30.
 // f0860/f0882 use 0x33 for color/alpha. a1bb0/a1c38 use the
 // exponent 1 + 1.4 * power; these are not fixed quartic easing curves.
@@ -95,7 +146,7 @@ std::vector<AnimationSoundEvent> animationSoundEvents(const Motion&motion,double
  std::vector<AnimationSoundEvent> out;
  for(const auto&layer:motion.layers){if(!layer.flags)continue;
   for(const auto&key:layer.keys){double time=keyU32(key,0);if(time<=previous||time>current||key.size()<0x91)continue;
-   unsigned event=key.at(0x34);if(event!=8&&event!=11)continue;
+   unsigned event=keyCode(key,0x34);if(event!=8&&event!=11)continue;
    int channel=keyI16(key,event==11?0x89:0x8f);if(channel<0)continue;
    AnimationSoundEvent sound;sound.stop=event==11;sound.channel=unsigned(channel);
    if(!sound.stop){int index=keyI16(key,0x89);if(index<0)continue;sound.resource=unsigned(index);
@@ -108,7 +159,7 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
  AnimationSample out;
  if(layer.keys.empty()||ms<keyU32(layer.keys.front(),0))return out;
  // PE e6d19: direct event-1 jumps to key[0x89], preserving overshoot.
- for(const auto&key:layer.keys)if(key.at(0x34)==1&&ms>=keyU32(key,0)){
+ for(const auto&key:layer.keys)if(keyCode(key,0x34)==1&&ms>=keyU32(key,0)){
   if(keyI16(key,0x8d)!=0){out.unsupported.push_back("conditional-key-jump");break;}
   int target=keyI16(key,0x89);if(target<0||size_t(target)>=layer.keys.size()){out.unsupported.push_back("invalid-key-jump");break;}
   double start=keyU32(layer.keys[size_t(target)],0),end=keyU32(key,0);
@@ -121,11 +172,11 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
  const auto&a=layer.keys[i];
  const auto&b=layer.keys[std::min(i+1,layer.keys.size()-1)];
  double span=double(keyU32(b,0))-keyU32(a,0),t=span>0?std::clamp((ms-keyU32(a,0))/span,0.,1.):0;
- size_t mediaStart=i;while(mediaStart>0&&layer.keys[mediaStart-1][4]==a[4]&&layer.keys[mediaStart-1][6]==a[6])mediaStart--;
+ size_t mediaStart=i;while(mediaStart>0&&keyCode(layer.keys[mediaStart-1],4)==keyCode(a,4)&&keyCode(layer.keys[mediaStart-1],6)==keyCode(a,6))mediaStart--;
  out.mediaTime=ms-keyU32(layer.keys[mediaStart],0);
- out.kind=a.at(4);
- out.flags=a.at(5);
- out.resource=a.at(6);
+ out.kind=keyCode(a,4);
+ out.flags=keyCode(a,5);
+ out.resource=keyCode(a,6);
  auto number=[&](const qlie::Bytes&key,size_t offset){
   int v=keyI16(key,offset);
   if(v>=32700&&v<32716&&(context.externalMask&(1u<<(v-32700))))return context.external[size_t(v-32700)];
@@ -138,58 +189,58 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
  };
  auto val=[&](size_t offset,unsigned mode,float power){return sampleValue(number(a,offset),number(b,offset),mode,power,t,out.unsupported);
  };
- out.x=val(0x18,a.at(0x30),a.at(0x31)/100.f);
- out.y=val(0x1a,a.at(0x30),a.at(0x31)/100.f);
- out.scaleX=val(0x1c,a.at(0x30),a.at(0x31)/100.f);
- out.scaleY=val(0x1e,a.at(0x30),a.at(0x31)/100.f);
- out.priority=val(0x20,a.at(0x30),a.at(0x31)/100.f);
- out.rotationZ=val(0x22,a.at(0x30),a.at(0x31)/100.f);
+ out.x=val(0x18,keyCode(a,0x30),keyCode(a,0x31)/100.f);
+ out.y=val(0x1a,keyCode(a,0x30),keyCode(a,0x31)/100.f);
+ out.scaleX=val(0x1c,keyCode(a,0x30),keyCode(a,0x31)/100.f);
+ out.scaleY=val(0x1e,keyCode(a,0x30),keyCode(a,0x31)/100.f);
+ out.priority=val(0x20,keyCode(a,0x30),keyCode(a,0x31)/100.f);
+ out.rotationZ=val(0x22,keyCode(a,0x30),keyCode(a,0x31)/100.f);
  // PE f1cb8/f1cc0 and e6324 preserve filter1(point)/2(linear).
- if(a.size()>0x91)out.textureFilter=a[0x91];
+ if(a.size()>0x91)out.textureFilter=keyCode(a,0x91);
  // PE f1ce9/f1cf1: packed 0x93 becomes runtime rotation order +0xa9.
- if(a.size()>0x93)out.rotationOrder=a[0x93];
- out.rotationX=val(0x48,a.at(0x30),a.at(0x31)/100.f);
- out.rotationY=val(0x4a,a.at(0x30),a.at(0x31)/100.f);
- if(a.size()>=0x98&&b.size()>=0x98)out.scaleZ=val(0x96,a.at(0x30),a.at(0x31)/100.f);
- out.z=sampleValue(float(int32_t(keyU32(a,0x4d))),float(int32_t(keyU32(b,0x4d))),a.at(0x30),a.at(0x31)/100.f,t,out.unsupported);
+ if(a.size()>0x93)out.rotationOrder=keyCode(a,0x93);
+ out.rotationX=val(0x48,keyCode(a,0x30),keyCode(a,0x31)/100.f);
+ out.rotationY=val(0x4a,keyCode(a,0x30),keyCode(a,0x31)/100.f);
+ if(a.size()>=0x98&&b.size()>=0x98)out.scaleZ=val(0x96,keyCode(a,0x30),keyCode(a,0x31)/100.f);
+ out.z=sampleValue(float(int32_t(keyU32(a,0x4d))),float(int32_t(keyU32(b,0x4d))),keyCode(a,0x30),keyCode(a,0x31)/100.f,t,out.unsupported);
 
- out.alpha=val(0x35,a.at(0x33),a.at(0x3b)/100.f);
+ out.alpha=val(0x35,keyCode(a,0x33),keyCode(a,0x3b)/100.f);
  if(out.kind==10){
-  auto input=[&](size_t offset){return val(offset,a.at(0x2d),a.at(0x2e)/100.f);};
+  auto input=[&](size_t offset){return val(offset,keyCode(a,0x2d),keyCode(a,0x2e)/100.f);};
   out.mask.sourceX=input(8);out.mask.sourceY=input(0xa);out.mask.width=input(0xc);out.mask.height=input(0xe);
   out.mask.x=input(0x40);out.mask.y=input(0x42);out.mask.maskWidth=input(0x44);out.mask.maskHeight=input(0x46);
   out.mask.alignX=number(a,0x81)/100;out.mask.alignY=number(a,0x83)/100;
-  out.mask.amount=uint8_t(std::clamp(int(std::round(val(0x37,a.at(0x33),a.at(0x3b)/100.f))),0,255));out.mask.mode=a.at(0x3a);
-  out.childMotion=a.at(7);
+  out.mask.amount=uint8_t(std::clamp(int(std::round(val(0x37,keyCode(a,0x33),keyCode(a,0x3b)/100.f))),0,255));out.mask.mode=keyCode(a,0x3a);
+  out.childMotion=keyCode(a,7);
  }
  if(out.kind==0||out.kind==4||out.kind==20||out.kind==21){
   auto timeValue=[&](const qlie::Bytes&key,size_t offset){
-   auto value=int32_t(keyU32(key,offset));
+   auto value=numericReference(int32_t(keyU32(key,offset)));
    if(value>=32700&&value<32716&&(context.externalMask&(1u<<(value-32700))))return context.external[size_t(value-32700)];
    if((value>=32700&&value<32716)||(value>=32720&&value<32736)){
     out.childTimeResolved=false;out.unsupported.push_back("child-time-context="+std::to_string(value));
    }
    return float(value);
   };
-  out.childTime=int32_t(sampleValue(timeValue(a,0x10),timeValue(b,0x10),a.at(0x3c),a.at(0x3d)/100.f,t,out.unsupported));
-  out.childMotion=a.at(7);
+  out.childTime=int32_t(sampleValue(timeValue(a,0x10),timeValue(b,0x10),keyCode(a,0x3c),keyCode(a,0x3d)/100.f,t,out.unsupported));
+  out.childMotion=keyCode(a,7);
  }
  if((out.kind==20||out.kind==21)&&a.size()<152)out.unsupported.push_back("particle-layout="+std::to_string(layer.version));
  // Generic group records carry these fields too (PE f6de0..f6e18).
  if(a.size()>=152){
-  auto particleValue=[&](size_t offset){return val(offset,a.at(0x2d),a.at(0x2e)/100.f);};
+  auto particleValue=[&](size_t offset){return val(offset,keyCode(a,0x2d),keyCode(a,0x2e)/100.f);};
   out.particles.count=particleValue(8);out.particles.edge=particleValue(0xa);
   out.particles.divisions=particleValue(0xc);out.particles.scaleOffset=particleValue(0x46);
   for(unsigned axis=0;axis<3;axis++)out.particles.phase[axis]=particleValue(0x40+axis*2);
-  out.particles.extent={out.scaleX,out.scaleY,val(0x96,a.at(0x30),a.at(0x31)/100.f)};
-  auto childTime=[&](size_t offset){return int32_t(sampleValue(float(int32_t(keyU32(a,offset))),float(int32_t(keyU32(b,offset))),a.at(0x3c),a.at(0x3d)/100.f,t,out.unsupported));};
+  out.particles.extent={out.scaleX,out.scaleY,val(0x96,keyCode(a,0x30),keyCode(a,0x31)/100.f)};
+  auto childTime=[&](size_t offset){return int32_t(sampleValue(float(int32_t(keyU32(a,offset))),float(int32_t(keyU32(b,offset))),keyCode(a,0x3c),keyCode(a,0x3d)/100.f,t,out.unsupported));};
   out.particles.timeBegin=childTime(0x10);out.particles.timeEnd=childTime(0x14);
  }
  out.anchorX=number(a,0x85);
  out.anchorY=number(a,0x87);
  auto color=[&](size_t p){uint32_t z=0;
  auto ca=keyU32(a,p),cb=keyU32(b,p);
- for(int n=0;n<3;n++){auto v=sampleValue(float((ca>>(8*n))&255),float((cb>>(8*n))&255),a.at(0x33),a.at(0x3b)/100.f,t,out.unsupported);
+ for(int n=0;n<3;n++){auto v=sampleValue(float((ca>>(8*n))&255),float((cb>>(8*n))&255),keyCode(a,0x33),keyCode(a,0x3b)/100.f,t,out.unsupported);
  z|=uint32_t(std::clamp(std::lround(v),0l,255l))<<(8*n);
  }return z;
  };
@@ -198,10 +249,10 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
  // PE f1468 interpolates four signed parameters before invoking the
  // waveform and property tables. Time is relative to this key (f15ed).
  for(unsigned n=0;n<4;n++){
-  size_t q=0x51+12*n;unsigned op=a.at(q),target=a.at(q+1);
+  size_t q=0x51+12*n;unsigned op=keyCode(a,q),target=keyCode(a,q+1);
   if(!op||!target)continue;
   float p[4];
-  for(unsigned j=0;j<4;j++)p[j]=val(q+4+j*2,a.at(q+2),a.at(q+3)/100.f);
+  for(unsigned j=0;j<4;j++)p[j]=val(q+4+j*2,keyCode(a,q+2),keyCode(a,q+3)/100.f);
   float value=0;bool known=true;
   auto trig=[](float radians,bool cosine){
    // a18c4 quantizes the phase to the engine's 1024-entry sine table.

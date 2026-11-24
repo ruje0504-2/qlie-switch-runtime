@@ -82,12 +82,10 @@ inline void applySentenceTiming(Event& event){
     event.value=="^sentence,$overlap,wait:click")
   event.value="^sentence,fade:overlap:1000,wait:click:1000";
  if(event.file!="scenario/本編/w@16_03.s")return;
- if(event.line==905&&event.value=="^sentence,$overlap_long")
-  event.value="^sentence,fade:overlap:2000";
  if(event.line==913&&event.value=="^sentence,wait:click:1000")
-  event.value="^sentence,wait:click:2000";
+  event.value="^sentence,wait:click:1500";
  if(event.line==915&&event.value=="^sentence,$overlap_long")
-  event.value="^sentence,$overlap_long,wait:click:1500";
+  event.value="^sentence,fade:overlap:2000,wait:click:2000";
 }
 inline constexpr char gameName[] = "美少女万華鏡２";
 inline constexpr char sdRoot[] = "sdmc:/switch/whj2";

@@ -5,9 +5,11 @@
 namespace whj2 {
 class Progress {
  std::array<bool,4> cleared{};
- std::set<std::string> labels,files;
+ std::set<std::string> labels,files,readPages;
 public:
  bool capture(const Story&);
+ bool markRead(const std::string&key){return !key.empty()&&readPages.insert(key).second;}
+ bool wasRead(const std::string&key)const{return !key.empty()&&readPages.count(key)!=0;}
  bool captureFiles(const std::set<std::string>&);
  bool seenFile(const std::string&path)const{return files.count(qlie::canonical(path))!=0;}
  void apply(Story&)const;

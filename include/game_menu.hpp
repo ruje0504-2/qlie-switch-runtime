@@ -25,6 +25,6 @@ public:
  Action confirm();
  Action tap(float,float);
  bool beginDrag(float,float);bool drag(float,float);void endDrag(){draggedSlider=-1;}
- void draw(qlie::Bytes&);void drawAutoButton(qlie::Bytes&,bool);
+ void draw(qlie::Bytes&);void drawAutoButton(qlie::Bytes&,bool);void drawSkipButton(qlie::Bytes&,bool);
 };
 }

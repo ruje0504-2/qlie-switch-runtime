@@ -15,6 +15,7 @@ JoyConInput JoyCon::poll(uint64_t ms){
  out.save=down&HidNpadButton_L;
  out.load=down&HidNpadButton_R;
  out.fastForward=held&HidNpadButton_ZR;
+ out.skipToggle=down&HidNpadButton_ZL;
  out.history=down&HidNpadButton_Up;
  out.horizontal=(down&HidNpadButton_Left)?-1:(down&HidNpadButton_Right)?1:0;
  out.upperMenu=down&HidNpadButton_Y;

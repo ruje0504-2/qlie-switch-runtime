@@ -12,6 +12,7 @@ VoiceResolver::VoiceResolver(qlie::Assets&a):assets(a){
    auto key=qlie::canonical(trim(line.substr(0,p))),value=trim(line.substr(p+1));
    if(key=="pathformat")prefix=qlie::canonical(value);
    else if(key=="voicefileerror")fileErrors=value=="1";
+   else if(key=="forcevoiceplay")forcePlay=value=="1";
    else if(key=="volumevoice")gain=std::clamp(std::stof(value)/100.f,0.f,1.f);
   }
  }

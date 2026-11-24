@@ -207,6 +207,12 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   try{upcoming=story.upcomingAssetCommands(openingHint);}
   catch(const std::runtime_error&e){std::fprintf(stderr,"LOAD read-ahead script: %s\n",e.what());return;}
   for(auto&line:upcoming){
+   if(line.rfind("％",0)==0){
+    if((!normalSkip&&!fastForward)||voices->forcePlay)
+     if(auto voice=voices->resolve(line))add(voice->request,true);
+    if(hints.size()==6)break;
+    continue;
+   }
    auto comma=line.find(',');auto cmd=line.substr(0,comma);
    if(cmd=="^music01"||cmd=="^se01"||cmd=="^se02"){
     for(auto&part:whj2::split(line.substr(comma+1),','))if(part.rfind("file:",0)==0){
@@ -278,12 +284,13 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }else audio->volume(ch,volumes[ch],ms);
  return true;
  }
- void playVoice(const std::string&id){
+ void playVoice(const std::string&id,bool historyReplay=false){
+ if(!historyReplay&&!voices->forcePlay&&(normalSkip||fastForward)){audio->stop(3);return;}
  if(id.empty())return;
  auto match=voices->resolve(id);
  if(!match){std::cerr<<"VOICE unresolved id="<<id;for(auto&candidate:voices->candidates(id))std::cerr<<" candidate="<<candidate;std::cerr<<"\n";if(voices->fileErrors)throw std::runtime_error("Voice file not found: "+id);return;}
- auto bytes=assets.read(match->request);audio->play(3,bytes,false,voices->gain,0,match->request);
- std::cerr<<"VOICE playing id="<<id<<" source="<<match->source.path<<" offset="<<match->source.offset<<" bytes="<<bytes.size()<<" loose="<<match->source.loose<<"\n";
+ audio->playFile(assets,3,match->request,false,voices->gain,0,1);
+ std::cerr<<"VOICE playing id="<<id<<" source="<<match->source.path<<" offset="<<match->source.offset<<" stored_bytes="<<match->source.size<<" loose="<<match->source.loose<<"\n";
  }
  void refreshMessage(bool show=false){images->setMessageImage(messageText->render(font,images->messageStyle()),show);lastMessageVisible=messageText->visible();}
  void recordCurrentRead(){if(!menu&&!hidden&&!gameMenu.visible()&&!movie->playing()&&images->messageVisible()&&!currentPageKey.empty()&&messageText->finished()&&progress.markRead(currentPageKey))qlie::write_file(saveDir+"/system.progress",progress.save());}
@@ -444,7 +451,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }else if(story.state.awaiting){if(!choiceScreen->ready())return;story.choose(unsigned(focus));
  next();
  }else {if(sentenceWait.blocksClick())return;
- if(settings.get("ClickVoiceStop"))audio->volume(3,0,0,true);
+ if(settings.get("ClickVoiceStop"))audio->volume(3,0,250,true);
  if(messageText->reveal()){auto action=sentenceWait.prewaiting()?sentenceWait.confirm():whj2::SentenceWait::None;refreshMessage();if(action==whj2::SentenceWait::Next)next();else if(action==whj2::SentenceWait::Resume)next(true);return;}
  auto action=sentenceWait.confirm();if(action==whj2::SentenceWait::Next)next();else if(action==whj2::SentenceWait::Resume)next(true);}
  }
@@ -458,7 +465,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    if(offset+size_t(row)>=history.size())continue;
    auto&entry=history[history.size()-1-offset-size_t(row)];
    if(entry.voice.empty()||!voices->resolve(entry.voice))continue;
-   playVoice(entry.voice);historyVoicePlayed=true;return;
+   playVoice(entry.voice,true);historyVoicePlayed=true;return;
   }
   return;
  }

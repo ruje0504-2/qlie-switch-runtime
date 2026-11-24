@@ -45,6 +45,7 @@ std::vector<std::string> Story::upcomingAssetCommands(bool opening){
   const auto&text=source->ops[pc].text;
   if(text.rfind("\\jmp,",0)==0||text.rfind("\\if,",0)==0||text.rfind("\\sub,",0)==0)break;
   if(!text.empty()&&text.front()=='^'&&text.find("file:")!=text.npos)out.push_back(text);
+  else if(text.rfind("％",0)==0)out.push_back(text);
  }
  return out;
 }

@@ -40,5 +40,9 @@ $cc -std=c11 $flags -c src/switch_stdio.c -o build-switch/switch_stdio.o
 flags="$flags -ffp-contract=off -DWHJ2_WITH_VULKAN -DWHJ2_WITH_DEKO3D"
 
 $cxx -std=c++17 $flags $($pc --cflags sdl2 freetype2 libpng libjpeg) -L"$dkp/libnx/lib" -specs="$dkp/libnx/switch.specs" src/qlie.cpp src/story.cpp src/audio.cpp src/image.cpp src/animation.cpp src/particles.cpp src/scene_images.cpp src/model.cpp src/gradient_mask.cpp src/render_queue.cpp src/voice.cpp src/movie.cpp src/message_text.cpp src/scene_transition.cpp src/sentence_wait.cpp src/joycon.cpp src/upper_menu.cpp src/game_menu.cpp src/settings.cpp src/auto_play.cpp src/fps_overlay.cpp src/title_screen.cpp src/choice_screen.cpp src/progress.cpp src/music_screen.cpp src/replay_catalog.cpp src/replay_screen.cpp src/cg_catalog.cpp src/cg_screen.cpp src/mac_runtime.cpp build-switch/font.o build-switch/video.o build-switch/gpu_raster.o build-switch/deko3d_raster.o build-switch/vulkan_raster.o build-switch/switch_stdio.o build-switch/switch_nak_cache.o build-switch/mesa-scoped-nak.o -Wl,--wrap=nak_debug_flags -L"$mesa/lib" -Wl,--start-group "$mesa/lib/libvulkan.a" "$rust"/*.rlib $($pc --libs sdl2 freetype2 libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -lexpat -lzstd -ldeko3d -lpthread -lnx -Wl,--end-group -o build-switch/whj2-runtime.elf
+# Installed packages consume the ELF directly.
+if [ "${1:-}" = "--elf-only" ]; then
+  exit 0
+fi
 "$dkp/tools/bin/nacptool" --create "WHJ2 Runtime (Development)" "WHJ2 port contributors" "0.0.2" build-switch/whj2-runtime.nacp
 "$dkp/tools/bin/elf2nro" build-switch/whj2-runtime.elf build-switch/whj2-runtime.nro --nacp=build-switch/whj2-runtime.nacp

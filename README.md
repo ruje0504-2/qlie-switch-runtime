@@ -8,6 +8,8 @@
 - 游戏适配：`games/whj2/`
 - 仓库不包含游戏资源、图标、密钥、存档或安装包。
 
+[优化手册](docs/optimization/README.md)记录图形、影片、资源调度和界面的实现与测量结果。
+
 ## 构建
 
 Mac 需要 C/C++17、SDL2、FreeType、libpng、libjpeg 和 FFmpeg：

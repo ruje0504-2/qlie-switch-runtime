@@ -24,10 +24,10 @@ MessageText::MessageText(qlie::Assets&assets,bool useStoryLineBreaking):storyLin
   auto p=line.find('=');if(p==line.npos)continue;
   auto key=trim(line.substr(0,p)),value=trim(line.substr(p+1));
   if(key=="\\cal,#KinsokuWordLength")lineReserve=unsigned(std::stoul(value));
-  else if(key=="\\cal,#GyoutouKinsokuWord"||key=="\\cal,#GyoumatuKinsokuWord"){
+  else if(key=="\\cal,#GyoutouKinsokuWord"||key=="\\cal,#GyoumatuKinsokuWord"||key=="\\cal,#IgnoreReturnSpaceWord"){
    if(value.size()<2||value.front()!='"'||value.back()!='"')throw std::runtime_error("Invalid line breaking configuration");
    auto chars=codepoints(value.substr(1,value.size()-2));
-   (key=="\\cal,#GyoutouKinsokuWord"?lineStartForbidden:lineEndForbidden)=std::move(chars);
+   (key=="\\cal,#GyoutouKinsokuWord"?lineStartForbidden:key=="\\cal,#GyoumatuKinsokuWord"?lineEndForbidden:noInitialIndent)=std::move(chars);
   }
  }
 }
@@ -49,15 +49,17 @@ void MessageText::update(double ms){elapsed+=std::max(0.,ms);}
 size_t MessageText::visible()const{return size_t(std::upper_bound(glyphs.begin(),glyphs.end(),elapsed,[](double time,const Glyph&g){return time<g.deadline;})-glyphs.begin());}
 bool MessageText::finished()const{return visible()==glyphs.size();}
 bool MessageText::reveal(){if(finished())return false;elapsed=glyphs.empty()?0:glyphs.back().deadline;return true;}
-Image MessageText::render(KFont*font,const MessageStyle&style)const{if(!style.width||!style.height)throw std::runtime_error("Message surface dimensions");Image out{style.width,style.height,qlie::Bytes(size_t(style.width)*style.height*4)};KImage dst{0,0,out.width,out.height,size_t(out.width)*4,out.pixels.data()};unsigned x=0,y=0;size_t count=visible();
+Image MessageText::render(KFont*font,const MessageStyle&style)const{if(!style.width||!style.height)throw std::runtime_error("Message surface dimensions");Image out{style.width,style.height,qlie::Bytes(size_t(style.width)*style.height*4)};KImage dst{0,0,out.width,out.height,size_t(out.width)*4,out.pixels.data()};unsigned x=0,y=0;size_t count=visible();bool paragraphStart=true;
  for(size_t i=0;i<count;++i){uint32_t cp=glyphs[i].codepoint;
-  if(glyphs[i].centeredRun){unsigned width=0;for(size_t j=i;j<i+glyphs[i].centeredRun;++j)width+=glyphs[j].codepoint<128?std::max(1u,style.fontWidth/2):style.fontWidth;x=style.width>width?(style.width-width)/2:0;}
+  if(cp=='\n'){x=0;y+=style.fontHeight;paragraphStart=true;continue;}
+  if(glyphs[i].centeredRun){unsigned width=0;for(size_t j=i;j<i+glyphs[i].centeredRun;++j)width+=glyphs[j].codepoint<128?std::max(1u,style.fontWidth/2):style.fontWidth;x=style.width>width?(style.width-width)/2:0;paragraphStart=false;}
+  if(paragraphStart){if(storyLineBreaking&&std::find(noInitialIndent.begin(),noInitialIndent.end(),cp)==noInitialIndent.end())x=style.fontWidth;paragraphStart=false;}
   unsigned width=cp<128?std::max(1u,style.fontWidth/2):style.fontWidth;
   const bool startForbidden=std::find(lineStartForbidden.begin(),lineStartForbidden.end(),cp)!=lineStartForbidden.end();
   const bool endForbidden=std::find(lineEndForbidden.begin(),lineEndForbidden.end(),cp)!=lineEndForbidden.end();
   const unsigned remaining=(style.width-std::min(x,style.width))/std::max(1u,style.fontWidth);
   const bool earlyWrap=storyLineBreaking&&!startForbidden&&remaining<=lineReserve+unsigned(endForbidden);
-  if(cp=='\n'||x+width>style.width||(x&&earlyWrap)){x=0;y+=style.fontHeight;if(cp=='\n')continue;}
+  if(x+width>style.width||(x&&earlyWrap)){x=storyLineBreaking?style.fontWidth:0;y+=style.fontHeight;}
   if(y+style.fontHeight>style.height)break;
   kfont_draw_outline(font,&dst,cp,int(x),int(y),width,style.fontHeight,style.color);x+=width;
  }return out;

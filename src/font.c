@@ -1,6 +1,8 @@
 #include "font.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+#include <limits.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_SYNTHESIS_H
@@ -112,11 +114,20 @@ int kfont_cache_stats(const KFont *f,KFontCacheStats *stats){
     *stats=(KFontCacheStats){f->cache_count,f->cache_bytes,FONT_CACHE_GLYPHS,FONT_CACHE_BYTES,
                            f->cache_hits,f->rasterizations};return 0;
 }
-KFont *kfont_open(const char *path,int simplified){
+int kfont_face_info(const char *path,unsigned face_index,char *label,size_t capacity){
+    FT_Library library;FT_Face face;
+    if(!path||!label||!capacity||FT_Init_FreeType(&library))return -1;
+    if(FT_New_Face(library,path,(FT_Long)face_index,&face)){FT_Done_FreeType(library);return -1;}
+    int count=face->num_faces>INT_MAX?-1:(int)face->num_faces;
+    snprintf(label,capacity,"%s %s",face->family_name?face->family_name:"",face->style_name?face->style_name:"");
+    FT_Done_Face(face);FT_Done_FreeType(library);return count;
+}
+KFont *kfont_open(const char *path,int simplified){return kfont_open_face(path,0,simplified);}
+KFont *kfont_open_face(const char *path,unsigned face_index,int simplified){
     KFont *f=calloc(1,sizeof(*f));if(!f)return NULL;
     if(FT_Init_FreeType(&f->library)){kfont_close(f);return NULL;}
     if(path&&*path){
-        if(FT_New_Face(f->library,path,0,&f->faces[0])){kfont_close(f);return NULL;}
+        if(FT_New_Face(f->library,path,(FT_Long)face_index,&f->faces[0])){kfont_close(f);return NULL;}
         select_unicode(f->faces[0]);
         f->count=1;
     }

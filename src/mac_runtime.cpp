@@ -97,7 +97,8 @@ struct Frontend {
  std::array<unsigned,3>audioTypes{{0,2,2}};
  bool cpuInterlaced=false;unsigned cpuScanlinePhase=0;qlie::Bytes cpuScanlineHistory;
  KFont*font=nullptr;
- std::vector<std::string> fontFiles{std::string()};int selectedFont=0;qlie::Bytes fontSettingsSnapshot;
+ struct FontChoice {std::string file,label;unsigned face=0;};
+ std::vector<FontChoice> fontChoices{{"","標準フォント",0}};int selectedFont=0;qlie::Bytes fontSettingsSnapshot;
  SDL_Window*window=nullptr;
  SDL_Renderer*renderer=nullptr;
  SDL_Texture*texture=nullptr;
@@ -240,13 +241,16 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   preview.start("[spd,0]   美 少 女 万 華 鏡");auto sample=preview.render(font,style);
   preview.start("[spd,0]「サンプルテキスト」");gameMenu.setTextPreviews(std::move(sample),preview.render(font,style));
  }
+ void saveFontChoice(int index){
+  whj2::StateWriter writer;writer.str("WHJ2-font-2");writer.str(fontChoices[index].file);writer.n(fontChoices[index].face);qlie::write_file(saveDir+"/font.cfg",writer.bytes);
+ }
  bool selectFont(int index,bool persist){
-  if(index<0||size_t(index)>=fontFiles.size())return false;
-  if(index==selectedFont){if(persist)qlie::write_file(saveDir+"/font.cfg",qlie::Bytes(fontFiles[index].begin(),fontFiles[index].end()));return true;}
-  std::string path=index?gameDir+"/fonts/"+fontFiles[index]:std::string();
-  std::unique_ptr<KFont,void(*)(KFont*)> nextFont(kfont_open(index?path.c_str():nullptr,0),kfont_close);
-  if(!nextFont){status="フォントを読み込めませんでした。";std::cerr<<"FONT FAIL file="<<fontFiles[index]<<"\n";return false;}
-  if(persist)qlie::write_file(saveDir+"/font.cfg",qlie::Bytes(fontFiles[index].begin(),fontFiles[index].end()));
+  if(index<0||size_t(index)>=fontChoices.size())return false;
+  if(index==selectedFont){if(persist)saveFontChoice(index);return true;}
+  const auto&choice=fontChoices[index];std::string path=index?gameDir+"/fonts/"+choice.file:std::string();
+  std::unique_ptr<KFont,void(*)(KFont*)> nextFont(kfont_open_face(index?path.c_str():nullptr,choice.face,0),kfont_close);
+  if(!nextFont){status="フォントを読み込めませんでした。";std::cerr<<"FONT FAIL file="<<choice.file<<" face="<<choice.face<<"\n";return false;}
+  if(persist)saveFontChoice(index);
   auto*previous=font;font=nextFont.release();selectedFont=index;kfont_set_antialias(font,1u<<settings.get("FontAA"));kfont_set_style(font,unsigned(settings.get("FontStyle")),uint32_t(settings.get("FontStyleColor")));uiGlyphs.clear();musicScreen->setFont(font);cgScreen->setFont(font);
   refreshFontPreviews();if(!text.empty())refreshMessage();
   if(story.state.awaiting){auto savedChoice=choiceScreen->save();choiceScreen->restore(savedChoice,font);}
@@ -254,13 +258,23 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }
  void loadFontSelection(){
   try{
-   auto directory=std::filesystem::path(gameDir)/"fonts";
+   auto directory=std::filesystem::path(gameDir)/"fonts";std::vector<std::string> files;
    if(std::filesystem::is_directory(directory))for(auto&entry:std::filesystem::directory_iterator(directory))if(entry.is_regular_file()){
     auto ext=entry.path().extension().string();std::transform(ext.begin(),ext.end(),ext.begin(),[](unsigned char c){return char(std::tolower(c));});
-    if(ext==".ttf"||ext==".otf"||ext==".ttc")fontFiles.push_back(entry.path().filename().string());
+    if(ext==".ttf"||ext==".otf"||ext==".ttc")files.push_back(entry.path().filename().string());
    }
-   std::sort(fontFiles.begin()+1,fontFiles.end());
-   if(std::filesystem::exists(saveDir+"/font.cfg")){auto bytes=qlie::file(saveDir+"/font.cfg");std::string name(bytes.begin(),bytes.end());auto at=std::find(fontFiles.begin(),fontFiles.end(),name);if(at!=fontFiles.end())selectFont(int(at-fontFiles.begin()),false);else {status="保存されたフォントが見つかりません。";std::cerr<<"FONT selection unavailable\n";}}
+   std::sort(files.begin(),files.end());
+   for(const auto&file:files){auto path=(directory/file).string();char label[512];int count=kfont_face_info(path.c_str(),0,label,sizeof(label));
+    if(count<1){std::cerr<<"FONT CATALOG FAIL file="<<file<<"\n";continue;}
+    for(int i=0;i<count;i++){if(i&&kfont_face_info(path.c_str(),unsigned(i),label,sizeof(label))<1){std::cerr<<"FONT CATALOG FAIL file="<<file<<" face="<<i<<"\n";continue;}fontChoices.push_back({file,std::string(label)+" ["+file+" #"+std::to_string(i)+"]",unsigned(i)});}
+   }
+   if(std::filesystem::exists(saveDir+"/font.cfg")){
+    auto bytes=qlie::file(saveDir+"/font.cfg");std::string name(bytes.begin(),bytes.end());uint64_t face=0;
+    whj2::StateWriter signature;signature.str("WHJ2-font-2");
+    if(bytes.size()>=signature.bytes.size()&&std::equal(signature.bytes.begin(),signature.bytes.end(),bytes.begin())){whj2::StateReader reader{bytes};reader.str();name=reader.str();face=reader.n();reader.end();}
+    auto at=std::find_if(fontChoices.begin(),fontChoices.end(),[&](const FontChoice&choice){return choice.file==name&&choice.face==face;});
+    if(at!=fontChoices.end())selectFont(int(at-fontChoices.begin()),false);else {status="保存されたフォントが見つかりません。";std::cerr<<"FONT selection unavailable\n";}
+   }
   }catch(const std::exception&e){status="フォント設定を読み込めませんでした。";std::cerr<<"FONT CONFIG FAIL "<<e.what()<<"\n";}
  }
  void applySettings(bool persist=true){
@@ -543,7 +557,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(action==UI::ResetSettings){settings.reset();selectFont(0,true);applySettings();return;}
  if(action==UI::Quit){done=true;return;}
  if(action==UI::Title){if(movie->playing())movie->stop();showTitle();return;}}
- if(action==UI::ChooseFont){fontSettingsSnapshot=settings.save();gameMenu.open(UI::Fonts);gameMenu.fontCount=int(fontFiles.size())+8;gameMenu.focus=selectedFont;return;}
+ if(action==UI::ChooseFont){fontSettingsSnapshot=settings.save();gameMenu.open(UI::Fonts);gameMenu.fontCount=int(fontChoices.size())+8;gameMenu.focus=selectedFont;return;}
  if(action==UI::AcceptFont){gameMenu.open(UI::Settings);gameMenu.focus=24;applySettings();status.clear();return;}
  if(action==UI::ApplyFont){if(selectFont(gameMenu.focus,true)){gameMenu.open(UI::Settings);gameMenu.focus=24;applySettings();status.clear();}return;}
  if(action==UI::Close){if(gameMenu.panel==UI::Fonts){settings.restore(fontSettingsSnapshot);applySettings(false);gameMenu.open(UI::Settings);gameMenu.focus=24;status.clear();return;}if(gameMenu.panel==UI::History&&historyVoicePlayed)audio->volume(3,0,200,true);historyVoicePlayed=false;gameMenu.close();return;}
@@ -601,7 +615,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(gameMenu.asking){auto prompt=gameMenu.requested==UI::Quit?"ゲームを終了しますか？":gameMenu.requested==UI::Title?"タイトルに戻りますか？":gameMenu.requested==UI::ResetSettings?"設定を初期状態に戻しますか？":gameMenu.requested==UI::DeleteSlot?"データを削除しますか？":gameMenu.panel==UI::Load?"データをロードしますか？":"データを上書き保存しますか？";line(prompt,440,275,28);return;}
  if(gameMenu.panel==UI::Fonts){
   line("フォント選択",350,150,30);int first=gameMenu.focus/5*5;
-  for(int row=0;row<5&&first+row<gameMenu.fontCount;row++){int index=first+row;std::string label;if(index<int(fontFiles.size()))label=index?fontFiles[index]:"標準フォント";else {int option=index-int(fontFiles.size()),style=settings.get("FontStyle");if(option==0)label="アンチエイリアス ×"+std::to_string(1<<settings.get("FontAA"));else if(option==1)label=std::string("太字：")+((style&1)?"する":"しない");else if(option==2)label=std::string("影：")+((style&2)?"する":"しない");else if(option==3)label="縁取り："+std::to_string((style&8)?2:(style&4)?1:0);else if(option==7)label="設定";else {const char*channels[]={"R","G","B"};label=std::string("縁・影の色 ")+channels[option-4]+"："+std::to_string((settings.get("FontStyleColor")>>((6-option)*8))&255);}}if(index==selectedFont)label="* "+label;line(label,340,220+row*60,24,index==gameMenu.focus?0xffff88:0xffffff);}
+  for(int row=0;row<5&&first+row<gameMenu.fontCount;row++){int index=first+row;std::string label;if(index<int(fontChoices.size()))label=fontChoices[index].label;else {int option=index-int(fontChoices.size()),style=settings.get("FontStyle");if(option==0)label="アンチエイリアス ×"+std::to_string(1<<settings.get("FontAA"));else if(option==1)label=std::string("太字：")+((style&1)?"する":"しない");else if(option==2)label=std::string("影：")+((style&2)?"する":"しない");else if(option==3)label="縁取り："+std::to_string((style&8)?2:(style&4)?1:0);else if(option==7)label="設定";else {const char*channels[]={"R","G","B"};label=std::string("縁・影の色 ")+channels[option-4]+"："+std::to_string((settings.get("FontStyleColor")>>((6-option)*8))&255);}}if(index==selectedFont)label="* "+label;int x=340;for(auto cp:utf8(label)){int width=cp<128?12:24;if(x+width>960)break;drawGlyph(cp,x,220+row*60,width,24,index==gameMenu.focus?0xffff88:0xffffff);x+=width;}}
   if(first>0)line("前へ",840,170,24);
   if(first+5<gameMenu.fontCount)line("次へ",840,555,24);
   line("設定",420,565,24);line("キャンセル",640,565,24);if(!status.empty())line(status,320,525,18);return;

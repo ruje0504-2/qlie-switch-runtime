@@ -8,6 +8,9 @@ typedef struct {
 } KFontCacheStats;
 /* A user font path, or platform font (macOS / Switch shared font). */
 KFont *kfont_open(const char *path,int simplified);
+KFont *kfont_open_face(const char *path,unsigned face_index,int simplified);
+/* Returns the number of faces, or -1 on error; label is family and style. */
+int kfont_face_info(const char *path,unsigned face_index,char *label,size_t capacity);
 void kfont_close(KFont *font);
 /* QLIE sampling factor: monochrome rasterization followed by coverage averaging. */
 int kfont_set_antialias(KFont *font,unsigned factor);
@@ -18,8 +21,8 @@ int kfont_cache_stats(const KFont *font,KFontCacheStats *stats);
 typedef struct {int left,top;unsigned width,height;} KFontGlyphBounds;
 int kfont_glyph_bounds(KFont*,uint32_t,unsigned,unsigned,KFontGlyphBounds*);
 int kfont_draw(KFont *font,KImage *dst,uint32_t codepoint,int x,int y,unsigned width,unsigned height,uint32_t rgb);
-/* Draw a glyph with a thin black core and faint outer edge. Used only by the
-   supplied story/choice font; HOS UI panels continue using plain glyphs. */
+/* Draw the configured shadow/outline layers, or the legacy thin edge when
+   no style was configured. UI panels can use plain kfont_draw instead. */
 int kfont_draw_outline(KFont *font,KImage *dst,uint32_t codepoint,int x,int y,
                        unsigned width,unsigned height,uint32_t rgb);
 #endif

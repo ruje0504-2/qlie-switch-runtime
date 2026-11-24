@@ -720,7 +720,14 @@ controllerKey(e.cbutton.button);
  return 0;
  }
 };
-int main(int argc,char**argv){try{std::string game=argc>1?argv[1]:(std::getenv("WHJ2_GAME")?std::getenv("WHJ2_GAME"):"");
+int main(int argc,char**argv){
+#ifdef __SWITCH__
+ const char*logPath=std::getenv("WHJ2_LOG");if(!logPath)logPath="sdmc:/switch/whj2/runtime.log";
+ if(!std::freopen(logPath,"a",stderr))return 2;
+ std::setvbuf(stderr,nullptr,_IONBF,0);
+ std::cerr<<"START WHJ2 runtime argc="<<argc<<"\n";
+#endif
+try{std::string game=argc>1?argv[1]:(std::getenv("WHJ2_GAME")?std::getenv("WHJ2_GAME"):"");
 #ifdef __SWITCH__
 if(game.empty())game="sdmc:/switch/whj2/game";
 #endif
@@ -734,6 +741,7 @@ if(game.empty()){std::cerr<<"usage: whj2-runtime GAME [SAVE_DIR] [--smoke-frames
 #ifdef __SWITCH__
 if(argc<3)saves="sdmc:/switch/whj2/saves";
 #endif
+std::cerr<<"INIT game="<<game<<" saves="<<saves<<"\n";
 Frontend f(game,saves);if(argc>4&&std::string(argv[3])=="--read-skip-smoke"){f.readSkipTest=true;smoke=unsigned(std::stoul(argv[4]));}
  if(argc>4&&std::string(argv[3])=="--replay-return-smoke"){f.replayReturnTest=true;smoke=unsigned(std::stoul(argv[4]));}
  if(argc>4&&std::string(argv[3])=="--cg-loop-smoke"){f.cgLoopTest=true;smoke=unsigned(std::stoul(argv[4]));}

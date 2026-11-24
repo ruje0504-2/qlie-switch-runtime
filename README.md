@@ -19,7 +19,13 @@ Switch需要devkitPro、devkitA64、libnx和Switch portlibs：
 ./build-switch.sh
 ```
 
-产物为`build-switch/whj2-runtime.nro`。默认从`sdmc:/switch/whj2/game`读取原版文件，在`sdmc:/switch/whj2/saves`保存状态。原版GameData、DLL/key.fkey和日文EXE来自本地游戏副本；运行时不会执行EXE。
+产物为`build-switch/whj2-runtime.nro`。默认从`sdmc:/switch/whj2/game`读取原版文件，在`sdmc:/switch/whj2/saves`保存状态。部署目录只需原版GameData、DLL/key.fkey和独立DLL/icon.key。Switch运行时不读取或执行EXE，也不需要Windows DLL。可从自己的本地原版副本准备icon.key：
+
+```sh
+python3 tools/extract_icon_key.py /absolute/path/to/original.exe /absolute/path/to/deployment/game/DLL/icon.key
+```
+
+icon.key必须为256字节；密钥和游戏资源不得提交到源码仓库。Switch启动日志写入sdmc:/switch/whj2/runtime.log。Mac也优先使用独立icon.key，缺少时兼容原本地日文EXE提取。
 
 构建输出集中到固定build/build-switch目录，后续更新覆盖产物。同版本已有有效结果可以复用。
 

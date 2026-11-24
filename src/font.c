@@ -105,20 +105,23 @@ KFont *kfont_open(const char *path,int simplified){
         if(FT_New_Face(f->library,path,0,&f->faces[0])){kfont_close(f);return NULL;}
         select_unicode(f->faces[0]);
         f->count=1;
-    }else {
+    }
+    {
 #ifdef __SWITCH__
-        if(R_FAILED(plInitialize(PlServiceType_User))){kfont_close(f);return NULL;}f->shared=1;
+        if(R_FAILED(plInitialize(PlServiceType_User))){if(!f->count){kfont_close(f);return NULL;}}
+        else {f->shared=1;
         PlSharedFontType types[]={simplified?PlSharedFontType_ChineseSimplified:PlSharedFontType_Standard,simplified?PlSharedFontType_Standard:PlSharedFontType_ChineseSimplified,PlSharedFontType_ExtChineseSimplified};
-        for(unsigned i=0;i<3;i++){
+        for(unsigned i=0;i<3&&f->count<3;i++){
             PlFontData data;
             if(R_SUCCEEDED(plGetSharedFontByType(&data,types[i]))&&!FT_New_Memory_Face(f->library,data.address,data.size,0,&f->faces[f->count])){
                 select_unicode(f->faces[f->count]);
                 f->count++;
             }
         }
+        }
 #elif defined(__APPLE__)
         (void)simplified;
-        if(!FT_New_Face(f->library,"/System/Library/Fonts/Hiragino Sans GB.ttc",0,&f->faces[0])){select_unicode(f->faces[0]);f->count=1;}
+        if(!FT_New_Face(f->library,"/System/Library/Fonts/Hiragino Sans GB.ttc",0,&f->faces[f->count])){select_unicode(f->faces[f->count]);f->count++;}
 #else
         (void)simplified;
 #endif

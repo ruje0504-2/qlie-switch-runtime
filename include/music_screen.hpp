@@ -11,6 +11,7 @@ class MusicScreen {
  void highlight();void play(int);void text(const std::string&,unsigned,const std::string&,unsigned,unsigned,unsigned);void refresh();
  void uiSound(const char*);
 public:
+ void setFont(KFont*value){font=value;}
  enum Destination {NoDestination,CG,Replay};
  Destination destination=NoDestination;
  Destination takeDestination(){auto value=destination;destination=NoDestination;return value;}

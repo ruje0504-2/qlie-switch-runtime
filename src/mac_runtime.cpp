@@ -37,6 +37,7 @@ extern "C" {
 #include <iostream>
 #include <memory>
 #include <cstring>
+#include <cctype>
 #include <cstdlib>
 #include <cmath>
 #include <cstdio>
@@ -96,6 +97,7 @@ struct Frontend {
  std::array<unsigned,3>audioTypes{{0,2,2}};
  bool cpuInterlaced=false;unsigned cpuScanlinePhase=0;qlie::Bytes cpuScanlineHistory;
  KFont*font=nullptr;
+ std::vector<std::string> fontFiles{std::string()};int selectedFont=0;
  SDL_Window*window=nullptr;
  SDL_Renderer*renderer=nullptr;
  SDL_Texture*texture=nullptr;
@@ -108,14 +110,14 @@ struct Frontend {
  std::map<std::tuple<uint32_t,unsigned,unsigned,uint32_t>,CachedGlyph>uiGlyphs;
  struct SlotPreview {bool exists=false,damaged=false;whj2::Image thumbnail;std::vector<uint32_t>excerpt;};
  std::map<unsigned,SlotPreview>slotPreviews;
- std::string text,name,status="",saveDir;
+ std::string text,name,status="",saveDir,gameDir;
  bool menu=true,done=false,hidden=false,fpsVisible=false;
  int focus=0;
  unsigned advances=0,panelDraws=0;
  whj2::FramePacer framePacer;
  whj2::FpsOverlay fpsDisplay;
  std::map<SDL_JoystickID,SDL_GameController*>controllers;
- Frontend(const std::string&game,const std::string&saves):assets(game),story(assets),pixels(1280*720*4),saveDir(saves){unsigned subsystems=SDL_INIT_AUDIO|SDL_INIT_EVENTS;
+ Frontend(const std::string&game,const std::string&saves):assets(game),story(assets),pixels(1280*720*4),saveDir(saves),gameDir(game){unsigned subsystems=SDL_INIT_AUDIO|SDL_INIT_EVENTS;
  bool nativeRequested=false;
 #ifdef WHJ2_WITH_VULKAN
  const char*gpuMode=std::getenv("WHJ2_RENDERER");
@@ -158,11 +160,7 @@ struct Frontend {
  images->setReadAhead(readAhead.get());audio->setReadAhead(readAhead.get());
 #endif
  messageText=std::make_unique<whj2::MessageText>(assets,true);
- {
-  whj2::MessageText preview(assets);whj2::MessageStyle style{400,50,20,20,0xffffff};
-  preview.start("[spd,0]   美 少 女 万 華 鏡");auto fontPreview=preview.render(font,style);
-  preview.start("[spd,0]「サンプルテキスト」");gameMenu.setTextPreviews(std::move(fontPreview),preview.render(font,style));
- }
+ refreshFontPreviews();
  transition=std::make_unique<whj2::SceneTransition>(assets);
  movie=std::make_unique<whj2::Movie>(assets,*audio);
  voices=std::make_unique<whj2::VoiceResolver>(assets);
@@ -174,6 +172,7 @@ struct Frontend {
  cgScreen=std::make_unique<whj2::CgScreen>(assets,progress,font);
  if(std::filesystem::exists(saveDir+"/system.progress"))progress.restore(qlie::file(saveDir+"/system.progress"));
  if(std::filesystem::exists(saveDir+"/settings.cfg"))settings.restore(qlie::file(saveDir+"/settings.cfg"));
+ loadFontSelection();
  applySettings(false);
  for(auto type:{"music","sound"}){std::istringstream in(qlie::cp932(assets.read(std::string("avg/imoscripter_template_")+type+".txt")));
  std::string l;
@@ -235,6 +234,34 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }
  void showTitle(){normalSkip=false;currentPageKey.clear();cgScreen->close();replayActive=false;replayScreen->close();opening=0;images->clear();syncProgress();menu=true;hidden=false;focus=0;upperMenu->close();gameMenu.close();
   title->reset(false,progress.extras());audio->stopAll();audio->playFile(assets,0,"music/wbgm06.ogg",true,255.f/256,0,0);warmNextScene(true);
+ }
+ void refreshFontPreviews(){
+  whj2::MessageText preview(assets);whj2::MessageStyle style{400,50,20,20,0xffffff};
+  preview.start("[spd,0]   美 少 女 万 華 鏡");auto sample=preview.render(font,style);
+  preview.start("[spd,0]「サンプルテキスト」");gameMenu.setTextPreviews(std::move(sample),preview.render(font,style));
+ }
+ bool selectFont(int index,bool persist){
+  if(index<0||size_t(index)>=fontFiles.size())return false;
+  if(index==selectedFont){if(persist)qlie::write_file(saveDir+"/font.cfg",qlie::Bytes(fontFiles[index].begin(),fontFiles[index].end()));return true;}
+  std::string path=index?gameDir+"/fonts/"+fontFiles[index]:std::string();
+  std::unique_ptr<KFont,void(*)(KFont*)> nextFont(kfont_open(index?path.c_str():nullptr,0),kfont_close);
+  if(!nextFont){status="フォントを読み込めませんでした。";std::cerr<<"FONT FAIL file="<<fontFiles[index]<<"\n";return false;}
+  if(persist)qlie::write_file(saveDir+"/font.cfg",qlie::Bytes(fontFiles[index].begin(),fontFiles[index].end()));
+  auto*previous=font;font=nextFont.release();selectedFont=index;uiGlyphs.clear();musicScreen->setFont(font);cgScreen->setFont(font);
+  refreshFontPreviews();if(!text.empty())refreshMessage();
+  if(story.state.awaiting){auto savedChoice=choiceScreen->save();choiceScreen->restore(savedChoice,font);}
+  kfont_close(previous);return true;
+ }
+ void loadFontSelection(){
+  try{
+   auto directory=std::filesystem::path(gameDir)/"fonts";
+   if(std::filesystem::is_directory(directory))for(auto&entry:std::filesystem::directory_iterator(directory))if(entry.is_regular_file()){
+    auto ext=entry.path().extension().string();std::transform(ext.begin(),ext.end(),ext.begin(),[](unsigned char c){return char(std::tolower(c));});
+    if(ext==".ttf"||ext==".otf"||ext==".ttc")fontFiles.push_back(entry.path().filename().string());
+   }
+   std::sort(fontFiles.begin()+1,fontFiles.end());
+   if(std::filesystem::exists(saveDir+"/font.cfg")){auto bytes=qlie::file(saveDir+"/font.cfg");std::string name(bytes.begin(),bytes.end());auto at=std::find(fontFiles.begin(),fontFiles.end(),name);if(at!=fontFiles.end())selectFont(int(at-fontFiles.begin()),false);else {status="保存されたフォントが見つかりません。";std::cerr<<"FONT selection unavailable\n";}}
+  }catch(const std::exception&e){status="フォント設定を読み込めませんでした。";std::cerr<<"FONT CONFIG FAIL "<<e.what()<<"\n";}
  }
  void applySettings(bool persist=true){
  bool interlace=settings.get("Interlace")!=0;bool cpuMode=interlace;
@@ -511,10 +538,12 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(action==UI::Yes){action=gameMenu.requested;gameMenu.dismissPrompt();
  if(action==UI::DeleteSlot){deleteSlot(selectedSlot);return;}
  if(action==UI::Slot){if(gameMenu.panel==UI::Load){load(selectedSlot);gameMenu.close();}else save(selectedSlot);return;}
- if(action==UI::ResetSettings){settings.reset();applySettings();return;}
+ if(action==UI::ResetSettings){settings.reset();selectFont(0,true);applySettings();return;}
  if(action==UI::Quit){done=true;return;}
  if(action==UI::Title){if(movie->playing())movie->stop();showTitle();return;}}
- if(action==UI::Close){if(gameMenu.panel==UI::History&&historyVoicePlayed)audio->volume(3,0,200,true);historyVoicePlayed=false;gameMenu.close();return;}
+ if(action==UI::ChooseFont){gameMenu.open(UI::Fonts);gameMenu.fontCount=int(fontFiles.size());gameMenu.focus=selectedFont;return;}
+ if(action==UI::ApplyFont){if(selectFont(gameMenu.focus,true)){gameMenu.open(UI::Settings);gameMenu.focus=24;status.clear();}return;}
+ if(action==UI::Close){if(gameMenu.panel==UI::Fonts){gameMenu.open(UI::Settings);gameMenu.focus=24;status.clear();return;}if(gameMenu.panel==UI::History&&historyVoicePlayed)audio->volume(3,0,200,true);historyVoicePlayed=false;gameMenu.close();return;}
  if(action==UI::Quit||action==UI::Title||action==UI::ResetSettings){gameMenu.ask(action);return;}
  if(action==UI::DeleteSlot){selectedSlot=unsigned(gameMenu.slot());if(std::filesystem::exists(slotPrefix(selectedSlot)+".story"))gameMenu.ask(UI::DeleteSlot);else status="保存データがありません。";return;}
  if(action==UI::Slot){selectedSlot=unsigned(gameMenu.slot());
@@ -567,6 +596,12 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }
  refreshSlotFlags();if(frameTarget)gameMenu.draw(*frameTarget);else gameMenu.draw(pixels);
  if(gameMenu.asking){auto prompt=gameMenu.requested==UI::Quit?"ゲームを終了しますか？":gameMenu.requested==UI::Title?"タイトルに戻りますか？":gameMenu.requested==UI::ResetSettings?"設定を初期状態に戻しますか？":gameMenu.requested==UI::DeleteSlot?"データを削除しますか？":gameMenu.panel==UI::Load?"データをロードしますか？":"データを上書き保存しますか？";line(prompt,440,275,28);return;}
+ if(gameMenu.panel==UI::Fonts){
+  line("フォント選択",350,150,30);int first=gameMenu.focus/5*5;
+  for(int row=0;row<5&&first+row<int(fontFiles.size());row++){int index=first+row;auto label=index?fontFiles[index]:"標準フォント";if(index==selectedFont)label="* "+label;line(label,340,220+row*60,24,index==gameMenu.focus?0xffff88:0xffffff);}
+  if(first>0)line("前へ",840,170,24);if(first+5<int(fontFiles.size()))line("次へ",840,555,24);
+  line("キャンセル",570,565,24);if(!status.empty())line(status,320,525,18);return;
+ }
  if(gameMenu.panel==UI::Settings&&gameMenu.allowSceneReturn)line("回想を終了",520,680,26,gameMenu.focus==16?0xffff88:0xffffff);
  if(gameMenu.panel==UI::Save||gameMenu.panel==UI::Load){for(int i=0;i<8;i++){unsigned slot=unsigned(gameMenu.page*8+i+1);int x=i<4?198:834,y=136+(i%4)*135;line("No."+std::to_string(slot),x,y,16,0xff5555);auto&preview=slotPreview(slot);if(preview.exists){if(!preview.thumbnail.pixels.empty()){whj2::RenderQueue queue;queue.image(preview.thumbnail,whj2::imagePlacement(i<4?27:660,137+(i%4)*135,1,1,0,0,0,160,90),0,255,0,0xffffff);if(frameTarget)queue.draw(*frameTarget,1280,720);else queue.draw(pixels,1280,720);}auto&chars=preview.excerpt;int px=x;for(size_t n=0;n<chars.size()&&n<23;n++){drawGlyph(chars[n],px,y+22,18,18,0xffffff);px+=chars[n]<128?9:18;}}else line("NO DATA",x,y+24,18,0x999999);}
  if(!status.empty())line(status,30,677,18);}

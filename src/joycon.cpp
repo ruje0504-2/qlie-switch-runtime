@@ -12,7 +12,8 @@ JoyConInput JoyCon::poll(uint64_t ms){
  out.confirm=down&(HidNpadButton_A|HidNpadButton_AnySL);
  out.back=down&(HidNpadButton_B|HidNpadButton_AnySR);
  out.save=down&(HidNpadButton_X|HidNpadButton_L|HidNpadButton_R);
- out.load=down&(HidNpadButton_Y|HidNpadButton_ZL|HidNpadButton_ZR);
+ out.load=down&(HidNpadButton_ZL|HidNpadButton_ZR);
+ out.upperMenu=down&HidNpadButton_Y;
  out.menu=down&(HidNpadButton_Plus|HidNpadButton_Minus);
  out.hide=down&(HidNpadButton_StickL|HidNpadButton_StickR);
  int direction=(held&HidNpadButton_AnyUp)?-1:(held&HidNpadButton_AnyDown)?1:0;

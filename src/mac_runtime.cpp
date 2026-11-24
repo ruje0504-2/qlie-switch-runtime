@@ -10,6 +10,7 @@
 #include "movie.hpp"
 #include "joycon.hpp"
 #include "voice.hpp"
+#include "upper_menu.hpp"
 #include <sstream>
 #include <algorithm>
 extern "C" {
@@ -21,6 +22,7 @@ extern "C" {
 #include <memory>
 #include <cstring>
 #include <cstdlib>
+#include <cmath>
 #include <cstdio>
 static std::vector<uint32_t> utf8(const std::string&s){std::vector<uint32_t>o;
  for(size_t p=0;p<s.size();){unsigned c=uint8_t(s[p++]),n=0;
@@ -50,6 +52,8 @@ struct Frontend {
  std::string pendingBody,pendingSpeaker,pendingVoice;
  std::unique_ptr<whj2::Movie>movie;
  std::unique_ptr<whj2::VoiceResolver>voices;
+ std::unique_ptr<whj2::UpperMenu>upperMenu;
+ bool fingerActive=false;SDL_FingerID fingerId=0;float fingerX=0,fingerY=0;qlie::Bytes gestureStory;
  bool movieOnly=false,movieCaptured=false,touchOnlyTest=false;
  qlie::Bytes touchSavedStory;std::string touchSavedText;
  std::map<std::string,std::map<std::string,std::string>>audioTemplates;
@@ -87,6 +91,7 @@ struct Frontend {
  transition=std::make_unique<whj2::SceneTransition>(assets);
  movie=std::make_unique<whj2::Movie>(assets,*audio);
  voices=std::make_unique<whj2::VoiceResolver>(assets);
+ upperMenu=std::make_unique<whj2::UpperMenu>(assets);
  for(auto type:{"music","sound"}){std::istringstream in(qlie::cp932(assets.read(std::string("avg/imoscripter_template_")+type+".txt")));
  std::string l;
  while(std::getline(in,l)){auto p=l.find(61);
@@ -274,7 +279,13 @@ struct Frontend {
  if(messageText->reveal()){auto action=sentenceWait.prewaiting()?sentenceWait.confirm():whj2::SentenceWait::None;refreshMessage();if(action==whj2::SentenceWait::Next)next();else if(action==whj2::SentenceWait::Resume)next(true);return;}
  auto action=sentenceWait.confirm();if(action==whj2::SentenceWait::Next)next();else if(action==whj2::SentenceWait::Resume)next(true);}
  }
+ void upperAction(whj2::UpperMenu::Action action){if(action==whj2::UpperMenu::None)return;upperMenu->close();
+ if(action==whj2::UpperMenu::Quit){done=true;return;}
+ if(action==whj2::UpperMenu::Title){if(movie->playing())movie->stop();audio->stopAll();menu=true;focus=0;return;}
+ if(action==whj2::UpperMenu::Screen){auto flags=SDL_GetWindowFlags(window);if(SDL_SetWindowFullscreen(window,(flags&SDL_WINDOW_FULLSCREEN_DESKTOP)?0:SDL_WINDOW_FULLSCREEN_DESKTOP))std::cerr<<"PENDING-UPPERMENU screen mode: "<<SDL_GetError()<<"\n";}
+ }
  void draw(){if(movie->playing()){pixels=movie->image().pixels;
+ upperMenu->draw(pixels);
  SDL_UpdateTexture(texture,nullptr,pixels.data(),1280*4);
  SDL_RenderClear(renderer);
  SDL_RenderCopy(renderer,texture,nullptr,nullptr);
@@ -293,6 +304,7 @@ struct Frontend {
  if(images->messageVisible())line(whj2::messageDisplayName(name),200,570,26,0xffffff);
  if(story.state.awaiting)for(size_t i=0;i<story.state.choices.size();i++)line((focus==int(i)?"▶ ":"　 ")+story.state.choices[i],80,220+int(i)*50,26,focus==int(i)?0xffd58b:0xffffff);
  }if(!menu&&!hidden)images->drawFaces(pixels);
+ if(!menu)upperMenu->draw(pixels);
  SDL_UpdateTexture(texture,nullptr,pixels.data(),1280*4);
  SDL_RenderClear(renderer);
  SDL_RenderCopy(renderer,texture,nullptr,nullptr);
@@ -305,6 +317,7 @@ struct Frontend {
  }
  void pointer(int px,int py){float x,y;
  SDL_RenderWindowToLogical(renderer,px,py,&x,&y);
+ if(upperMenu->visible()){upperAction(upperMenu->tap(x,y));return;}
  if(menu){if(y<210||y>=420)return;
  focus=int((y-210)/70);
  }else if(story.state.awaiting){if(y<220||y>=220+50*story.state.choices.size())return;
@@ -319,13 +332,15 @@ struct Frontend {
  else controllers[id]=c;
  std::cerr<<"INPUT controller connected id="<<id<<"\n";
  }
- void controllerKey(Uint8 button){int count=menu?3:int(story.state.choices.size());
+ void controllerKey(Uint8 button){if(button==SDL_CONTROLLER_BUTTON_Y&&!menu){upperMenu->toggle();return;}
+ if(upperMenu->visible()){if(button==SDL_CONTROLLER_BUTTON_A)upperAction(upperMenu->confirm());else if(button==SDL_CONTROLLER_BUTTON_B)upperMenu->close();else if(button==SDL_CONTROLLER_BUTTON_DPAD_UP||button==SDL_CONTROLLER_BUTTON_DPAD_LEFT)upperMenu->move(-1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_DOWN||button==SDL_CONTROLLER_BUTTON_DPAD_RIGHT)upperMenu->move(1);return;}
+ int count=menu?3:int(story.state.choices.size());
  switch(button){case SDL_CONTROLLER_BUTTON_A:activate();break;
  case SDL_CONTROLLER_BUTTON_B:if(movie->playing())movie->stop();menu=true;focus=0;if(movieOnly)done=true;break;
  case SDL_CONTROLLER_BUTTON_DPAD_UP:if(count)focus=(focus+count-1)%count;break;
  case SDL_CONTROLLER_BUTTON_DPAD_DOWN:if(count)focus=(focus+1)%count;break;
  case SDL_CONTROLLER_BUTTON_X:save();break;
- case SDL_CONTROLLER_BUTTON_Y:load();break;
+
  default:break;
  }}
  int run(unsigned smoke){
@@ -354,6 +369,9 @@ struct Frontend {
  if(!appletMainLoop()){done=true;
  break;
  }auto pad=joycon.poll(now);
+ if(pad.upperMenu&&!menu)upperMenu->toggle();
+ if(upperMenu->visible()){if(pad.direction)upperMenu->move(pad.direction);if(pad.confirm)upperAction(upperMenu->confirm());else if(pad.back||pad.menu)upperMenu->close();}
+ else {
  int count=menu?3:int(story.state.choices.size());
  if(count&&pad.direction)focus=(focus+count+pad.direction)%count;
  if(pad.menu||pad.back){if(movie->playing())movie->stop();
@@ -363,6 +381,7 @@ struct Frontend {
  if(pad.save)save();
  if(pad.load)load();
  if(pad.hide)hidden=!hidden;
+ }
 #endif
  if(movie->playing()){movie->update();
  if(!movie->playing()){if(movieOnly){done=true;
@@ -388,10 +407,11 @@ else if(e.type==SDL_KEYDOWN&&!e.key.repeat){auto k=e.key.keysym.sym;
  pointer(e.button.x,e.button.y);
  }
 #endif
-else if(e.type==SDL_FINGERDOWN){int w,h;
- SDL_GetWindowSize(window,&w,&h);
- std::cerr<<"INPUT touch\n";
- pointer(int(e.tfinger.x*w),int(e.tfinger.y*h));
+else if(e.type==SDL_FINGERDOWN){if(!fingerActive){fingerActive=true;fingerId=e.tfinger.fingerId;fingerX=e.tfinger.x;fingerY=e.tfinger.y;}}
+ else if(e.type==SDL_FINGERUP&&fingerActive&&e.tfinger.fingerId==fingerId){fingerActive=false;
+ float dx=(e.tfinger.x-fingerX)*1280,dy=(e.tfinger.y-fingerY)*720;
+ if(!menu&&upperMenu->swipe(dx,dy)){std::cerr<<"INPUT downward swipe upper menu\n";}
+ else if(std::abs(dx)<24&&std::abs(dy)<24){int w,h;SDL_GetWindowSize(window,&w,&h);std::cerr<<"INPUT touch\n";pointer(int(e.tfinger.x*w),int(e.tfinger.y*h));}
  }else if(e.type==SDL_CONTROLLERDEVICEADDED)controllerAdded(e.cdevice.which);
  else if(e.type==SDL_CONTROLLERDEVICEREMOVED){auto i=controllers.find(e.cdevice.which);
  if(i!=controllers.end()){SDL_GameControllerClose(i->second);
@@ -405,7 +425,7 @@ controllerKey(e.cbutton.button);
  movieCaptured=true;
  std::cerr<<"MOVIE screenshot audio_clock_ms="<<movie->elapsedMs()<<"\n";
  }if(smoke){if(touchOnlyTest){
- auto touch=[](float x,float y){SDL_Event ev{};ev.type=SDL_FINGERDOWN;ev.tfinger.x=x;ev.tfinger.y=y;if(SDL_PushEvent(&ev)<0)throw std::runtime_error(SDL_GetError());};
+ auto touch=[](float x,float y){SDL_Event ev{};ev.type=SDL_FINGERDOWN;ev.tfinger.x=x;ev.tfinger.y=y;if(SDL_PushEvent(&ev)<0)throw std::runtime_error(SDL_GetError());ev.type=SDL_FINGERUP;if(SDL_PushEvent(&ev)<0)throw std::runtime_error(SDL_GetError());};
  auto controller=[](Uint8 button){SDL_Event ev{};ev.type=SDL_CONTROLLERBUTTONDOWN;ev.cbutton.button=button;if(SDL_PushEvent(&ev)<0)throw std::runtime_error(SDL_GetError());};
  if(frames==1)touch(0.2f,0.44f);
  if(frames==3&&(!menu||std::filesystem::exists(saveDir+"/slot01.story")))throw std::runtime_error("Empty touch load changed state");
@@ -415,12 +435,16 @@ controllerKey(e.cbutton.button);
  if(frames==16&&(menu||std::filesystem::exists(saveDir+"/slot01.story")))throw std::runtime_error("Removed HUD hotspot is still active");
  if(frames==24)controller(SDL_CONTROLLER_BUTTON_X);
  if(frames==26){touchSavedStory=qlie::file(saveDir+"/slot01.story");touchSavedText=text;}
- if(frames==38)controller(SDL_CONTROLLER_BUTTON_Y);
+ if(frames==18){gestureStory=story.save();controller(SDL_CONTROLLER_BUTTON_Y);}
+ if(frames==20){if(!upperMenu->visible()||story.save()!=gestureStory)throw std::runtime_error("Y menu changed story");controller(SDL_CONTROLLER_BUTTON_Y);}
+ if(frames==38)load();
+ if(frames==42){gestureStory=story.save();SDL_Event ev{};ev.type=SDL_FINGERDOWN;ev.tfinger.x=.5f;ev.tfinger.y=.2f;SDL_PushEvent(&ev);ev.type=SDL_FINGERUP;ev.tfinger.y=.5f;SDL_PushEvent(&ev);}
+ if(frames==44){if(!upperMenu->visible()||story.save()!=gestureStory)throw std::runtime_error("Swipe menu changed story");snapshot("upper-menu.bmp");controller(SDL_CONTROLLER_BUTTON_Y);}
  if(frames==40&&(story.save()!=touchSavedStory||text!=touchSavedText))throw std::runtime_error("Touch load mismatch");
  if(frames==48)controller(SDL_CONTROLLER_BUTTON_B);
  if(frames==50&&!menu)throw std::runtime_error("Touch menu did not open");
  if(frames==62&&menu)throw std::runtime_error("Touch new game did not activate");
- if(++frames>=smoke){snapshot("touch.bmp");std::cerr<<"TARGET INPUT PASS touch advance / controller save-load-menu / new-game\n";done=true;}continue;
+ if(++frames>=smoke){snapshot("touch.bmp");std::cerr<<"TARGET INPUT PASS touch / Y and swipe upper menu / save-load methods / new-game\n";done=true;}continue;
  }if(frames==1 || (frames>=12 && frames%12==0)){SDL_Event input{};
  switch((frames/12)%4){case 0:input.type=SDL_KEYDOWN;
  input.key.keysym.sym=SDLK_RETURN;

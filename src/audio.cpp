@@ -83,10 +83,15 @@ void Audio::playFile(qlie::Assets&assets,unsigned ch,const std::string&path,bool
  auto pcm=ready?std::move(ready->pcm):decodePcm(assets.read(path));
  playDecoded(ch,std::move(pcm),loop,gain,ms,path,category);
 }
+void Audio::playMusicFile(qlie::Assets&assets,const std::string&path,bool loop,float gain,unsigned ms,unsigned category,bool explicitFade){
+ auto ready=readAhead?readAhead->take(qlie::canonical(path)):std::nullopt;
+ auto pcm=ready?std::move(ready->pcm):decodePcm(assets.read(path));
+ playDecoded(0,std::move(pcm),loop,gain,ms,path,category,true,explicitFade);
+}
 void Audio::play(unsigned ch,const qlie::Bytes&bytes,bool loop,float gain,unsigned ms,const std::string&path,unsigned category){
  playDecoded(ch,decodePcm(bytes),loop,gain,ms,path,category);
 }
-void Audio::playDecoded(unsigned ch,DecodedPcm pcm,bool loop,float gain,unsigned ms,const std::string&path,unsigned category){
+void Audio::playDecoded(unsigned ch,DecodedPcm pcm,bool loop,float gain,unsigned ms,const std::string&path,unsigned category,bool musicCrossfade,bool explicitFade){
  if(ch>=channels.size()||pcm.empty())throw std::runtime_error("Invalid PCM channel or clip");
  size_t stereoFrames=pcm.size()/2;
  Channel c;c.pcm=std::move(pcm);c.path=path;
@@ -97,6 +102,17 @@ void Audio::playDecoded(unsigned ch,DecodedPcm pcm,bool loop,float gain,unsigned
  c.gain=c.fade?0:c.target;
  c.step=c.fade?c.target/float(c.fade):0;
  SDL_LockAudioDevice(device);
+ if(musicCrossfade){
+  auto&previous=channels[MusicPreviousChannel];
+  const bool audible=channels[ch].gain>0&&(channels[ch].loop||channels[ch].pos+1<channels[ch].pcm.size());
+  if(!audible&&!explicitFade){c.fade=0;c.step=0;c.gain=c.target;}
+  if(ms&&audible){
+   previous=std::move(channels[ch]);
+   previous.category=c.category;previous.target=0;previous.stop=true;
+   previous.fade=uint64_t(ms)*44100/1000;
+   previous.step=-previous.gain/float(previous.fade);
+  }else previous=Channel{};
+ }
  channels[ch]=std::move(c);
  SDL_UnlockAudioDevice(device);
  std::cerr<<"AUDIO play channel="<<ch<<" stereo_frames="<<stereoFrames<<" loop="<<loop<<" gain="<<gain<<"\n";

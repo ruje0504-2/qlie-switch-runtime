@@ -268,7 +268,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(c==t.npos)throw std::runtime_error("Unknown audio template "+t);
  attrs[t.substr(0,c)]=t.substr(c+1);
  }for(auto&v:attrs)if(v.first!="file"&&v.first!="loop"&&v.first!="vol"&&v.first!="voltype"&&v.first!="time"&&v.first!="clear")throw std::runtime_error("Unsupported audio property "+v.first);
- if(attrs.count("clear")){audio->volume(ch,0,0,true);
+ if(attrs.count("clear")){audio->volume(ch,0,0,true);if(ch==0)audio->volume(whj2::Audio::MusicPreviousChannel,0,0,true);
  return true;
  }if(attrs.count("loop"))loops[ch]=attrs["loop"]=="true";
  if(attrs.count("vol"))volumes[ch]=std::stof(attrs["vol"])/100.f*(ch==0?0.4f:1.f);
@@ -276,11 +276,12 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(attrs.count("voltype")){auto type=attrs["voltype"];if(type=="bgm")audioTypes[ch]=0;else if(type=="voice")audioTypes[ch]=1;else if(type=="se")audioTypes[ch]=2;else std::cerr<<"PENDING audio volume type "<<type<<"\n";}
  unsigned ms=audioTimes[ch];
  if(attrs.count("file")){auto f=attrs["file"];
- if(f=="none"){audio->volume(ch,0,ms,true);
+ if(f=="none"){audio->volume(ch,0,ms,true);if(ch==0)audio->volume(whj2::Audio::MusicPreviousChannel,0,ms,true);
  return true;
  }std::string path=(ch==0?"music/":"se/")+f;
  if(!assets.exists(path))path+=".ogg";
- audio->playFile(assets,ch,path,loops[ch],volumes[ch],ms,audioTypes[ch]);
+ if(ch==0)audio->playMusicFile(assets,path,loops[ch],volumes[ch],ms,audioTypes[ch],attrs.count("time")!=0);
+ else audio->playFile(assets,ch,path,loops[ch],volumes[ch],ms,audioTypes[ch]);
  }else audio->volume(ch,volumes[ch],ms);
  return true;
  }

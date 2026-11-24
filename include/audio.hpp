@@ -9,13 +9,13 @@ struct AudioStats {uint64_t frames,nonzero;};
 struct AudioPosition {uint64_t frame=0,length=0;bool loop=false,playing=false;};
 class Audio {
 public:
- static constexpr unsigned SystemChannel=24,ChannelCount=25;
+ static constexpr unsigned MusicPreviousChannel=4,SystemChannel=24,ChannelCount=25;
 private:
  struct Channel {DecodedPcm pcm;std::string path;unsigned category=2;size_t pos=0;bool loop=false,stop=false;float gain=0,target=0,step=0;uint64_t fade=0;};
  std::array<float,6> userGains{{1,1,1,1,1,1}};
  SDL_AudioDeviceID device=0;std::array<Channel,ChannelCount>channels;std::atomic<uint64_t>frames{0},nonzero{0};
  AssetReadAhead*readAhead=nullptr;
- void playDecoded(unsigned,DecodedPcm,bool,float,unsigned,const std::string&,unsigned);
+ void playDecoded(unsigned,DecodedPcm,bool,float,unsigned,const std::string&,unsigned,bool musicCrossfade=false,bool explicitFade=false);
  static void callback(void*,Uint8*,int);
 #ifdef __SWITCH__
  ThreadBinding mixerBinding;
@@ -26,6 +26,7 @@ public:
  void setReadAhead(AssetReadAhead*loader){readAhead=loader;}
  void warmFile(qlie::Assets&,const std::string&);
  void playFile(qlie::Assets&,unsigned,const std::string&,bool,float,unsigned,unsigned);
+ void playMusicFile(qlie::Assets&,const std::string&,bool,float,unsigned,unsigned,bool explicitFade=false);
  Audio();~Audio();Audio(const Audio&)=delete;Audio&operator=(const Audio&)=delete;
  void play(unsigned,const qlie::Bytes&,bool,float,unsigned fadeMs=0,const std::string&path="",unsigned category=6);
  void volume(unsigned,float,unsigned fadeMs=0,bool stopAfter=false);

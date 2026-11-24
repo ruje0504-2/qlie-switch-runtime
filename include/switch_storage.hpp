@@ -11,14 +11,6 @@ namespace whj2 {
 class SwitchStorage {
  #ifdef __SWITCH__
  bool romfs=false,save=false;
-
- static void require(Result result, const char* operation){
-  if(R_FAILED(result)){
-   throw std::runtime_error(std::string(operation) + " failed (module " +
-                            std::to_string(R_MODULE(result)) + ", description " +
-                            std::to_string(R_DESCRIPTION(result)) + ")");
-  }
- }
  #endif
 public:
  SwitchStorage()=default;
@@ -26,15 +18,14 @@ public:
  SwitchStorage&operator=(const SwitchStorage&)=delete;
  void mount(std::string&game,std::string&saves){
 #ifdef __SWITCH__
-  if(!envIsNso())return;
-  require(romfsMountSelf("romfs"), "Mount installed-title RomFS");
+  if(R_FAILED(romfsMountSelf("romfs")))return;
   romfs=true;
   Result result=accountInitialize(AccountServiceType_Application);
-  require(result, "Initialize installed-title account");
+  if(R_FAILED(result))throw std::runtime_error("Cannot initialize installed-title account");
   AccountUid uid{};result=accountGetPreselectedUser(&uid);accountExit();
-  require(result, "Get installed-title save user");
+  if(R_FAILED(result))throw std::runtime_error("Cannot obtain installed-title save user");
   result=fsdevMountSaveData("save",FS_SAVEDATA_CURRENT_APPLICATIONID,uid);
-  require(result, "Mount installed-title SaveData");
+  if(R_FAILED(result))throw std::runtime_error("Cannot mount installed-title SaveData");
   save=true;game="romfs:";saves="save:";
 #else
   (void)game;(void)saves;

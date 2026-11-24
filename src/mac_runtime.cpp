@@ -1138,7 +1138,6 @@ int main(int argc,char**argv){
  if(!std::freopen(logPath,"a",stderr))return 2;
  std::setvbuf(stderr,nullptr,_IONBF,0);
  std::cerr<<"START WHJ2 runtime argc="<<argc<<"\n";
- std::cerr<<"BUILD revision="<<WHJ2_BUILD_REV<<"\n";
 #endif
 try{whj2::SwitchStorage storage;
 std::string game=argc>1?argv[1]:(std::getenv("WHJ2_GAME")?std::getenv("WHJ2_GAME"):"");
@@ -1159,9 +1158,7 @@ storage.mount(game,saves);
 #ifdef WHJ2_MAC_GAME_PICKER
 if(!whj2_mac_can_read_game(game.c_str())){char *chosen=whj2_mac_choose_game(game.c_str());if(!chosen)return 0;game=chosen;std::free(chosen);}
 #endif
-#ifndef __SWITCH__
 std::cerr<<"BUILD revision="<<WHJ2_BUILD_REV<<"\n";
-#endif
 std::cerr<<"INIT game="<<game<<" saves="<<saves<<"\n";
 Frontend f(game,saves);if(argc>4&&std::string(argv[3])=="--restore-autosave"){unsigned index=unsigned(std::stoul(argv[4]));if(index<1||index>Frontend::AutoSaveCount)throw std::runtime_error("Auto save index must be1..5");auto slot=Frontend::AutoSaveBase+index-1;if(!std::filesystem::exists(f.slotPrefix(slot)+".story"))throw std::runtime_error("Auto save slot is empty");f.opening=0;f.load(slot);}
  if(argc>4&&std::string(argv[3])=="--start-transition-smoke"){f.startTransitionTest=true;smoke=unsigned(std::stoul(argv[4]));}

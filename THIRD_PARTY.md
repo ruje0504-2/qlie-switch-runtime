@@ -15,6 +15,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 rafi441/qlie-unpack 的固定研究快照 531694715df21a9940578f4319d246ac8aa794de 仅用于独立算法比对，未发现许可文件，不复制其源码到分发工程。
 
+IMOAVI 容器和 JPEG 帧字段与 [Chtobi、Nazon 的格式分析](https://habr.com/en/articles/426431/)及本地原件交叉核对，运行时独立实现读取。
+
 ## biko3-switch-runtime FPS overlay
 
 The compact glyph rows and cyan/black FPS styling in src/fps_overlay.cpp are adapted from https://github.com/ruje0504-2/biko3-switch-runtime at bd70f2c1278ea907740baa0c3d3e9d64e9cb1b57 (runtime/scene/fps_overlay.c and runtime/ui/debug_overlay.c). Copyright (C) 2025-2026 ruje0504-2. Licensed under 0BSD; see licenses/biko3-0bsd.txt. Frame measurement is based on actual presentation intervals and does not copy its game simulation clock.

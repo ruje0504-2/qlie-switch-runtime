@@ -552,3 +552,9 @@ void kvideo_disable_audio(KVideo *v){
 
 unsigned kvideo_source_width(const KVideo *v){return v&&v->video?(unsigned)v->video->width:0;}
 unsigned kvideo_source_height(const KVideo *v){return v&&v->video?(unsigned)v->video->height:0;}
+double kvideo_duration_ms(const KVideo *v){
+    if(!v)return 0;
+    const AVStream *stream=v->format->streams[v->vi];
+    if(stream->duration>0)return stream->duration*av_q2d(stream->time_base)*1000;
+    return v->format->duration>0?v->format->duration*(1000.0/AV_TIME_BASE):0;
+}

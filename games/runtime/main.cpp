@@ -176,10 +176,19 @@ struct Frontend {
  std::array<bool,5>loops{{true,false,false,false,false}};
  std::array<unsigned,5>audioTimes{{defaultMusicFadeMs,0,0,0,0}};
  std::array<unsigned,5>audioTypes{{0,2,2,2,1}};
+ bool bgvMode=false,bgvDucked=false;
  static int audioTrack(const std::string&command){
   constexpr const char* names[]={"music01","se01","se02","se03","sebgv"};
   for(unsigned i=0;i<game_profile::storyAudioTracks;++i)if(command==names[i])return int(i);
   return -1;
+ }
+ void updateBackgroundVoice(){
+  if constexpr (game_profile::storyAudioTracks>3){
+   const bool duck=bgvMode&&audio->playing(3);
+   if(duck==bgvDucked)return;
+   bgvDucked=duck;
+   audio->volume(whj2::Audio::StoryBgvChannel,duck?0:volumes[4],duck?250:1000);
+  }
  }
  KFont*font=nullptr;
  std::unique_ptr<KFont,decltype(&kfont_close)> localizedFont{nullptr,kfont_close};
@@ -411,7 +420,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  void showTitle(){cancelPendingScene();menuFade.reset();titleStarting=false;titleStartElapsed=0;transition->reset();normalSkip=false;currentPageKey.clear();extrasExit.reset();cgScreen->close();replayActive=false;replayScreen->close();if(musicScreen->visible())musicScreen->close();opening=0;images->clear();syncProgress();prepareExtras();menu=true;hidden=false;focus=0;upperMenu->close();gameMenu.close();
   const bool alternate=preparedTitleAlternate?*preparedTitleAlternate:title->rollAlternate();
   preparedTitleAlternate.reset();
-  title->reset(alternate,progress.extras());audio->stopAll();audio->playFile(assets,0,game_profile::titleMusic,true,255.f/256,0,0);warmNextScene(true);
+  title->reset(alternate,progress.extras());audio->stopAll();bgvMode=bgvDucked=false;audio->playFile(assets,0,game_profile::titleMusic,true,255.f/256,0,0);warmNextScene(true);
  }
  void invalidateHistoryRows(){historyRows={};historyViewOffset=-1;}
  void replaceHistory(std::vector<whj2::HistoryEntry> entries={}){
@@ -496,7 +505,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
      v.first=="clear"||v.first=="oncetime")continue;
   if(game_profile::storyAudioTracks>3){
    if(v.first=="pan"&&v.second=="50")continue;
-   if(v.first=="delay"&&v.second=="0")continue;
+   if(v.first=="delay")continue;
+   if(v.first=="trans"&&v.second=="continue"&&!attrs.count("file"))continue;
    if(v.first=="id"||v.first=="mode")continue;
   }
   throw std::runtime_error("Unsupported audio property "+v.first);
@@ -507,12 +517,15 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   if(attrs.count("clear"))audioTypes[ch]=cmd=="sebgv"?1:2;
  }
  if(attrs.count("clear")){audio->volume(output,0,0,true);if(ch==0)audio->volume(whj2::Audio::MusicPreviousChannel,0,0,true);
+ if(ch==4){bgvMode=false;bgvDucked=false;}
  return true;
  }if(attrs.count("loop"))loops[ch]=attrs["loop"]=="true"||attrs["loop"]=="infinity";
  if(attrs.count("vol"))volumes[ch]=std::stof(attrs["vol"])/100.f*(ch==0?game_profile::storyMusicGain:1.f);
  if(attrs.count("time"))audioTimes[ch]=unsigned(std::stoul(attrs["time"]));
  if(attrs.count("voltype")){auto type=attrs["voltype"];if(type=="bgm")audioTypes[ch]=0;else if(type=="voice")audioTypes[ch]=1;else if(type=="se")audioTypes[ch]=2;else QLIE_LOG_LINE(<<"PENDING audio volume type "<<type<<"\n");}
+ if(ch==4&&attrs.count("mode"))bgvMode=attrs["mode"]=="bgv";
  const unsigned ms=attrs.count("oncetime")?unsigned(std::stoul(attrs["oncetime"])):audioTimes[ch];
+ const float gain=ch==4&&bgvMode&&audio->playing(3)?0:volumes[ch];
  if(attrs.count("file")){auto f=attrs["file"];
  if(f=="none"){if(ch==0)audio->stopMusic(ms,audioTypes[ch]);else audio->volume(output,0,ms,true);
  return true;
@@ -520,8 +533,9 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  std::string path=(ch==0?"music/":"se/")+f;
  if(!assets.exists(path))path+=".ogg";
  if(ch==0)audio->playMusicFile(assets,path,loops[ch],volumes[ch],ms,audioTypes[ch],attrs.count("time")||attrs.count("oncetime"));
- else audio->playFile(assets,output,path,loops[ch],volumes[ch],ms,audioTypes[ch]);
- }else audio->volume(output,volumes[ch],ms);
+ else audio->playFile(assets,output,path,loops[ch],gain,ms,audioTypes[ch],
+                      attrs.count("delay")?unsigned(std::stoul(attrs["delay"])):0);
+ }else audio->volume(output,gain,ms);
  return true;
  }
  void playSceneSounds(){
@@ -720,7 +734,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   for(const auto&path:resources)readAhead->release(qlie::canonical(path));
   if(sceneCommand){playSceneSounds();continue;}
  }
- if(e.type=="create"||e.type=="free"){audio->stopAll();
+ if(e.type=="create"||e.type=="free"){audio->stopAll();bgvMode=bgvDucked=false;
  images->clear();
  transition->reset();
  sentenceWait=whj2::SentenceWait{};
@@ -789,6 +803,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
     mixer.n(audioTimes[i]);
     mixer.n(audioTypes[i]);
    }
+   if constexpr (game_profile::storyAudioTracks>3)mixer.n(bgvMode);
    output.write(".mixer",mixer.bytes);
    output.write(".history",whj2::saveHistory(history));
    output.write(".story",story.save());
@@ -874,6 +889,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   std::array<float,5> volumes{};
   std::array<bool,5> loops{};
   std::array<unsigned,5> times{},types{};
+  bool bgvMode=false;
   whj2::SentenceWait wait;
   whj2::AutoPlay autoPlay;
   std::unique_ptr<whj2::MessageText> message;
@@ -892,13 +908,15 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   whj2::StateReader mixer{mixerBytes};
   const auto mixerVersion=mixer.str();
   const bool legacy=game_profile::storyAudioTracks==3&&mixerVersion=="WHJ2-mixer-1";
-  if(!legacy&&mixerVersion!=game_profile::mixerSignature)throw std::runtime_error("Mixer version");
+  const bool earlyWhj4=game_profile::storyAudioTracks>3&&mixerVersion=="WHJ4-mixer-1";
+  if(!legacy&&!earlyWhj4&&mixerVersion!=game_profile::mixerSignature)throw std::runtime_error("Mixer version");
   for(unsigned i=0;i<game_profile::storyAudioTracks;++i){
    result.volumes[i]=mixer.f();
    result.loops[i]=mixer.n()!=0;
    result.times[i]=unsigned(mixer.n());
    result.types[i]=legacy?(i==0?0:2):unsigned(mixer.n());
   }
+  if(game_profile::storyAudioTracks>3&&!earlyWhj4)result.bgvMode=mixer.n()!=0;
   mixer.end();
   if(std::filesystem::exists(path+".flow")){
    const auto bytes=qlie::file(path+".flow");
@@ -965,6 +983,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   images->setReadAhead(readAhead.get());
   transition->setReadAhead(readAhead.get());
   audio->applyRestore(std::move(preparedAudio),assets);
+  bgvMode=saved.bgvMode;
+  bgvDucked=bgvMode&&audio->playing(3);
   volumes=saved.volumes;
   loops=saved.loops;
   audioTimes=saved.times;
@@ -1493,6 +1513,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  while(!done){auto now=SDL_GetTicks64();
  const bool skipAtFrameStart=normalSkip;
  audio->update();
+ updateBackgroundVoice();
  gameMenu.update(double(now-lastUpdate));
  advanceMenuFade(double(now-lastUpdate));
 #if defined(__SWITCH__) && QLIE_DIAGNOSTICS

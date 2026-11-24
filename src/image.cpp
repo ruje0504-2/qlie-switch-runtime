@@ -51,6 +51,9 @@ Image boxBlur(const Image&source){
 }
 Image filterImage(const Image&source,const std::string&name){
  if(!source.width||!source.height||source.pixels.size()!=size_t(source.width)*source.height*4)throw std::runtime_error("Filter source dimensions");
+ if(name=="blur2")return boxBlur<1>(source);
+ if(name=="blur5"||name=="\"blur,4,4\"")return boxBlur<2>(source);
+ if(name=="blur8")return boxBlur<4>(source);
  if(name=="blur10")return boxBlur<5>(source);
  if(name=="blur20")return boxBlur<10>(source);
  Image out{source.width,source.height,source.pixels};

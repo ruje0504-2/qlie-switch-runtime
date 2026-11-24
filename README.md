@@ -2,7 +2,7 @@
 
 [![GPL-2.0-or-later](https://img.shields.io/badge/license-GPL--2.0--or--later-blue)](LICENSE)
 
-面向 Nintendo Switch/Horizon 和 macOS 的 QLIE 运行时。WHJ2 日文版的 NRO 已有 Switch 实机验证。WHJ4 先适配日文原版，当前为开发目标。
+面向 Nintendo Switch/Horizon 和 macOS 的 QLIE 运行时。WHJ2 日文版的 NRO 已有 Switch 实机验证。WHJ4 日文版已有 Mac 验证和 Switch 构建，实机表现待验证。
 
 [优化手册](docs/optimization/README.md)记录 deko3d 渲染、影片硬解、资源预读、音频和界面的实现及测量范围。
 
@@ -40,6 +40,7 @@ QLIE_GAME=whj4 ./build-switch.sh
 各目标在自己的 `saves/` 下写入存档。两平台均支持 `--engine-only`。
 
 WHJ4 运行目录需准备日文原版的九个封包和从原版 EXE 导出的 RESKEY。
+剧情中的独立 OGV 走通用影片解码器，原版 Theora 使用软件解码。原生 ABMP 中的 IMOAVI 逐帧读取 JPEG。
 
 ```sh
 python3 tools/extract_reskey.py /absolute/path/to/original.exe /absolute/path/to/whj4-game/reskey.fkey

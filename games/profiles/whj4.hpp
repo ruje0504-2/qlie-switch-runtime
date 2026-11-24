@@ -42,5 +42,5 @@ inline constexpr bool extendedCgRoots=true;
 inline constexpr char extrasFlag[]="#spopenflag";
 inline constexpr unsigned storyAudioTracks=5;
 inline constexpr float storyMusicGain=1.f;
-inline constexpr char mixerSignature[]="WHJ4-mixer-1";
+inline constexpr char mixerSignature[]="WHJ4-mixer-2";
 }

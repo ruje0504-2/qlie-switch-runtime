@@ -64,6 +64,7 @@ void Audio::callback(void*context,Uint8*stream,int bytes){auto&a=*static_cast<Au
  unsigned audibleFrames=0;
  for(unsigned i=0;i<count;i++){float left=0,right=0;
  for(unsigned channel=0;channel<activeCount;++channel){auto&c=*active[channel];
+ if(c.delay){--c.delay;continue;}
  if(c.pos+1>=c.pcm.size()){if(c.loop)c.pos=0;
  else continue;
  }if(c.fade){c.gain+=c.step;
@@ -98,9 +99,11 @@ DecodedPcm Audio::decodePcm(const qlie::Bytes&bytes,bool allowMissing){
 void Audio::warmFile(qlie::Assets&assets,const std::string&path){
  if(readAhead)readAhead->request(qlie::canonical(path),[&assets,path]{return preparePcm(assets.read(path));});
 }
-void Audio::playFile(qlie::Assets&assets,unsigned ch,const std::string&path,bool loop,float gain,unsigned ms,unsigned category){
- if(!readAhead){playDecoded(ch,decodePcm(assets.read(path)),loop,gain,ms,path,category);return;}
- queue(ch,{channelFor(ch,loop,gain,ms,path,category),qlie::canonical(path),{}},
+void Audio::playFile(qlie::Assets&assets,unsigned ch,const std::string&path,bool loop,float gain,unsigned ms,unsigned category,unsigned delayMs){
+ if(!readAhead){playDecoded(ch,decodePcm(assets.read(path)),loop,gain,ms,path,category,false,false,delayMs);return;}
+ auto channel=channelFor(ch,loop,gain,ms,path,category);
+ channel.delay=uint64_t(delayMs)*44100/1000;
+ queue(ch,{std::move(channel),qlie::canonical(path),{}},
        [&assets,path]{return preparePcm(assets.read(path));});
 }
 void Audio::playMusicFile(qlie::Assets&assets,const std::string&path,bool loop,float gain,unsigned ms,unsigned category,bool explicitFade){
@@ -119,10 +122,11 @@ void Audio::play(unsigned ch,qlie::Bytes bytes,bool loop,float gain,unsigned ms,
 uint64_t Audio::playMovie(DecodedPcm pcm,const std::string&path){
  return playDecoded(7,std::move(pcm),false,1,0,path,4);
 }
-uint64_t Audio::playDecoded(unsigned ch,DecodedPcm pcm,bool loop,float gain,unsigned ms,const std::string&path,unsigned category,bool musicCrossfade,bool explicitFade){
+uint64_t Audio::playDecoded(unsigned ch,DecodedPcm pcm,bool loop,float gain,unsigned ms,const std::string&path,unsigned category,bool musicCrossfade,bool explicitFade,unsigned delayMs){
  if(ch>=channels.size())throw std::runtime_error("Invalid PCM channel");
  cancelPending(ch);
  auto c=channelFor(ch,loop,gain,ms,path,category);c.pcm=std::move(pcm);
+ c.delay=uint64_t(delayMs)*44100/1000;
  return install(ch,std::move(c),musicCrossfade,ms,explicitFade);
 }
 Audio::Channel Audio::channelFor(unsigned ch,bool loop,float gain,unsigned ms,const std::string&path,unsigned category){
@@ -249,20 +253,23 @@ void Audio::stopAll(){
 AudioStats Audio::stats()const{return {frames.load(),nonzero.load()};
  }
 qlie::Bytes Audio::save(){StateWriter w;
+ const auto queued=std::count_if(pending.begin(),pending.end(),[](const auto&clip){return clip&&!clip->channel.path.empty();});
+ // Keep the audible tracks and their cursors, even while a replacement is queued.
+ SDL_LockAudioDevice(device);
+ const bool withDelay=std::any_of(channels.begin(),channels.end(),[](const auto&c){return c.delay!=0;})||
+  std::any_of(pending.begin(),pending.end(),[](const auto&clip){return clip&&clip->channel.delay;});
  auto writeChannel=[&](const Channel&c){
   w.str(c.path);w.n(c.category);w.n(c.pos);w.n(c.loop);w.n(c.stop);
   w.f(c.gain);w.f(c.target);w.f(c.step);w.n(c.fade);
+  if(withDelay)w.n(c.delay);
  };
- const auto queued=std::count_if(pending.begin(),pending.end(),[](const auto&clip){return clip&&!clip->channel.path.empty();});
- w.str(queued?"WHJ2-audio-4":"WHJ2-audio-3");
- // Keep the audible tracks and their cursors, even while a replacement is queued.
- SDL_LockAudioDevice(device);
+ w.str(withDelay?"WHJ2-audio-5":queued?"WHJ2-audio-4":"WHJ2-audio-3");
  size_t count=channels.size();
  while(count>StoryEffect3Channel&&channels[count-1].path.empty()&&!pending[count-1])--count;
  w.n(count);
  for(size_t i=0;i<count;++i)writeChannel(channels[i]);
  SDL_UnlockAudioDevice(device);
- if(queued){
+ if(queued||withDelay){
   w.n(queued);
   for(unsigned ch=0;ch<pending.size();++ch){
    if(!pending[ch]||pending[ch]->channel.path.empty())continue;
@@ -290,7 +297,8 @@ struct PreparedAudioRestore {
 WarmAsset Audio::prepareRestore(const qlie::Bytes&bytes,qlie::Assets&assets){
  StateReader r{bytes};
  auto version=r.str();bool legacy=version=="WHJ2-audio-1";
- bool withQueue=version=="WHJ2-audio-4";
+ bool withDelay=version=="WHJ2-audio-5";
+ bool withQueue=withDelay||version=="WHJ2-audio-4";
  bool categories=withQueue||version=="WHJ2-audio-3";
  if(!legacy&&!categories&&version!="WHJ2-audio-2")throw std::runtime_error("Audio state version");
  auto count=legacy?8:r.n();if(count>ChannelCount)throw std::runtime_error("Audio state channel count");
@@ -304,6 +312,7 @@ WarmAsset Audio::prepareRestore(const qlie::Bytes&bytes,qlie::Assets&assets){
   if(category>5)throw std::runtime_error("Audio category");
   c.category=unsigned(category);c.pos=r.n();c.loop=r.n()!=0;c.stop=r.n()!=0;
   c.gain=r.f();c.target=r.f();c.step=r.f();c.fade=r.n();
+  if(withDelay)c.delay=r.n();
   if(!std::isfinite(c.gain)||!std::isfinite(c.target)||!std::isfinite(c.step)||c.gain<0||c.gain>1||c.target<0||c.target>1)
    throw std::runtime_error("Invalid audio gain state");
   return c;

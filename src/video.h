@@ -53,5 +53,6 @@ int kvideo_has_audio(const KVideo *v);
 void kvideo_disable_audio(KVideo *v);
 unsigned kvideo_source_width(const KVideo *v);
 unsigned kvideo_source_height(const KVideo *v);
+double kvideo_duration_ms(const KVideo *v);
 const char *kvideo_error(KVideo *v);
 #endif

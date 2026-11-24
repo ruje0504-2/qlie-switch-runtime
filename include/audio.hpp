@@ -13,7 +13,7 @@ public:
  static constexpr unsigned StoryEffect3Channel=25,StoryBgvChannel=26,ChannelCount=27;
 private:
  friend struct PreparedAudioRestore;
- struct Channel {DecodedPcm pcm;std::string path;unsigned category=2;size_t pos=0;bool loop=false,stop=false;float gain=0,target=0,step=0;uint64_t fade=0;};
+ struct Channel {DecodedPcm pcm;std::string path;unsigned category=2;size_t pos=0;bool loop=false,stop=false;float gain=0,target=0,step=0;uint64_t fade=0,delay=0;};
  struct Pending {Channel channel;std::string key;std::optional<uint64_t> seek;unsigned crossfade=0;bool music=false,explicitFade=false;};
  std::array<float,6> userGains{{1,1,1,1,1,1}};
  SDL_AudioDeviceID device=0;std::array<Channel,ChannelCount>channels;std::atomic<uint64_t>frames{0},nonzero{0};
@@ -27,7 +27,7 @@ private:
  void queue(unsigned,Pending,std::function<WarmAsset()>);
  void installPending(unsigned,Pending,DecodedPcm);
  uint64_t install(unsigned,Channel,bool,unsigned,bool);
- uint64_t playDecoded(unsigned,DecodedPcm,bool,float,unsigned,const std::string&,unsigned,bool musicCrossfade=false,bool explicitFade=false);
+ uint64_t playDecoded(unsigned,DecodedPcm,bool,float,unsigned,const std::string&,unsigned,bool musicCrossfade=false,bool explicitFade=false,unsigned delayMs=0);
  void clearChannel(unsigned);
  bool fadeMusicToPrevious(unsigned ms,unsigned category,Channel&retired);
  static void callback(void*,Uint8*,int);
@@ -45,7 +45,7 @@ public:
  void update();
  void discardQueued(unsigned ch){cancelPending(ch);}
  void warmFile(qlie::Assets&,const std::string&);
- void playFile(qlie::Assets&,unsigned,const std::string&,bool,float,unsigned,unsigned);
+ void playFile(qlie::Assets&,unsigned,const std::string&,bool,float,unsigned,unsigned,unsigned delayMs=0);
  void playMusicFile(qlie::Assets&,const std::string&,bool,float,unsigned,unsigned,bool explicitFade=false);
  static DecodedPcm decodePcm(const qlie::Bytes&,bool allowMissing=false);
  uint64_t playMovie(DecodedPcm,const std::string&);

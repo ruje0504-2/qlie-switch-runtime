@@ -25,7 +25,24 @@ std::string canonical(std::string s){for(auto&c:s){if(c==92)c=47;else if(c>=65&&
 Bytes file(const std::string&p){std::ifstream f(p,std::ios::binary);if(!f)throw std::runtime_error("Cannot open "+p);f.seekg(0,std::ios::end);auto n=f.tellg();if(n<0)throw std::runtime_error("Cannot size "+p);f.seekg(0);Bytes b(static_cast<size_t>(n));if(!b.empty()&&!f.read(reinterpret_cast<char*>(b.data()),b.size()))throw std::runtime_error("Cannot read "+p);return b;}
 void write_file(const std::string&p,const Bytes&b){std::ofstream f(p,std::ios::binary|std::ios::trunc);if(!f||!f.write(reinterpret_cast<const char*>(b.data()),b.size()))throw std::runtime_error("Cannot write "+p);}
 Pack::Pack(const std::string&path,const Bytes&a,const Bytes&b):fp(path,std::ios::binary),k1(a),k2(b){if(!fp)throw std::runtime_error("Cannot open "+path);fp.seekg(0,std::ios::end);uint64_t n=uint64_t(fp.tellg());if(n<0x41c)throw std::runtime_error("Archive too short");Bytes tail(28),kd(256);fp.seekg(n-28);fp.read(reinterpret_cast<char*>(tail.data()),28);if(std::memcmp(tail.data(),"FilePackVer3.0",13))throw std::runtime_error("Unsupported QLIE version");unsigned count=unsigned(rd(tail,16,4));uint64_t offset=rd(tail,20,8);if(count>100000||offset>n-28)throw std::runtime_error("Invalid archive index");fp.seekg(n-0x41c);fp.read(reinterpret_cast<char*>(kd.data()),256);key=hash(kd)&0xfffffff;fp.seekg(offset);Bytes toc(n-28-offset);fp.read(reinterpret_cast<char*>(toc.data()),toc.size());size_t p=0;for(unsigned i=0;i<count;i++){size_t len=rd(toc,p,2);p+=2;if(len>256||p+len+28>toc.size())throw std::runtime_error("Invalid entry name");Bytes name(toc.begin()+p,toc.begin()+p+len);unsigned nk=unsigned(len)+(key^0x3e);for(unsigned j=0;j<len;j++)name[j]^=uint8_t(((j+1)^nk)+j+1);p+=len;Entry e{cp932(name),std::string(name.begin(),name.end()),rd(toc,p,8),uint32_t(rd(toc,p+8,4)),uint32_t(rd(toc,p+12,4)),uint32_t(rd(toc,p+16,4)),uint32_t(rd(toc,p+20,4)),uint32_t(rd(toc,p+24,4))};p+=28;if(e.offset+e.size>offset)throw std::runtime_error("Invalid entry range");entries.push_back(e);}for(const auto&e:entries)if(e.name.find("pack_keyfile")!=std::string::npos){key_entry=read(e);k1=key_entry;key_ready=true;break;}}
-Bytes Pack::read(const Entry&e){if(key_ready&&e.name.find("pack_keyfile")!=std::string::npos)return key_entry;Bytes b(e.size);fp.clear();fp.seekg(e.offset);if(!fp.read(reinterpret_cast<char*>(b.data()),b.size()))throw std::runtime_error("Entry read failed: "+e.name);if(hash(b)!=e.hash)throw std::runtime_error("Checksum mismatch: "+e.name);if(e.encrypted){if(e.encrypted!=4)throw std::runtime_error("Unsupported entry encryption");b=decrypt(std::move(b),key,e.rawname,k1,k2);}if(e.packed)b=decompress(b);if(b.size()!=e.unpacked)throw std::runtime_error("Entry size mismatch: "+e.name);return b;}
+Bytes Pack::read(const Entry&e){
+ if(key_ready&&e.name.find("pack_keyfile")!=std::string::npos)return key_entry;
+ Bytes b(e.size);
+ {
+  std::lock_guard<std::mutex> lock(fileCursor);
+  fp.clear();
+  fp.seekg(e.offset);
+  if(!fp.read(reinterpret_cast<char*>(b.data()),b.size()))throw std::runtime_error("Entry read failed: "+e.name);
+ }
+ if(hash(b)!=e.hash)throw std::runtime_error("Checksum mismatch: "+e.name);
+ if(e.encrypted){
+  if(e.encrypted!=4)throw std::runtime_error("Unsupported entry encryption");
+  b=decrypt(std::move(b),key,e.rawname,k1,k2);
+ }
+ if(e.packed)b=decompress(b);
+ if(b.size()!=e.unpacked)throw std::runtime_error("Entry size mismatch: "+e.name);
+ return b;
+}
 std::pair<Bytes,Bytes> game_keys(const std::string&root){
  Bytes k1=file(root+"/DLL/key.fkey");
  auto icon=root+"/DLL/icon.key";

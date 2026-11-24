@@ -30,6 +30,7 @@ public:
  explicit Story(qlie::Assets&a):assets(a){}
  void start();void startReplay(const std::string&script);
  Event next();
+ std::vector<std::string> upcomingAssetCommands(bool opening=false);
  void choose(unsigned);
  qlie::Bytes save()const;
  void restore(const qlie::Bytes&);

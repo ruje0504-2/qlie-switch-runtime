@@ -66,16 +66,31 @@ void Audio::reportMixerBinding(){
  }
 }
 #endif
-void Audio::play(unsigned ch,const qlie::Bytes&bytes,bool loop,float gain,unsigned ms,const std::string&path,unsigned category){if(ch>=channels.size())throw std::runtime_error("Audio channel out of range");
- uint8_t*raw=nullptr;
- size_t n=0;
+namespace {
+DecodedPcm decodePcm(const qlie::Bytes&bytes){
+ uint8_t*raw=nullptr;size_t n=0;
  if(kaudio_decode(bytes.data(),bytes.size(),&raw,&n))throw std::runtime_error("PCM decode failed");
- Channel c;
- c.path=path;
+ return {std::shared_ptr<const int16_t>(reinterpret_cast<const int16_t*>(raw),[](const int16_t*p){std::free(const_cast<int16_t*>(p));}),n/2};
+}
+}
+void Audio::warmFile(qlie::Assets&assets,const std::string&path){
+ if(readAhead)readAhead->request(qlie::canonical(path),[&assets,path]{
+  WarmAsset ready;ready.pcm=decodePcm(assets.read(path));ready.bytes=ready.pcm.size()*sizeof(int16_t);return ready;
+ });
+}
+void Audio::playFile(qlie::Assets&assets,unsigned ch,const std::string&path,bool loop,float gain,unsigned ms,unsigned category){
+ auto ready=readAhead?readAhead->take(qlie::canonical(path)):std::nullopt;
+ auto pcm=ready?std::move(ready->pcm):decodePcm(assets.read(path));
+ playDecoded(ch,std::move(pcm),loop,gain,ms,path,category);
+}
+void Audio::play(unsigned ch,const qlie::Bytes&bytes,bool loop,float gain,unsigned ms,const std::string&path,unsigned category){
+ playDecoded(ch,decodePcm(bytes),loop,gain,ms,path,category);
+}
+void Audio::playDecoded(unsigned ch,DecodedPcm pcm,bool loop,float gain,unsigned ms,const std::string&path,unsigned category){
+ if(ch>=channels.size()||pcm.empty())throw std::runtime_error("Invalid PCM channel or clip");
+ size_t stereoFrames=pcm.size()/2;
+ Channel c;c.pcm=std::move(pcm);c.path=path;
  c.category=category<6?category:ch==0?0:ch==3?1:ch==7?4:2;
- c.pcm.resize(n/2);
- if(n)std::memcpy(c.pcm.data(),raw,n);
- free(raw);
  c.loop=loop;
  c.target=std::clamp(gain,0.f,1.f);
  c.fade=uint64_t(ms)*44100/1000;
@@ -84,7 +99,7 @@ void Audio::play(unsigned ch,const qlie::Bytes&bytes,bool loop,float gain,unsign
  SDL_LockAudioDevice(device);
  channels[ch]=std::move(c);
  SDL_UnlockAudioDevice(device);
- std::cerr<<"AUDIO play channel="<<ch<<" stereo_frames="<<n/4<<" loop="<<loop<<" gain="<<gain<<"\n";
+ std::cerr<<"AUDIO play channel="<<ch<<" stereo_frames="<<stereoFrames<<" loop="<<loop<<" gain="<<gain<<"\n";
  }
 void Audio::volume(unsigned ch,float gain,unsigned ms,bool stopAfter){if(ch>=channels.size())throw std::runtime_error("Audio channel out of range");
  SDL_LockAudioDevice(device);
@@ -147,12 +162,7 @@ void Audio::restore(const qlie::Bytes&bytes,qlie::Assets&assets){StateReader r{b
  c.fade=r.n();
  if(!std::isfinite(c.gain)||!std::isfinite(c.target)||!std::isfinite(c.step)||c.gain<0||c.gain>1||c.target<0||c.target>1)throw std::runtime_error("Invalid audio gain state");
  if(!c.path.empty()){auto b=audioSource(assets,c.path);
- uint8_t*raw=nullptr;
- size_t n=0;
- if(kaudio_decode(b.data(),b.size(),&raw,&n))throw std::runtime_error("Restored PCM decode failed");
- c.pcm.resize(n/2);
- if(n)std::memcpy(c.pcm.data(),raw,n);
- free(raw);
+  c.pcm=decodePcm(b);
  }if(!c.path.empty())std::cerr<<"AUDIO restore path="<<c.path<<" stereo_cursor="<<c.pos/2<<" gain="<<c.gain<<" fade_remaining="<<c.fade<<"\n";
  if(c.pos>c.pcm.size()||c.pos%2)throw std::runtime_error("Invalid audio cursor");
  }r.end();

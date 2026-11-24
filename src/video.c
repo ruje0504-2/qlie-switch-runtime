@@ -164,23 +164,37 @@ void kvideo_close(KVideo *v){if(!v)return;
 const char *kvideo_error(KVideo *v){return v->error;}
 uint64_t kvideo_decoded_frames(KVideo *v){return v->decoded;}
 uint64_t kvideo_written_frames(const KVideo *v){return v->written;}
-static int audio_frames(KVideo *v,uint8_t **pcm,size_t *bytes){
+/* Standalone clips grow geometrically. Video ticks return separately owned
+   short PCM buffers to their caller, so their capacity is local to the tick. */
+static int reserve_pcm(uint8_t **pcm,size_t needed,size_t *capacity){
+    size_t allocation=needed?needed:4;
+    if(capacity){
+        if(*capacity>=allocation)return 0;
+        size_t next=*capacity?*capacity:16384;
+        while(next<allocation)next*=2;
+        allocation=next;
+    }
+    uint8_t *p=realloc(*pcm,allocation);
+    if(!p)return -1;
+    *pcm=p;if(capacity)*capacity=allocation;return 0;
+}
+static int audio_frames(KVideo *v,uint8_t **pcm,size_t *bytes,size_t *capacity){
     int rc;while((rc=avcodec_receive_frame(v->audio,v->sound))>=0){
         int samples=swr_get_out_samples(v->resample,v->sound->nb_samples);
         if(samples<0||samples>1000000||*bytes>64*1024*1024-(size_t)samples*4)return fail(v,"video PCM limit");
-        uint8_t *p=realloc(*pcm,*bytes+(size_t)samples*4);if(!p)return fail(v,"video PCM allocation failed");*pcm=p;
-        uint8_t *out=p+*bytes;int count=swr_convert(v->resample,&out,samples,(const uint8_t **)v->sound->extended_data,v->sound->nb_samples);
+        if(reserve_pcm(pcm,*bytes+(size_t)samples*4,capacity))return fail(v,"video PCM allocation failed");
+        uint8_t *out=*pcm+*bytes;int count=swr_convert(v->resample,&out,samples,(const uint8_t **)v->sound->extended_data,v->sound->nb_samples);
         av_frame_unref(v->sound);if(count<0)return fail(v,"audio conversion failed");*bytes+=(size_t)count*4;
     }
     return rc==AVERROR(EAGAIN)||rc==AVERROR_EOF?0:fail(v,"audio decode failed");
 }
 /* Shared resampler tail for VSD audio and standalone voice streams. */
-static int audio_tail(KVideo *v,uint8_t **pcm,size_t *bytes){
+static int audio_tail(KVideo *v,uint8_t **pcm,size_t *bytes,size_t *capacity){
     int samples=swr_get_out_samples(v->resample,0);
     if(samples<0||samples>1000000||*bytes>64*1024*1024-(size_t)samples*4)return fail(v,"audio tail limit");
     if(samples){
-        uint8_t *p=realloc(*pcm,*bytes+(size_t)samples*4);if(!p)return fail(v,"audio tail allocation failed");*pcm=p;
-        uint8_t *out=p+*bytes;int count=swr_convert(v->resample,&out,samples,NULL,0);
+        if(reserve_pcm(pcm,*bytes+(size_t)samples*4,capacity))return fail(v,"video PCM allocation failed");
+        uint8_t *out=*pcm+*bytes;int count=swr_convert(v->resample,&out,samples,NULL,0);
         if(count<0)return fail(v,"audio tail conversion failed");
         *bytes+=(size_t)count*4;
     }
@@ -190,7 +204,7 @@ int kaudio_decode(const uint8_t *data,size_t size,uint8_t **pcm,size_t *bytes){
     if(!pcm||!bytes)return -1;
     *pcm=NULL;*bytes=0;if(!data||!size||size>256*1024*1024)return -1;
     KVideo *v=calloc(1,sizeof(*v));if(!v)return -1;
-    int result=-1;v->data=data;v->size=size;v->ai=v->vi=-1;
+    size_t capacity=0;int result=-1;v->data=data;v->size=size;v->ai=v->vi=-1;
     uint8_t *buffer=av_malloc(32768);if(!buffer)goto done;
     v->io=avio_alloc_context(buffer,32768,0,v,read_data,NULL,seek_data);if(!v->io){av_free(buffer);goto done;}
     v->format=avformat_alloc_context();if(!v->format)goto done;
@@ -204,14 +218,17 @@ int kaudio_decode(const uint8_t *data,size_t size,uint8_t **pcm,size_t *bytes){
     for(unsigned guard=0;guard<100000;guard++){
         int rc=av_read_frame(v->format,v->packet);
         if(rc==AVERROR_EOF){
-            if(avcodec_send_packet(v->audio,NULL)<0||audio_frames(v,pcm,bytes)||audio_tail(v,pcm,bytes)||!*bytes)goto done;
+            if(avcodec_send_packet(v->audio,NULL)<0||audio_frames(v,pcm,bytes,&capacity)||audio_tail(v,pcm,bytes,&capacity)||!*bytes)goto done;
             result=0;break;
         }
         if(rc<0)goto done;
-        if(v->packet->stream_index==v->ai){rc=avcodec_send_packet(v->audio,v->packet);if(rc>=0)rc=audio_frames(v,pcm,bytes);}
+        if(v->packet->stream_index==v->ai){rc=avcodec_send_packet(v->audio,v->packet);if(rc>=0)rc=audio_frames(v,pcm,bytes,&capacity);}
         av_packet_unref(v->packet);if(rc<0)goto done;
     }
- done:kvideo_close(v);if(result){free(*pcm);*pcm=NULL;*bytes=0;}return result;
+ done:kvideo_close(v);
+    if(result){free(*pcm);*pcm=NULL;*bytes=0;}
+    else if(capacity>*bytes){uint8_t *trimmed=realloc(*pcm,*bytes);if(trimmed)*pcm=trimmed;}
+    return result;
 }
 /* Normalize immediately after receive, before pending timing or cache takes
    ownership. FFmpeg handles device fences/cache maintenance on transfer.
@@ -255,8 +272,8 @@ static int next(KVideo *v,uint8_t **pcm,size_t *bytes){
         if(rc<0){
             if(rc!=AVERROR_EOF)return fail(v,"video demux failed");
             v->eof=1;if(avcodec_send_packet(v->video,NULL)<0)return fail(v,"video flush failed");
-            if(v->audio&&(avcodec_send_packet(v->audio,NULL)<0||audio_frames(v,pcm,bytes)))return fail(v,"audio flush failed");
-            if(v->audio&&audio_tail(v,pcm,bytes))return -1;
+            if(v->audio&&(avcodec_send_packet(v->audio,NULL)<0||audio_frames(v,pcm,bytes,NULL)))return fail(v,"audio flush failed");
+            if(v->audio&&audio_tail(v,pcm,bytes,NULL))return -1;
             continue;
         }
         if(v->packet->stream_index==v->vi){
@@ -272,7 +289,7 @@ static int next(KVideo *v,uint8_t **pcm,size_t *bytes){
             }
             rc=avcodec_send_packet(v->video,v->packet);
         }
-        else if(v->packet->stream_index==v->ai){rc=avcodec_send_packet(v->audio,v->packet);if(rc>=0)rc=audio_frames(v,pcm,bytes);}else rc=0;
+        else if(v->packet->stream_index==v->ai){rc=avcodec_send_packet(v->audio,v->packet);if(rc>=0)rc=audio_frames(v,pcm,bytes,NULL);}else rc=0;
         if(rc<0){
             char detail[128];av_strerror(rc,detail,sizeof(detail));
             video_log("packet error: stream=%d size=%d pts=%lld code=%d (%s)",v->packet->stream_index,v->packet->size,(long long)v->packet->pts,rc,detail);

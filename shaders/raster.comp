@@ -1,50 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #version 450
+#extension GL_GOOGLE_include_directive : require
 layout(local_size_x=16,local_size_y=16) in;
 layout(set=0,binding=0,std430) readonly buffer Source { uint source[]; };
 layout(set=0,binding=1,std430) buffer Destination { uint destination[]; };
-struct Draw { vec4 p0;vec4 p1;vec4 p2;vec4 p3;ivec4 rect;uvec4 meta;uvec4 colors;vec4 maskSource;vec4 maskRect;uvec4 maskMeta; };
+#include "raster_types.glsl"
 layout(set=0,binding=2,std430) readonly buffer Commands { Draw draws[]; };
 layout(set=0,binding=3,std430) readonly buffer Tiles { uint tiles[]; };
 layout(push_constant) uniform Parameters { vec4 p0;vec4 p1;vec4 p2;vec4 p3;ivec4 rect;uvec4 meta;uvec4 colors; } frame;
-uvec4 unpack(uint c){return uvec4(c,c>>8,c>>16,c>>24)&255u;}
-uint pack(uvec4 c){return c.x|(c.y<<8)|(c.z<<16)|(c.w<<24);}
-float divide(float a,float b);
-uint maskAlpha(uint sourceAlpha,uint blue,uint amount,uint mode){
- if(amount==255u)return sourceAlpha;
- uint power=1u<<min(mode&15u,7u),span=256u/power;
- int threshold=(255-int(amount))*int(span+255u)/255-int(span);
- int value=(mode&128u)!=0u?255-int(blue):int(blue);
- int wrapped=((value-threshold)*int(power))&65535;if(wrapped>=32768)wrapped-=65536;
- uint coverage=uint(clamp(wrapped,0,255));return sourceAlpha*((coverage>>1)+(coverage>>7))>>7;
-}
-uvec4 pixel(Draw p,ivec2 q){
- q=clamp(q,ivec2(0),ivec2(p.meta.xy)-1);
- if((p.meta.z&262144u)==0u)return unpack(source[p.colors.z+uint(q.y)*p.meta.x+uint(q.x)]);
- precise vec2 uv=vec2(divide(float(q.x)+.5,float(p.meta.x)),divide(float(q.y)+.5,float(p.meta.y)));
- precise vec2 from=p.maskSource.xy+uv*p.maskSource.zw,mask=p.maskRect.xy+uv*p.maskRect.zw;
- ivec2 sq=clamp(ivec2(floor(from)),ivec2(0),ivec2(p.meta.xy)-1),mq=clamp(ivec2(floor(mask)),ivec2(0),ivec2(p.maskMeta.xy)-1);
- uvec4 color=unpack(source[p.colors.z+uint(sq.y)*p.meta.x+uint(sq.x)]);
- uint blue=source[p.maskMeta.z+uint(mq.y)*p.maskMeta.x+uint(mq.x)]&255u;
- color.a=maskAlpha(color.a,blue,p.maskMeta.w&255u,p.maskMeta.w>>8);return color;
-}
-uvec4 samplePixel(Draw p,vec2 uv){
- if((p.meta.z&255u)!=2u)return pixel(p,ivec2(floor(uv)));
- precise vec2 f=uv-vec2(.5);ivec2 i=ivec2(floor(f));f-=vec2(i);
- precise vec4 a=vec4(pixel(p,i)),b=vec4(pixel(p,i+ivec2(1,0))),c=vec4(pixel(p,i+ivec2(0,1))),d=vec4(pixel(p,i+ivec2(1,1)));
- precise vec4 value=(a*(1-f.x)+b*f.x)*(1-f.y)+(c*(1-f.x)+d*f.x)*f.y;
- return uvec4(floor(value+.5));
-}
-int shift7(int n){return n>=0?n/128:-((-n+127)/128);}
-uint blend(uint mode,uint source,uint dest,uint alpha){
- int s=int(source),d=int(dest),a=int(alpha),v=0,w=s*(a+(a>>7))/256;
- if(mode<2u)v=d+shift7((s-d)*((a+(a>>7))>>1));
- else if(mode==2u)v=w+d-w*d/256;
- else if(mode==3u||mode==6u){int f=(a>>1)+((a>>1)>>6);int x=255+shift7((s-255)*f);v=mode==3u?(x+(x>>7))*d/256:min(x,d);}
- else if(mode==4u)v=abs(w-d);else if(mode==5u)v=max(w,d);else if(mode==7u)v=w+d;else if(mode==8u)v=d-w;
- return uint(clamp(v,0,255));
-}
-float divide(float a,float b){precise float z=a/b;precise float residual=fma(-z,b,a);precise float result=z+residual/b;return result;}
+#include "raster_pixels.glsl"
 float edge(vec2 a,vec2 b,vec2 q){precise float e=(b.x-a.x)*(q.y-a.y)-(b.y-a.y)*(q.x-a.x);return e;}
 bool included(vec2 a,vec2 b){return b.y<a.y||(b.y==a.y&&b.x>a.x);}
 // Apply one paint operation to a pixel. The caller owns its final and cached
@@ -56,26 +20,13 @@ void applyDraw(Draw p,ivec2 q,uint index,inout uvec4 color){
  if(operation==2u){color.rgb=color.rgb*p.meta.x/p.meta.y;return;}
  if(operation==3u){
   uvec4 old=unpack(source[p.colors.z+index]);
-  if((p.meta.z&131072u)==0u){
-   color=uvec4(source[p.colors.w+old.r*256u+color.r],source[p.colors.w+old.g*256u+color.g],source[p.colors.w+old.b*256u+color.b],source[p.colors.w+old.a*256u+color.a]);
-  }else{
-   uint alpha=p.meta.w;
-   if(alpha!=255u){
-    uint power=1u<<min(p.colors.y&15u,7u),span=256u/power;
-    int threshold=(255-int(alpha))*int(span+255u)/255-int(span);
-    uint mask=source[p.colors.w+(uint(q.y)*p.meta.y/720u)*p.meta.x+uint(q.x)*p.meta.x/1280u]&255u;
-    int value=(p.colors.y&128u)!=0u?255-int(mask):int(mask);
-    int wrapped=((value-threshold)*int(power))&65535;if(wrapped>=32768)wrapped-=65536;
-    uint coverage=uint(clamp(wrapped,0,255));alpha=255u*((coverage>>1)+(coverage>>7))>>7;
-   }
-   color=uvec4(blend(0u,old.r,color.r,alpha),blend(0u,old.g,color.g,alpha),blend(0u,old.b,color.b,alpha),blend(0u,old.a,color.a,alpha));
-  }
+  uint a=(p.meta.z&131072u)!=0u?ruleAlpha(p,uvec2(q)):0u;
+  color=fadePixel(p,old,color,a);
   return;
  }
  if(operation==1u){
   uvec4 s=pixel(p,q-ivec2(p.p1.xy));if(s.a==0u)return;
-  uint alpha=s.a+color.a*(255u-s.a)/255u;
-  color=uvec4((s.rgb*s.a+color.rgb*color.a*(255u-s.a)/255u)/alpha,alpha);return;
+  color=glyphOver(s,color);return;
  }
  uvec4 s;
  if((p.meta.z&524288u)!=0u){
@@ -93,14 +44,7 @@ void applyDraw(Draw p,ivec2 q,uint index,inout uvec4 color){
  }
  s=samplePixel(p,uv);
  }
- uint alpha=s.a*p.meta.w/255u;if(alpha==0)return;
- if(p.colors.x!=0u||p.colors.y!=0xffffffu)s.rgb=min(uvec3(255),s.rgb*unpack(p.colors.y).rgb/255u+unpack(p.colors.x).rgb);
- uint mode=(p.meta.z>>8)&255u;
- if(mode<2u){
-  if(alpha==255u){color=uvec4(s.rgb,alpha);return;}
-  ivec4 sourceColor=ivec4(s.rgb,alpha),d=ivec4(color);int factor=int((alpha+(alpha>>7))>>1);
-  color=uvec4(d+((sourceColor-d)*factor>>7));
- }else color=uvec4(blend(mode,s.r,color.r,alpha),blend(mode,s.g,color.g,alpha),blend(mode,s.b,color.b,alpha),blend(mode,alpha,color.a,alpha));
+ s=tint(p,s);if(s.a!=0u)color=composite((p.meta.z>>8)&255u,s,color);
 }
 
 void main(){

@@ -3,7 +3,8 @@
 from pathlib import Path
 import struct,subprocess
 root=Path(__file__).resolve().parents[1]
-for source,symbol in [('raster.comp','rasterSpv'),('present.vert','presentVertexSpv'),('present.frag','presentFragmentSpv')]:
+for source,symbol in [('raster.comp','rasterSpv'),('present.vert','presentVertexSpv'),('present.frag','presentFragmentSpv'),
+                      ('scene.vert','sceneVertexSpv'),('scene.frag','sceneFragmentSpv'),('scene_init.comp','sceneInitSpv')]:
     output=root/'build'/(source+'.spv');output.parent.mkdir(exist_ok=True)
     subprocess.run(['glslangValidator','-V','--target-env','vulkan1.1',str(root/'shaders'/source),'-o',str(output)],check=True)
     data=output.read_bytes();words=struct.unpack('<'+'I'*(len(data)//4),data)

@@ -8,6 +8,10 @@ class TitleScreen {
 public:
  enum Action {None,Start,Load,Extra,Settings,Quit,CG,Memory,Sound,Back};
  explicit TitleScreen(qlie::Assets&a):scene(a){}
+ void prepareOpening(AssetReadAhead*loader){
+  scene.setReadAhead(loader);
+  for(const char*path:{"script/title/title_back01.b","script/title/frame.b","script/title/button.b"})scene.warmFile(path);
+ }
  void reset(bool alternate=false,bool unlocked=false);
  void view(float x);
  void setExtraPage(bool);bool isExtraPage()const{return extraPage;}

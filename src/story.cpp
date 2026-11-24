@@ -22,6 +22,32 @@ bool Story::condition(const std::string&s)const{for(const auto&op:std::vector<st
 void Story::jump(std::string label,std::string file){label=lower(value(label));file=value(file);if(file.empty()||lower(file)=="self")file=state.at.file;else if(file.find(47)==file.npos&&file.find(92)==file.npos){auto p=state.at.file.rfind(47);file=state.at.file.substr(0,p+1)+file;}file=qlie::canonical(file);auto&sc=script(file);auto it=sc.labels.find(label);if(it==sc.labels.end())throw std::runtime_error("Missing label "+label+" in "+file);state.at={file,uint32_t(it->second)};visited.insert(file+":"+label);}
 Event Story::event(std::string t,std::string v,unsigned ln)const{return {std::move(t),std::move(v),state.at.file,ln};}
 void Story::resetState(){state={};state.vars["game_routeflag[0]"]="0";state.vars["_routefile"]="scenario/root.s";state.vars["_selectfile"]="scenario/select.s";state.vars["resultstr[0]"]="";state.vars["resultint[0]"]="0";}
+std::vector<std::string> Story::upcomingAssetCommands(bool opening){
+ std::string file=opening?"scenario/root.s":state.at.file;
+ std::vector<std::string> out;
+ if(file.empty())return out;
+ const Script*source=&script(file);
+ size_t pc=opening?0:state.at.pc;
+ if(opening){
+  // The root dispatches into the first chapter via a literal script jump.
+  // Resolve that path as a read hint without executing VM instructions.
+  for(const auto&op:source->ops){
+   if(op.text.rfind("\\jmp,",0)!=0)continue;
+   auto args=split(op.text,',');
+   if(args.size()<3||args[2].size()<3||args[2].front()!='"'||args[2].back()!='"')return out;
+   auto next=qlie::canonical(args[2].substr(1,args[2].size()-2));
+   if(!assets.exists(next))return out;
+   source=&script(next);pc=0;break;
+  }
+ }
+ size_t end=std::min(source->ops.size(),pc+96);
+ for(;pc<end;++pc){
+  const auto&text=source->ops[pc].text;
+  if(text.rfind("\\jmp,",0)==0||text.rfind("\\if,",0)==0||text.rfind("\\sub,",0)==0)break;
+  if(!text.empty()&&text.front()=='^'&&text.find("file:")!=text.npos)out.push_back(text);
+ }
+ return out;
+}
 void Story::start(){resetState();state.at.file="scenario/root.s";jump("@@top",state.at.file);}
 void Story::startReplay(const std::string&file){resetState();state.replay=true;state.at.file=qlie::canonical(file);jump("@@top",state.at.file);}
 void Story::native(const Op&o){auto a=split(o.text,44);std::string cmd=lower(a[0]);auto arg=[&](size_t i){return i<a.size()?a[i]:std::string();};auto need=[&](bool ok){if(!ok)throw std::runtime_error("Unsupported native command: "+o.text);};

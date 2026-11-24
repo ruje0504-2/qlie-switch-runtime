@@ -26,6 +26,7 @@
 #include "replay_screen.hpp"
 #include "cg_screen.hpp"
 #include <sstream>
+#include <chrono>
 #include <algorithm>
 extern "C" {
 #include "font.h"
@@ -61,6 +62,7 @@ struct Frontend {
  whj2::Progress progress;
  std::unique_ptr<whj2::Audio>audio;
  std::unique_ptr<whj2::SceneImages>images;
+ std::unique_ptr<whj2::AssetReadAhead>readAhead;
  std::unique_ptr<whj2::SceneTransition>transition;
  whj2::SentenceWait sentenceWait;
  whj2::AutoPlay autoPlay;
@@ -148,6 +150,10 @@ struct Frontend {
  std::filesystem::create_directories(saveDir);
  audio=std::make_unique<whj2::Audio>();
  images=std::make_unique<whj2::SceneImages>(assets);
+#ifdef __SWITCH__
+ readAhead=std::make_unique<whj2::AssetReadAhead>();
+ images->setReadAhead(readAhead.get());audio->setReadAhead(readAhead.get());
+#endif
  messageText=std::make_unique<whj2::MessageText>(assets);
  transition=std::make_unique<whj2::SceneTransition>(assets);
  movie=std::make_unique<whj2::Movie>(assets,*audio);
@@ -166,10 +172,15 @@ struct Frontend {
  while(std::getline(in,l)){auto p=l.find(61);
  if(p!=l.npos)audioTemplates[type][whj2::trim(l.substr(0,p))]=whj2::trim(l.substr(p+1));
  }}
+ if(readAhead){
+  title->prepareOpening(readAhead.get());
+  audio->warmFile(assets,"music/wbgm06.ogg");
+ }
  opening=1;images->command("^ui_caution,file:script/caution/caution.b,x:0,y:0");
  std::cerr<<"OPENING caution\n";
  }
  ~Frontend(){
+ readAhead.reset();
 #ifdef WHJ2_WITH_VULKAN
  vulkan.reset();
 #endif
@@ -184,7 +195,33 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }
  void syncProgress(){if(progress.capture(story))qlie::write_file(saveDir+"/system.progress",progress.save());}
  void makerLogo(){opening=2;images->clear();movie->open("script/makerlogo/omegastar.ogv");std::cerr<<"OPENING maker-logo\n";}
- void showTitle(){normalSkip=false;currentPageKey.clear();cgScreen->close();replayActive=false;replayScreen->close();opening=0;images->clear();syncProgress();menu=true;hidden=false;focus=0;upperMenu->close();gameMenu.close();title->reset(false,progress.extras());audio->stopAll();audio->play(0,assets.read("music/wbgm06.ogg"),true,255.f/256,0,"music/wbgm06.ogg",0);}
+ void warmNextScene(bool openingHint=false){
+  if(!readAhead)return;
+  struct Hint {std::string path;bool audio;};std::vector<Hint> hints;std::vector<std::string> keys;
+  auto add=[&](const std::string&path,bool sound){
+   auto key=qlie::canonical(path);
+   if(hints.size()<6&&std::find(keys.begin(),keys.end(),key)==keys.end()){keys.push_back(key);hints.push_back({path,sound});}
+  };
+  std::vector<std::string> upcoming;
+  try{upcoming=story.upcomingAssetCommands(openingHint);}
+  catch(const std::runtime_error&e){std::fprintf(stderr,"LOAD read-ahead script: %s\n",e.what());return;}
+  for(auto&line:upcoming){
+   auto comma=line.find(',');auto cmd=line.substr(0,comma);
+   if(cmd=="^music01"||cmd=="^se01"||cmd=="^se02"){
+    for(auto&part:whj2::split(line.substr(comma+1),','))if(part.rfind("file:",0)==0){
+     auto name=part.substr(5);if(name.empty()||name=="none"||name.find('$')!=name.npos)continue;
+     auto path=std::string(cmd=="^music01"?"music/":"se/")+name;if(!assets.inPack(path))path+=".ogg";
+     if(assets.inPack(path))add(path,true);
+    }
+   }else for(auto&path:images->warmPaths(line))add(path,false);
+   if(hints.size()==6)break;
+  }
+  readAhead->retain(keys);
+  for(auto&h:hints){if(h.audio)audio->warmFile(assets,h.path);else images->warmFile(h.path);}
+ }
+ void showTitle(){normalSkip=false;currentPageKey.clear();cgScreen->close();replayActive=false;replayScreen->close();opening=0;images->clear();syncProgress();menu=true;hidden=false;focus=0;upperMenu->close();gameMenu.close();
+  title->reset(false,progress.extras());audio->stopAll();audio->playFile(assets,0,"music/wbgm06.ogg",true,255.f/256,0,0);warmNextScene(true);
+ }
  void applySettings(bool persist=true){audio->setUserGains(settings.gains());images->setWindowAlpha(unsigned(settings.get("WindowAlpha")));messageText->setSpeed(settings.get("TextSpeed"));if(!text.empty())refreshMessage();if(persist)qlie::write_file(saveDir+"/settings.cfg",settings.save());gameMenu.settingsDirty=false;}
  void drawGlyph(uint32_t cp,int x,int y,unsigned width,unsigned height,uint32_t color){
  if(!frameTarget){kfont_draw(font,newImage(),cp,x,y,width,height,color);return;}
@@ -236,8 +273,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  return true;
  }std::string path=(ch==0?"music/":"se/")+f;
  if(!assets.exists(path))path+=".ogg";
- if(!assets.exists(path))throw std::runtime_error("Missing audio "+path);
- audio->play(ch,assets.read(path),loops[ch],volumes[ch],ms,path,audioTypes[ch]);
+ audio->playFile(assets,ch,path,loops[ch],volumes[ch],ms,audioTypes[ch]);
  }else audio->volume(ch,volumes[ch],ms);
  return true;
  }
@@ -252,6 +288,21 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  void recordCurrentRead(){if(!menu&&!hidden&&!gameMenu.visible()&&!movie->playing()&&images->messageVisible()&&!currentPageKey.empty()&&messageText->finished()&&progress.markRead(currentPageKey))qlie::write_file(saveDir+"/system.progress",progress.save());}
  void toggleSkip(){if(menu||movie->playing()||gameMenu.visible()||upperMenu->visible()||story.state.awaiting)return;if(normalSkip){normalSkip=false;return;}normalSkip=settings.get("SkipMode")==0||progress.wasRead(currentPageKey);if(normalSkip){autoPlay.enabled=false;hidden=false;}}
  void next(bool resume=false){if(menu||story.state.finished)return;
+  using LoadClock=std::chrono::steady_clock;
+  struct PageTiming {
+   whj2::AssetReadAhead* loader;
+   whj2::AssetReadAhead::Stats start;
+   LoadClock::time_point begin;
+   double capture=0;
+   ~PageTiming(){
+    if(!loader)return;
+    double ms=std::chrono::duration<double,std::milli>(LoadClock::now()-begin).count();
+    if(ms<1000.0/60)return;
+    auto end=loader->stats();
+    std::fprintf(stderr,"LOAD page_ms=%.3f capture_ms=%.3f ready=%u waited=%u urgent=%u cold=%u\n",
+                 ms,capture,end.ready-start.ready,end.waited-start.waited,end.urgent-start.urgent,end.cold-start.cold);
+   }
+  } timing{readAhead.get(),readAhead?readAhead->stats():whj2::AssetReadAhead::Stats{},LoadClock::now()};
  if(!resume){recordCurrentRead();currentPageKey.clear();images->beginPage();pendingBody.clear();pendingSpeaker.clear();pendingVoice.clear();}
  auto&body=pendingBody;auto&speaker=pendingSpeaker;auto&voiceId=pendingVoice;
  for(unsigned guard=0;guard<10000;guard++){auto e=story.next();syncProgress();
@@ -271,7 +322,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  images->selectFace(speaker,voiceId);
  playVoice(voiceId);
  sentenceWait.page(true,audio->playing(3));
- advances++;
+ advances++;warmNextScene();
  std::cerr<<"PAGE "<<e.file<<":"<<e.line<<"\n";
  return;
  }if(e.type=="finish"||e.type=="finished"){if(replayActive){openReplay(replayPage);return;}showTitle();
@@ -294,8 +345,21 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  text="";
  name="";
  return;
- }if(e.type=="command"&&e.value.rfind("^sentence",0)==0){qlie::Bytes scene(1280*720*4);for(size_t i=0;i<scene.size();i+=4){scene[i]=35;scene[i+1]=25;scene[i+2]=20;scene[i+3]=255;}images->drawScene(scene);transition->blend(scene);transition->command(e.value,scene,&sentenceWait);continue;
- }if(e.type=="wait"||e.type=="click-wait"){sentenceWait.native(e.type=="click-wait",e.value.empty()?0:std::stod(e.value));transition->present();return;
+ }if(e.type=="command"&&e.value.rfind("^sentence",0)==0){
+  transition->commandWithCapture(e.value,[this,&timing]{
+   auto start=LoadClock::now();
+   qlie::Bytes scene(1280*720*4);
+#ifdef WHJ2_WITH_VULKAN
+   if(vulkan&&vulkan->nativePresentation()){
+    vulkan->begin(0xff141923u);images->drawScene(*vulkan);transition->blend(*vulkan);vulkan->end(scene);
+    timing.capture+=std::chrono::duration<double,std::milli>(LoadClock::now()-start).count();return scene;
+   }
+#endif
+   for(size_t i=0;i<scene.size();i+=4){scene[i]=35;scene[i+1]=25;scene[i+2]=20;scene[i+3]=255;}
+   images->drawScene(scene);transition->blend(scene);
+   timing.capture+=std::chrono::duration<double,std::milli>(LoadClock::now()-start).count();return scene;
+  },&sentenceWait);continue;
+ }if(e.type=="wait"||e.type=="click-wait"){sentenceWait.native(e.type=="click-wait",e.value.empty()?0:std::stod(e.value));transition->present();warmNextScene();return;
  }if(e.type=="command"&&(audioCommand(e.value)||images->command(e.value)))continue;
  if(e.type=="create"||e.type=="free"){audio->stopAll();
  images->clear();
@@ -358,6 +422,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  history.clear();if(std::filesystem::exists(slotPrefix(slot)+".history")){auto bytes=qlie::file(slotPrefix(slot)+".history");whj2::StateReader log{bytes};if(log.str()!="WHJ2-history-1")throw std::runtime_error("History version");auto count=log.n();for(uint64_t i=0;i<count;i++){auto who=log.str();auto words=log.str();history.emplace_back(who,words);}log.end();}
  menu=false;hidden=false;
  normalSkip=false;currentPageWasRead=progress.wasRead(currentPageKey);focus=0;if(story.state.awaiting)choiceScreen->show(story.state.choices,font);
+ warmNextScene();
  status="静止画・音声位置を含む状態を読み込みました。";
  }
  void activate(){if(normalSkip){normalSkip=false;return;}if(opening){if(opening==1)makerLogo();else {movie->stop();showTitle();}return;}if(!menu&&hidden){hidden=false;return;}if(movie->playing()){movie->stop();

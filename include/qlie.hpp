@@ -6,6 +6,7 @@
 #include <memory>
 #include <fstream>
 #include <optional>
+#include <mutex>
 namespace qlie {
 using Bytes=std::vector<uint8_t>;
 uint32_t hash(const Bytes&);
@@ -14,6 +15,7 @@ std::string cp932(const Bytes&);
 std::string canonical(std::string);
 struct Entry { std::string name,rawname;uint64_t offset;uint32_t size,unpacked,packed,encrypted,hash; };
 class Pack {
+ std::mutex fileCursor;
  std::ifstream fp;Bytes k1,k2,key_entry;bool key_ready=false;uint32_t key;
 public:
  std::vector<Entry> entries;
@@ -30,6 +32,7 @@ public:
  explicit Assets(const std::string&);
  Bytes read(const std::string&);
  bool exists(const std::string&) const;
+ bool inPack(const std::string&name)const{return index.count(canonical(name))!=0;}
  std::optional<ResourceLocation> locate(const std::string&) const;
  std::vector<std::string> names() const;
 };

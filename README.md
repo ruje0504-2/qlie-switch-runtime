@@ -103,31 +103,36 @@ backend from [danfromtico/mesa-switch](https://github.com/danfromtico/mesa-switc
 Mesa 26.2.4, commit `0ff52079ca9e9e837ed27eb95a8d239f439a1864`.
 The authored flower particles, sky mesh, texture sampling, ordered integer
 blending and left-stick/touch viewpoint remain in the same scene graph.
-The compositor compares the ordered draw list and source texture versions for
-each 16x16 tile. Unchanged tiles keep their final pixels. For a changed tile
-the compositor can also reuse the exact color of an unchanged prefix of layers.
-One dispatch updates the dirty tiles in scene order. Camera motion, reordered
-or removed layers, a new texture upload and a different clear color all take
-part in the comparison. Movie playback publishes a frame version when the decoder writes to the display
-surface. Repeated ticks can reuse the same pixels.
-Immutable scene images publish a version after decoding or replacement. Other
-image producers use byte comparison against a CPU copy while their GPU upload
-is cached. The arena keeps earlier versions alive until the GPU fence completes.
-A Vulkan fullscreen pass presents directly through the native NWindow
-swapchain, including the FPS overlay.
-On this path, SDL provides audio/events only; Joy-Con and touchscreen input use
-libnx. SDL does not create a video window or claim the NWindow. The title,
-story layers, message windows, choices, CG/replay/music screens, system panels,
-glyphs, dimming, bitmap masks and scene transitions share this GPU composition
-path without per-frame readback. Movies retain the existing CPU decoder and
-upload its frame directly; overlays are composed on the GPU. Transition/save
-snapshots still use the CPU reference renderer when requested by game logic.
-Save-panel metadata and thumbnails are cached while the panel is open; glyph
-bitmaps are cached separately from their GPU placement.
+The compositor compares draw order, parameters and texture versions in 16×16
+tiles. Unchanged tiles keep their pixels. A changed tile can start from a
+previously saved prefix of its layers. On Horizon devices that expose ordered
+pixel interlock, one instanced draw covers the dirty portions of sprites,
+particles, projected model triangles, text, masks and fades. The rasterizer
+interpolates the source coordinates. A shared shader implements the QLIE
+sampling and integer blend modes in draw order. When ordered geometry is
+unavailable, one compute dispatch processes the dirty tiles.
+
+The native composition target resides in GPU memory. At 1280×720 the renderer
+can copy it directly to a BGRA swapchain image with transfer-destination
+support. Other surface configurations use the fullscreen presentation shader.
+The title, story, menus and overlays share the native NWindow. SDL handles
+audio and events. The CPU movie decoder publishes each new video frame to the
+texture cache. Immutable decoded images carry content versions and other
+sources use byte comparisons. The GPU fence protects previously uploaded data.
+
+The script engine requests a transition snapshot only for a command which
+uses the previous scene. A capture draws the scene and any active transition
+and reads their pixels back once. Save thumbnails keep their existing CPU
+path. During the opening and at story waits a worker prepares upcoming images,
+composites and audio in script order. The queue holds up to six hints and
+evicts completed speculative results above a 48 MiB budget. Particle identities
+and audio playback start at the original script command. Slow page changes log
+the time spent capturing and whether their resources were ready.
 
 On Horizon, the main loop, the Vulkan submit/present thread and the audio mixer
 request the first, second and third CPU cores allowed for the process. CPU
 raster workers use the remaining allowed slots when rendering CPU snapshots.
+The asset worker shares the second allowed core with the presenter.
 Each role logs its requested core and the affinity mask read back from Horizon.
 The presenter holds one frame in flight. Input and scene preparation can overlap
 that frame. When every tile is unchanged and the FPS counter is hidden, the
@@ -135,7 +140,7 @@ screen retains the last presentation and the input loop runs at up to 60 Hz.
 With the counter visible the application continues presenting through FIFO so
 the counter measures completed presentations. Command buffers and mapped memory wait for its fence before
 reuse. Periodic logs identify dirty tiles, uploads, CPU preparation, fence wait
-and GPU raster time on queues supporting timestamps.
+and separate GPU raster and presentation times on queues supporting timestamps.
 
 Native FIFO presentation supplies the console's 60 Hz limit, without a second
 software sleep before swapchain acquisition. The CPU/host presentation path
@@ -151,9 +156,8 @@ sh build-switch.sh
 
 `WHJ2_MESA_SDK` and `WHJ2_RUST_LIBDIR` can reuse an existing matching SDK.
 The exact source, artifact and Rust versions/checksums are recorded in
-`config/graphics-dependencies.json`. The shader is `shaders/raster.comp`;
-`src/raster_spv.inc` contains its Vulkan 1.1 SPIR-V generated with
-`glslangValidator -V --target-env vulkan1.1`.
+`config/graphics-dependencies.json`. Run `python3 tools/build_graphics_shaders.py` to compile the scene,
+compute and presentation shaders for Vulkan 1.1 and update their embedded SPIR-V.
 
 The host build remains available without Vulkan. A Vulkan-enabled host build
 can be built with `WHJ2_HOST_VULKAN=1 sh build-host.sh --runtime-only` and

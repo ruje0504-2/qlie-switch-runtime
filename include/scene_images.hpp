@@ -8,6 +8,7 @@
 namespace whj2 {
 struct Composite;
 class RenderTarget;
+class AssetReadAhead;
 struct SceneSoundEvent {bool stop=false,loop=false;unsigned channel=0,category=2;float gain=1;std::string source;qlie::Bytes bytes;};
 class SceneImages {
  struct Tween {float from=0,to=0,power=100;double elapsed=0,duration=0;unsigned mode=1;};
@@ -20,6 +21,9 @@ class SceneImages {
  unsigned faceType=0;std::string faceDefaultFile;
  qlie::Assets&assets;std::map<std::string,Layer>layers;std::map<std::string,std::map<std::string,std::string>>templates;std::map<std::string,std::shared_ptr<const Image>>cache;
  std::map<std::string,std::shared_ptr<Composite>>composites;
+ AssetReadAhead*readAhead=nullptr;
+ std::shared_ptr<const Image> loadBitmap(const std::string&);
+ std::shared_ptr<Composite> loadComposite(const std::string&);
  static float value(const Layer&,const std::string&,float);
  void loadReplacement(Layer&,const std::string&);
  void transition(Layer&,const Layer&,bool,bool);
@@ -27,6 +31,9 @@ class SceneImages {
  std::string expand(std::string,const std::string&);
 public:
  explicit SceneImages(qlie::Assets&);
+ void setReadAhead(AssetReadAhead*loader){readAhead=loader;}
+ std::vector<std::string> warmPaths(const std::string&)const;
+ void warmFile(const std::string&);
  void draw(RenderTarget&)const;
  void drawScene(RenderTarget&)const;void drawFaces(RenderTarget&)const;void drawMessages(RenderTarget&)const;
  std::set<std::string> takeShownFiles(){std::set<std::string> out;out.swap(shownFiles);return out;}

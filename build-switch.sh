@@ -21,6 +21,16 @@ if [ ! -f build-switch/video.o ] || [ src/video.c -nt build-switch/video.o ] || 
   $cc -std=c11 $flags $($pc --cflags libavformat libavcodec libswscale libswresample libavutil) -c src/video.c -o build-switch/video.o
 fi
 # Graphical runtime candidate; hardware acceptance remains separate.
-$cxx -std=c++17 $flags $($pc --cflags sdl2 freetype2 libpng libjpeg) -L"$dkp/libnx/lib" -specs="$dkp/libnx/switch.specs" src/qlie.cpp src/story.cpp src/audio.cpp src/image.cpp src/animation.cpp src/particles.cpp src/scene_images.cpp src/model.cpp src/gradient_mask.cpp src/render_queue.cpp src/voice.cpp src/movie.cpp src/message_text.cpp src/scene_transition.cpp src/sentence_wait.cpp src/joycon.cpp src/upper_menu.cpp src/game_menu.cpp src/settings.cpp src/auto_play.cpp src/fps_overlay.cpp src/title_screen.cpp src/choice_screen.cpp src/progress.cpp src/music_screen.cpp src/replay_catalog.cpp src/replay_screen.cpp src/cg_catalog.cpp src/cg_screen.cpp src/mac_runtime.cpp build-switch/font.o build-switch/video.o $($pc --libs sdl2 freetype2 libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -lpthread -lnx -o build-switch/whj2-runtime.elf
+mesa=${WHJ2_MESA_SDK:-$PWD/local/mesa-sdk/opt/devkitpro/portlibs/switch}
+rust=${WHJ2_RUST_LIBDIR:-$PWD/local/rust/rust-std-nightly-aarch64-unknown-linux-gnu/rust-std-aarch64-unknown-linux-gnu/lib/rustlib/aarch64-unknown-linux-gnu/lib}
+if [ ! -f "$mesa/lib/libvulkan.a" ] || [ ! -d "$rust" ]; then
+  echo "Missing Mesa 26.2.4/Rust SDK. Run python3 tools/fetch_graphics_sdk.py" >&2
+  exit 1
+fi
+$cxx -std=c++17 $flags -ffp-contract=off -Wno-missing-field-initializers -Wno-misleading-indentation -I"$mesa/include" -c src/vulkan_raster.cpp -o build-switch/vulkan_raster.o
+$cc -std=c11 $flags -c src/switch_stdio.c -o build-switch/switch_stdio.o
+flags="$flags -ffp-contract=off -DWHJ2_WITH_VULKAN"
+
+$cxx -std=c++17 $flags $($pc --cflags sdl2 freetype2 libpng libjpeg) -L"$dkp/libnx/lib" -specs="$dkp/libnx/switch.specs" src/qlie.cpp src/story.cpp src/audio.cpp src/image.cpp src/animation.cpp src/particles.cpp src/scene_images.cpp src/model.cpp src/gradient_mask.cpp src/render_queue.cpp src/voice.cpp src/movie.cpp src/message_text.cpp src/scene_transition.cpp src/sentence_wait.cpp src/joycon.cpp src/upper_menu.cpp src/game_menu.cpp src/settings.cpp src/auto_play.cpp src/fps_overlay.cpp src/title_screen.cpp src/choice_screen.cpp src/progress.cpp src/music_screen.cpp src/replay_catalog.cpp src/replay_screen.cpp src/cg_catalog.cpp src/cg_screen.cpp src/mac_runtime.cpp build-switch/font.o build-switch/video.o build-switch/vulkan_raster.o build-switch/switch_stdio.o -L"$mesa/lib" -Wl,--start-group "$mesa/lib/libvulkan.a" "$rust"/*.rlib $($pc --libs sdl2 freetype2 libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -lexpat -lzstd -lpthread -lnx -Wl,--end-group -o build-switch/whj2-runtime.elf
 "$dkp/tools/bin/nacptool" --create "WHJ2 Runtime (Development)" "WHJ2 port contributors" "0.0.2" build-switch/whj2-runtime.nacp
 "$dkp/tools/bin/elf2nro" build-switch/whj2-runtime.elf build-switch/whj2-runtime.nro --nacp=build-switch/whj2-runtime.nacp

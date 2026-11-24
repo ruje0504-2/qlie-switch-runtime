@@ -491,8 +491,9 @@ void SceneImages::setMessageImage(const Image&image,bool show){if(!layers.count(
  if(show&&(layer.params["show"]!="true"||layer.params.count("@hiding"))){if(layer.composite&&findMotion(layer.composite->definition,"*Enable")){layer.params["motion"]="*Enable";layer.milliseconds=0;layer.audioMilliseconds=-1;}layer.params["show"]="true";layer.params.erase("@hiding");}
 }
 
-void SceneImages::render(qlie::Bytes&out,unsigned pass)const{
- if(out.size()!=1280*720*4)throw std::runtime_error("Scene canvas size");
+void SceneImages::draw(RenderTarget&target)const{qlie::Bytes unused;render(unused,0,&target);}
+void SceneImages::render(qlie::Bytes&out,unsigned pass,RenderTarget*target)const{
+ if(!target&&out.size()!=1280*720*4)throw std::runtime_error("Scene canvas size");
  std::vector<const Layer*>sorted;
  for(auto&x:layers){auto&layer=x.second;bool face=x.first=="face",message=x.first=="message";
  if((pass==1&&(face||message))||(pass==2&&!face)||(pass==3&&!message))continue;
@@ -518,7 +519,7 @@ void SceneImages::render(qlie::Bytes&out,unsigned pass)const{
  else queue.image(*l->pixels,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),0,unsigned(get(l,"texfilter",0)));
  if(queue.imageCount()>beforeImages){if(qlie::canonical(l->path).rfind("image/ev/",0)==0)shownFiles.insert(qlie::canonical(l->path));auto replacement=l->params.find("@replacement");if(replacement!=l->params.end()&&qlie::canonical(replacement->second).rfind("image/ev/",0)==0)shownFiles.insert(qlie::canonical(replacement->second));}
  }
- queue.draw(out,1280,720);
+ if(target)queue.draw(*target,1280,720);else queue.draw(out,1280,720);
 }
 
 qlie::Bytes SceneImages::save()const{StateWriter w;

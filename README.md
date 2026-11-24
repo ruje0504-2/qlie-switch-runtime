@@ -94,3 +94,39 @@ build/whj2-runtime /absolute/path/to/game /absolute/path/to/empty-test-saves --t
 L opens the save panel; R opens the load panel. A confirms a selected slot, and B cancels a panel. X opens the settings page, Up opens text history, and held ZR forces text advance until released or a choice is reached. During dialogue B hides or restores the text box; A first restores hidden text without advancing. Y or a downward swipe opens the original upper menu. No controller legend or permanent touch overlay is drawn.
 
 Save/load panels use the original resources, 15 pages of eight local slots, and small scene thumbnails. History contains displayed pages and is included with each slot. The settings page supports nine sliders for text speed, text-window opacity, auto-play delay, and six volume controls, plus click-to-stop voice and auto-play voice-wait toggles. Sliders support captured touch drags and controller adjustment, with local persistence and reset confirmation. The original auto-play button controls timed progression and waits for text completion and, when selected, voice completion. Remaining font, display-quality, and character-voice controls are pending; this is not full settings parity. Confirmation dialogs currently use original artwork without the original transition timing. Physical controller/touch and Switch runtime acceptance remain pending.
+
+
+## Vulkan title renderer
+
+The Switch title scene uses the GPU through the statically linked Vulkan/NVK
+backend from [danfromtico/mesa-switch](https://github.com/danfromtico/mesa-switch),
+Mesa 26.2.4, commit `0ff52079ca9e9e837ed27eb95a8d239f439a1864`.
+The authored flower particles, sky mesh, texture sampling, ordered integer
+blending and left-stick/touch viewpoint remain in the same scene graph.
+Compute dispatches write the title frame and a Vulkan fullscreen pass presents it
+directly through the native NWindow swapchain, including the FPS overlay. Modal
+panels use a readback for the existing CPU UI composition. Other game scenes
+currently retain CPU composition and use the same Vulkan native presentation.
+
+Dependencies are isolated from the system toolchain:
+
+```sh
+python3 tools/fetch_graphics_sdk.py
+sh build-switch.sh
+```
+
+`WHJ2_MESA_SDK` and `WHJ2_RUST_LIBDIR` can reuse an existing matching SDK.
+The exact source, artifact and Rust versions/checksums are recorded in
+`config/graphics-dependencies.json`. The shader is `shaders/raster.comp`;
+`src/raster_spv.inc` contains its Vulkan 1.1 SPIR-V generated with
+`glslangValidator -V --target-env vulkan1.1`.
+
+The host build remains available without Vulkan. A Vulkan-enabled host build
+can be built with `WHJ2_HOST_VULKAN=1 sh build-host.sh --runtime-only` and
+selected with `WHJ2_RENDERER=vulkan`; `WHJ2_VULKAN_LIBRARY` specifies the
+host library. `WHJ2_RENDERER=cpu` selects the CPU reference renderer on Switch.
+These are diagnostic environment variables, not controller bindings.
+
+Host verification covers 60 real title frames at different horizontal views,
+all nine blend modes, dynamic snapshots and title touch/stick logic. It does not
+establish the frame rate or stability of the Switch build on physical hardware.

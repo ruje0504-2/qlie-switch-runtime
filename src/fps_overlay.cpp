@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Glyph rows and four-pass styling adapted from biko3-switch-runtime (0BSD).
 #include "fps_overlay.hpp"
+#include "render_queue.hpp"
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
@@ -19,4 +20,6 @@ void FpsOverlay::rebuild(){char text[32];std::snprintf(text,sizeof(text),"FPS [%
  renderedValue=value;
 }
 void FpsOverlay::draw(qlie::Bytes&pixels){if(pixels.size()!=1280*720*4)throw std::runtime_error("FPS canvas size");if(renderedValue!=value)rebuild();for(unsigned y=0;y<label.height;y++)for(unsigned x=0;x<label.width;x++){const auto*src=&label.pixels[(y*label.width+x)*4];if(src[3])std::memcpy(&pixels[((696+y)*1280+x)*4],src,4);}}
+void FpsOverlay::draw(RenderTarget&target){if(renderedValue!=value)rebuild();RenderQueue q;q.image(label,imagePlacement(0,696,1,1,0,0,0,label.width,label.height),0,255,0,0xffffff);q.draw(target,1280,720);}
+
 }

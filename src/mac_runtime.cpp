@@ -1,3 +1,6 @@
+#ifdef WHJ2_WITH_VULKAN
+#include "vulkan_raster.hpp"
+#endif
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Incremental native frontend: graphics/audio integration remains in progress.
 #include "story.hpp"
@@ -89,6 +92,9 @@ struct Frontend {
  SDL_Window*window=nullptr;
  SDL_Renderer*renderer=nullptr;
  SDL_Texture*texture=nullptr;
+#ifdef WHJ2_WITH_VULKAN
+ std::unique_ptr<whj2::VulkanRaster>vulkan;
+#endif
  qlie::Bytes pixels;
  std::string text,name,status="",saveDir;
  bool menu=true,done=false,hidden=false,fpsVisible=false;
@@ -104,13 +110,28 @@ struct Frontend {
  if(SDL_Init(subsystems))throw std::runtime_error(SDL_GetError());
  window=SDL_CreateWindow("美少女万華鏡２",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,1280,720,SDL_WINDOW_RESIZABLE);
  if(!window)throw std::runtime_error(SDL_GetError());
+#ifdef WHJ2_WITH_VULKAN
+ const char*gpuMode=std::getenv("WHJ2_RENDERER");
+#ifdef __SWITCH__
+ if(!gpuMode||std::string(gpuMode)!="cpu")vulkan=std::make_unique<whj2::VulkanRaster>();
+#else
+ if(gpuMode&&std::string(gpuMode)=="vulkan")vulkan=std::make_unique<whj2::VulkanRaster>();
+#endif
+#endif
+
+ bool nativeVulkan=false;
+#ifdef WHJ2_WITH_VULKAN
+ nativeVulkan=vulkan&&vulkan->nativePresentation();
+#endif
+ if(!nativeVulkan){
  renderer=SDL_CreateRenderer(window,-1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);
  if(!renderer)renderer=SDL_CreateRenderer(window,-1,SDL_RENDERER_SOFTWARE);
  if(!renderer)throw std::runtime_error(SDL_GetError());
  SDL_RenderSetLogicalSize(renderer,1280,720);
  texture=SDL_CreateTexture(renderer,SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STREAMING,1280,720);
+ }
  font=kfont_open(nullptr,0);
- if(!font||!texture)throw std::runtime_error("Font/texture initialization failed");
+ if(!font||(!nativeVulkan&&!texture))throw std::runtime_error("Font/texture initialization failed");
  std::filesystem::create_directories(saveDir);
  audio=std::make_unique<whj2::Audio>();
  images=std::make_unique<whj2::SceneImages>(assets);
@@ -135,7 +156,11 @@ struct Frontend {
  opening=1;images->command("^ui_caution,file:script/caution/caution.b,x:0,y:0");
  std::cerr<<"OPENING caution\n";
  }
- ~Frontend(){cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
+ ~Frontend(){
+#ifdef WHJ2_WITH_VULKAN
+ vulkan.reset();
+#endif
+cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  for(auto&c:controllers)SDL_GameControllerClose(c.second);
  audio.reset();
  kfont_close(font);
@@ -381,7 +406,11 @@ struct Frontend {
  if(gameMenu.panel==UI::History){size_t offset=std::min(size_t(gameMenu.historyOffset),history.size());for(size_t row=0;row<4&&row+offset<history.size();row++){auto&entry=history[history.size()-1-offset-row];int y=64+int(3-row)*149;line(whj2::messageDisplayName(entry.first),230,y,24);int x=230,cy=y+30;for(auto cp:utf8(entry.second)){int width=cp<128?12:24;if(cp==10||x+width>1140){x=230;cy+=30;if(cp==10)continue;}if(cy>=y+140)break;kfont_draw(font,newImage(),cp,x,cy,width,24,0xffffff);x+=width;}}}
  }
  KImage*newImage(){static KImage dst;dst={0,0,1280,720,1280*4,pixels.data()};return &dst;}
- void present(){auto shown=images->takeShownFiles();auto cgShown=cgScreen->takeShownFiles();shown.insert(cgShown.begin(),cgShown.end());if(progress.captureFiles(shown))qlie::write_file(saveDir+"/system.progress",progress.save());if(fpsVisible)fpsDisplay.draw(pixels);SDL_UpdateTexture(texture,nullptr,pixels.data(),1280*4);SDL_RenderClear(renderer);SDL_RenderCopy(renderer,texture,nullptr,nullptr);framePacer.wait();SDL_RenderPresent(renderer);fpsDisplay.presented(SDL_GetTicks64());}
+ void present(){auto shown=images->takeShownFiles();auto cgShown=cgScreen->takeShownFiles();shown.insert(cgShown.begin(),cgShown.end());if(progress.captureFiles(shown))qlie::write_file(saveDir+"/system.progress",progress.save());if(fpsVisible)fpsDisplay.draw(pixels);
+#ifdef WHJ2_WITH_VULKAN
+ if(vulkan&&vulkan->nativePresentation()){framePacer.wait();vulkan->presentPixels(pixels);fpsDisplay.presented(SDL_GetTicks64());return;}
+#endif
+ SDL_UpdateTexture(texture,nullptr,pixels.data(),1280*4);SDL_RenderClear(renderer);SDL_RenderCopy(renderer,texture,nullptr,nullptr);framePacer.wait();SDL_RenderPresent(renderer);fpsDisplay.presented(SDL_GetTicks64());}
  void draw(){panelDraws=0;if(cgScreen->visible()){std::fill(pixels.begin(),pixels.end(),0);cgScreen->draw(pixels);present();return;}if(replayScreen->visible()){std::fill(pixels.begin(),pixels.end(),0);replayScreen->draw(pixels);present();return;}if(opening==1){std::fill(pixels.begin(),pixels.end(),0);images->draw(pixels);present();return;}if(musicScreen->visible()){std::fill(pixels.begin(),pixels.end(),0);musicScreen->draw(pixels);present();return;}if(movie->playing()){pixels=movie->image().pixels;
  upperMenu->draw(pixels);
  if(gameMenu.visible())drawPanel();
@@ -392,7 +421,12 @@ struct Frontend {
  pixels[i+2]=menu?0:20;
  pixels[i+3]=255;
  }if(!menu){images->drawScene(pixels);transition->blend(pixels);}
- if(menu){title->draw(pixels);
+ if(menu){
+#ifdef WHJ2_WITH_VULKAN
+ if(vulkan&&vulkan->nativePresentation()&&!gameMenu.visible()){vulkan->begin(pixels);title->draw(*vulkan);if(fpsVisible)fpsDisplay.draw(*vulkan);framePacer.wait();vulkan->present();fpsDisplay.presented(SDL_GetTicks64());return;}
+ if(vulkan){vulkan->begin(pixels);title->draw(*vulkan);vulkan->end(pixels);}else
+#endif
+ title->draw(pixels);
  }else if(!hidden&&gameMenu.panel!=whj2::GameMenu::History){images->drawMessages(pixels);
  if(images->messageVisible())line(whj2::messageDisplayName(name),200,570,26,0xffffff);
  if(story.state.awaiting)choiceScreen->draw(pixels);
@@ -407,10 +441,11 @@ struct Frontend {
  std::cerr<<"SCREENSHOT "<<saveDir<<"/"<<name<<"\n";
  }
  bool titleViewActive()const{return menu&&!opening&&!gameMenu.visible()&&!musicScreen->visible()&&!replayScreen->visible()&&!cgScreen->visible();}
- void touchTitleView(float x,float y){if(!titleViewActive())return;int w,h;SDL_GetWindowSize(window,&w,&h);float lx,ly;SDL_RenderWindowToLogical(renderer,int(x*w),int(y*h),&lx,&ly);titlePointer=std::clamp(lx,0.f,1280.f);title->view(titlePointer);}
- void touchDrag(float x,float y,bool start){int w,h;SDL_GetWindowSize(window,&w,&h);float lx,ly;SDL_RenderWindowToLogical(renderer,int(x*w),int(y*h),&lx,&ly);if(cgScreen->visible()){if(start)fingerUiDrag=false;if(cgScreen->inView())cgScreen->pan(lx,ly);return;}if(replayScreen->visible()){if(start)fingerUiDrag=false;return;}if(musicScreen->visible()){bool moved=musicScreen->drag(lx,ly);if(start)fingerUiDrag=moved;return;}if(start)fingerUiDrag=gameMenu.beginDrag(lx,ly);else gameMenu.drag(lx,ly);if(fingerUiDrag&&gameMenu.settingsDirty){applySettings(false);uiSound("Sys_OnMouse");}}
+ void windowToLogical(int px,int py,float*x,float*y){if(renderer){SDL_RenderWindowToLogical(renderer,px,py,x,y);return;}int width,height;SDL_GetWindowSize(window,&width,&height);float scale=std::min(width/1280.f,height/720.f);*x=(px-(width-1280*scale)*.5f)/scale;*y=(py-(height-720*scale)*.5f)/scale;}
+ void touchTitleView(float x,float y){if(!titleViewActive())return;int w,h;SDL_GetWindowSize(window,&w,&h);float lx,ly;windowToLogical(int(x*w),int(y*h),&lx,&ly);titlePointer=std::clamp(lx,0.f,1280.f);title->view(titlePointer);}
+ void touchDrag(float x,float y,bool start){int w,h;SDL_GetWindowSize(window,&w,&h);float lx,ly;windowToLogical(int(x*w),int(y*h),&lx,&ly);if(cgScreen->visible()){if(start)fingerUiDrag=false;if(cgScreen->inView())cgScreen->pan(lx,ly);return;}if(replayScreen->visible()){if(start)fingerUiDrag=false;return;}if(musicScreen->visible()){bool moved=musicScreen->drag(lx,ly);if(start)fingerUiDrag=moved;return;}if(start)fingerUiDrag=gameMenu.beginDrag(lx,ly);else gameMenu.drag(lx,ly);if(fingerUiDrag&&gameMenu.settingsDirty){applySettings(false);uiSound("Sys_OnMouse");}}
  void pointer(int px,int py){float x,y;
- SDL_RenderWindowToLogical(renderer,px,py,&x,&y);
+ windowToLogical(px,py,&x,&y);
  if(opening){activate();return;}if(menu){titlePointer=x;title->view(x);}
  if(cgScreen->visible()){cgAction(cgScreen->tap(x,y));return;}
  if(replayScreen->visible()){replayAction(replayScreen->tap(x,y));return;}

@@ -7,6 +7,7 @@
 #include <set>
 namespace whj2 {
 struct Composite;
+class RenderTarget;
 struct SceneSoundEvent {bool stop=false,loop=false;unsigned channel=0,category=2;float gain=1;std::string source;qlie::Bytes bytes;};
 class SceneImages {
  struct Tween {float from=0,to=0,power=100;double elapsed=0,duration=0;unsigned mode=1;};
@@ -22,10 +23,11 @@ class SceneImages {
  static float value(const Layer&,const std::string&,float);
  void loadReplacement(Layer&,const std::string&);
  void transition(Layer&,const Layer&,bool,bool);
- void render(qlie::Bytes&,unsigned pass)const;
+ void render(qlie::Bytes&,unsigned pass,RenderTarget*target=nullptr)const;
  std::string expand(std::string,const std::string&);
 public:
  explicit SceneImages(qlie::Assets&);
+ void draw(RenderTarget&)const;
  std::set<std::string> takeShownFiles(){std::set<std::string> out;out.swap(shownFiles);return out;}
  // UI slots are transient presentation state owned by title/choice screens.
  void uiSlot(const std::string&layer,unsigned slot,const std::string&asset);

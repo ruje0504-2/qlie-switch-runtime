@@ -13,6 +13,7 @@ public:
  void setExtraPage(bool);bool isExtraPage()const{return extraPage;}
  void update(double);void skipIntro();bool ready()const{return elapsed>=5500;}
  int selection()const{return selected;}int move(int);bool select(int);int hit(float,float)const;
+ void draw(RenderTarget&target)const{scene.draw(target);}
  Action confirm();void draw(qlie::Bytes&pixels)const{scene.draw(pixels);}
 };
 }

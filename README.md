@@ -157,6 +157,20 @@ python3 tools/fetch_graphics_sdk.py
 sh build-switch.sh
 ```
 
+The Switch build compiles the pinned Mesa NAK interlock pass with a local patch
+for GM20B. For an unconditional pair of fragment interlock markers, texture
+sampling before the first marker can proceed before waiting on the ordering
+ticket. The original ticket, memory fences and release atomic protect the
+marked section. Shaders with demotion or unproven control flow keep the
+conservative scope. The NRO links this object ahead of the SDK archive and
+uses a distinct NVK shader cache key.
+
+On a first build, the NAK helper caches its verified source inputs under
+`local/mesa-nak`. Set `WHJ2_MESA_SOURCE` to a Git checkout containing the
+locked Mesa commit to reuse local objects. The NIR header generators use
+Mako and PyYAML. `WHJ2_MESA_PYTHON` can select an existing Python environment.
+The helper otherwise prepares these dependencies in a project-local environment.
+
 `WHJ2_MESA_SDK` and `WHJ2_RUST_LIBDIR` can reuse an existing matching SDK.
 The exact source, artifact and Rust versions/checksums are recorded in
 `config/graphics-dependencies.json`. Run `python3 tools/build_graphics_shaders.py` to compile the scene,
@@ -183,3 +197,5 @@ measurements have been run for this revision.
 静态位图的 `imgfilter` 支持原 `blur10`、`blur20`、`mono`、`sepia` 公式，按图层前四个图像槽缓存处理结果；`none` 恢复源图。动态影片及嵌套非位图的滤镜仍待实现，会保留未支持日志。
 
 历史记录保留四条布局。十字键上下选择条目，A 重播该条语音；左右滚动选中条目的长正文。触摸正文可上下拖动，右侧原滚动条浏览更早记录。历史正文共用文本换行和已支持的标签解析，并按可见行缓存，不再在固定高度处永久丢弃后续文字。未完成全部原版日志演出的像素/实机验收。
+
+存档缩略图按原配置 `SaveThumPriority` 截取图层（本作默认 999），排除默认优先级 1100 的文字框和 1110 的头像。原剧情使用的 `savefilter,0` 明确保持无缩略图滤镜；其他缩略图滤镜模式尚未实现。

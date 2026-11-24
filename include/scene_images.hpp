@@ -30,7 +30,7 @@ class SceneImages {
  static float value(const Layer&,const std::string&,float);
  void loadReplacement(Layer&,const std::string&);
  void transition(Layer&,const Layer&,bool,bool);
- void render(qlie::Bytes&,unsigned pass,RenderTarget*target=nullptr)const;
+ void render(qlie::Bytes&,unsigned pass,RenderTarget*target=nullptr,float maxPriority=999)const;
  std::string expand(std::string,const std::string&);
 public:
  explicit SceneImages(qlie::Assets&);
@@ -48,7 +48,7 @@ public:
  void uiExternal(const std::string&layer,unsigned index,float value);
  qlie::Bytes save()const;void restore(const qlie::Bytes&);
  std::vector<SceneSoundEvent> takeSoundEvents();
- void update(double milliseconds);bool command(const std::string&);void clear();void beginPage();void selectFace(const std::string&speaker,const std::string&voice);void draw(qlie::Bytes&)const;void drawScene(qlie::Bytes&)const;void drawFaces(qlie::Bytes&)const;void drawMessages(qlie::Bytes&)const;
+ void update(double milliseconds);bool command(const std::string&);void clear();void beginPage();void selectFace(const std::string&speaker,const std::string&voice);void draw(qlie::Bytes&)const;void drawThumbnail(qlie::Bytes&,float maxPriority)const;void drawScene(qlie::Bytes&)const;void drawFaces(qlie::Bytes&)const;void drawMessages(qlie::Bytes&)const;
  void setWindowAlpha(unsigned alpha){windowAlpha=alpha>255?255:alpha;}
  bool messageVisible()const;MessageStyle messageStyle()const;void setMessageImage(const Image&,bool show=false);
 };

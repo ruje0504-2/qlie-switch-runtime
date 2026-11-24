@@ -554,6 +554,7 @@ void SceneImages::selectFace(const std::string&speaker,const std::string&voice){
 }
 std::pair<unsigned,unsigned> SceneImages::dimensions(const std::string&name)const{const auto&layer=layers.at(name);if(layer.composite)return {unsigned(layer.composite->definition.bounds[0]),unsigned(layer.composite->definition.bounds[1])};if(layer.pixels)return {layer.pixels->width,layer.pixels->height};throw std::runtime_error("Image dimensions unavailable: "+name);}
 void SceneImages::draw(qlie::Bytes&out)const{render(out,0);}
+void SceneImages::drawThumbnail(qlie::Bytes&out,float maxPriority)const{render(out,4,nullptr,maxPriority);}
 void SceneImages::drawScene(qlie::Bytes&out)const{render(out,1);}
 void SceneImages::drawFaces(qlie::Bytes&out)const{render(out,2);}
 void SceneImages::drawMessages(qlie::Bytes&out)const{render(out,3);}
@@ -570,11 +571,11 @@ void SceneImages::draw(RenderTarget&target)const{qlie::Bytes unused;render(unuse
 void SceneImages::drawScene(RenderTarget&target)const{qlie::Bytes unused;render(unused,1,&target);}
 void SceneImages::drawFaces(RenderTarget&target)const{qlie::Bytes unused;render(unused,2,&target);}
 void SceneImages::drawMessages(RenderTarget&target)const{qlie::Bytes unused;render(unused,3,&target);}
-void SceneImages::render(qlie::Bytes&out,unsigned pass,RenderTarget*target)const{
+void SceneImages::render(qlie::Bytes&out,unsigned pass,RenderTarget*target,float maxPriority)const{
  if(!target&&out.size()!=1280*720*4)throw std::runtime_error("Scene canvas size");
  std::vector<const Layer*>sorted;
  for(auto&x:layers){auto&layer=x.second;bool face=x.first=="face",message=x.first=="message";
- if((pass==1&&(face||message))||(pass==2&&!face)||(pass==3&&!message))continue;
+ if((pass==1&&(face||message))||(pass==2&&!face)||(pass==3&&!message)||(pass==4&&value(layer,"pri",0)>maxPriority))continue;
  if(face&&layer.params.at("disp")!="keep"&&layer.params.at("@face-active")!="true"){
  if(layer.params.at("show")=="true"&&layer.params.at("mode")=="auto"&&!faceWarning){std::cerr<<"PENDING-FACE automatic portrait selection\n";faceWarning=true;}continue;
  }

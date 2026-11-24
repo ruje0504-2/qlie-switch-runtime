@@ -1,0 +1,92 @@
+--- a/src/nouveau/compiler/nak_nir.c
++++ b/src/nouveau/compiler/nak_nir.c
+@@ -1585,16 +1585,45 @@
+    nir_lower_halt_to_return(nir);
+    nir_lower_returns(nir);
+    nir_function_impl *impl = nir_shader_get_entrypoint(nir);
++   /* A single unconditional pair in straight-line outer control flow can
++    * acquire and retire the same ticket at the shader's explicit boundaries.
++    * Keep the original whole-invocation lowering for exits, demotes, loops
++    * containing markers, and other control flow we cannot prove converges.
++    */
++   nir_intrinsic_instr *begin = NULL, *end = NULL;
++   bool scoped = false;
++#ifdef __SWITCH__
++   scoped = impl->structured && nak->sm == 52;
++#endif
+    bool has_demote = false;
+    nir_foreach_block(block, impl) {
+       nir_foreach_instr(instr, block) {
++         if (instr->type == nir_instr_type_call)
++            scoped = false;
++         if (instr->type == nir_instr_type_jump) {
++            const nir_jump_type jump = nir_instr_as_jump(instr)->type;
++            if (jump != nir_jump_break && jump != nir_jump_continue)
++               scoped = false;
++         }
+          if (instr->type != nir_instr_type_intrinsic)
+             continue;
+-         nir_intrinsic_op op = nir_instr_as_intrinsic(instr)->intrinsic;
++         nir_intrinsic_instr *intrin = nir_instr_as_intrinsic(instr);
++         nir_intrinsic_op op = intrin->intrinsic;
+          has_demote |= op == nir_intrinsic_demote || op == nir_intrinsic_demote_if;
+-      }
+-   }
+-
++         if (op == nir_intrinsic_terminate || op == nir_intrinsic_terminate_if ||
++             op == nir_intrinsic_demote_samples || op == nir_intrinsic_abort)
++            scoped = false;
++         if (op == nir_intrinsic_begin_invocation_interlock) {
++            scoped &= !begin && !end && block->cf_node.parent == &impl->cf_node;
++            begin = intrin;
++         } else if (op == nir_intrinsic_end_invocation_interlock) {
++            scoped &= begin && !end && block->cf_node.parent == &impl->cf_node;
++            end = intrin;
++         }
++      }
++   }
++
++   scoped &= begin && end && !has_demote;
+    nir_intrinsic_instr *final_demote = NULL;
+    if (has_demote) {
+       /* Track helper state in software until every lane reaches the release. */
+@@ -1612,7 +1641,8 @@
+          switch (intrin->intrinsic) {
+          case nir_intrinsic_begin_invocation_interlock:
+          case nir_intrinsic_end_invocation_interlock:
+-            nir_instr_remove(instr);
++            if (!scoped)
++               nir_instr_remove(instr);
+             break;
+          case nir_intrinsic_demote:
+          case nir_intrinsic_demote_if:
+@@ -1639,7 +1669,9 @@
+    /* Each warp retires its share of the coalesced tile. */
+    nir_def *increment = nir_iadd_imm(&b, nir_iand_imm(&b, ticket, 0xfe00), 0x200);
+ 
+-   /* Cover early returns and discard with one interlock per invocation. */
++   /* Keep ticket/address setup common to both paths, outside the wait. */
++   if (scoped)
++      b.cursor = nir_before_instr(&begin->instr);
+    nir_def *mask = nak_interlock_live_mask(&b);
+    nir_def *lane = nak_nir_load_sysval(&b, NAK_SV_LANE_ID, ACCESS_CAN_REORDER);
+    nir_push_if(&b, nir_ieq(&b, lane, nir_ufind_msb(&b, mask)));
+@@ -1657,9 +1689,16 @@
+                .memory_semantics = NIR_MEMORY_ACQUIRE,
+                .memory_modes = nir_var_mem_global);
+ 
+-   b.cursor = final_demote ? nir_before_instr(&final_demote->instr)
+-                           : nir_after_impl(impl);
++   if (scoped)
++      b.cursor = nir_before_instr(&end->instr);
++   else
++      b.cursor = final_demote ? nir_before_instr(&final_demote->instr)
++                              : nir_after_impl(impl);
+    nak_interlock_release(&b, addr, increment);
++   if (scoped) {
++      nir_instr_remove(&begin->instr);
++      nir_instr_remove(&end->instr);
++   }
+    return nir_progress(true, impl, nir_metadata_none);
+ }
+ 

@@ -88,7 +88,7 @@ struct Frontend {
  unsigned fontGeneration=0,historyFontGeneration=UINT32_MAX;size_t historyEntryCount=SIZE_MAX;
  bool normalSkip=false,skipReadOnly=true,leftTrigger=false,rightTrigger=false,currentPageWasRead=false;std::string currentPageKey;
  unsigned selectedSlot=1;unsigned skipStart=0;unsigned autoPhase=0,autoPhaseFrame=0,titlePhase=0;
- bool manualSlotsScanned=false;unsigned latestManualSlot=1;
+ bool manualSlotsScanned=false;unsigned latestManualSlot=1;int saveThumbnailPriority=999;
  bool fingerActive=false,fingerUiDrag=false;SDL_FingerID fingerId=0;float fingerX=0,fingerY=0;qlie::Bytes gestureStory;
  bool movieOnly=false,movieCaptured=false,touchOnlyTest=false,settingsTest=false,autoTest=false,fpsTest=false,titleTest=false,extraTest=false,musicTest=false,openingTest=false,viewTest=false,replayTest=false,cgTest=false,cgLoopTest=false,replayReturnTest=false,readSkipTest=false;
  unsigned opening=0;double openingElapsed=0;bool openingLogoCaptured=false;uint64_t openingTitleStarted=0;unsigned openingTitleCaptures=0;float titleAxis=0,titleAxisY=0,titlePointer=640;
@@ -158,6 +158,10 @@ struct Frontend {
  font=kfont_open(nullptr,0);
  if(!font||(!nativeVulkan&&!texture))throw std::runtime_error("Font/texture initialization failed");
  std::filesystem::create_directories(saveDir);
+ {
+  std::istringstream values(qlie::cp932(assets.read("avg/setting.txt")));std::string line;
+  while(std::getline(values,line)){auto pos=line.find('=');if(pos!=line.npos&&whj2::trim(line.substr(0,pos))=="SaveThumPriority")saveThumbnailPriority=std::stoi(whj2::trim(line.substr(pos+1)));}
+ }
  audio=std::make_unique<whj2::Audio>();
  images=std::make_unique<whj2::SceneImages>(assets);
 #ifdef __SWITCH__
@@ -432,6 +436,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    timing.capture+=std::chrono::duration<double,std::milli>(LoadClock::now()-start).count();return scene;
   },&sentenceWait);continue;
  }if(e.type=="wait"||e.type=="click-wait"){sentenceWait.native(e.type=="click-wait",e.value.empty()?0:std::stod(e.value));transition->present();warmNextScene();return;
+ }if(e.type=="command"&&e.value.rfind("^savefilter",0)==0){auto fields=whj2::split(e.value,',');if(fields.size()!=2||fields[1]!="0")throw std::runtime_error("Unsupported save thumbnail filter");continue;
  }if(e.type=="command"&&(audioCommand(e.value)||images->command(e.value)))continue;
  if(e.type=="create"||e.type=="free"){audio->stopAll();
  images->clear();
@@ -450,7 +455,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  unsigned newestManualSlot(){if(manualSlotsScanned)return latestManualSlot;latestManualSlot=1;auto latest=std::filesystem::file_time_type::min();for(unsigned i=1;i<AutoSaveBase;i++){auto path=slotPrefix(i)+".story";if(!std::filesystem::exists(path))continue;auto time=std::filesystem::last_write_time(path);if(time>latest){latest=time;latestManualSlot=i;}}manualSlotsScanned=true;return latestManualSlot;}
  std::string slotPrefix(unsigned slot=1)const{if(slot>=AutoSaveBase){if(slot>=AutoSaveBase+AutoSaveCount)throw std::runtime_error("Auto save slot range");char number[32];std::snprintf(number,sizeof(number),"/autosave/slot%02u",slot-AutoSaveBase+1);return saveDir+number;}char number[16];std::snprintf(number,sizeof(number),"/slot%02u",slot);return saveDir+number;}
  void save(unsigned slot=1){if(replayActive||menu||movie->playing())return;
- qlie::Bytes scene(1280*720*4,0);images->drawScene(scene);transition->blend(scene);if(!hidden){images->drawMessages(scene);images->drawFaces(scene);}qlie::Bytes thumb(160*90*4);for(unsigned y=0;y<90;y++)for(unsigned x=0;x<160;x++)for(unsigned c=0;c<4;c++)thumb[(y*160+x)*4+c]=scene[((y*8)*1280+x*8)*4+c];qlie::write_file(slotPrefix(slot)+".thumbnail",thumb);
+ qlie::Bytes scene(1280*720*4,0);images->drawThumbnail(scene,float(saveThumbnailPriority));transition->blend(scene);qlie::Bytes thumb(160*90*4);for(unsigned y=0;y<90;y++)for(unsigned x=0;x<160;x++)for(unsigned c=0;c<4;c++)thumb[(y*160+x)*4+c]=scene[((y*8)*1280+x*8)*4+c];qlie::write_file(slotPrefix(slot)+".thumbnail",thumb);
  auto b=story.save();
  qlie::write_file(slotPrefix(slot)+".story",b);
  qlie::Bytes t(text.begin(),text.end());

@@ -40,3 +40,9 @@ semaphore ownership in `src/vulkan_raster.cpp` are adapted from
 `runtime/render/vulkan/renderer.c` in biko3-switch-runtime at
 `bd70f2c1278ea907740baa0c3d3e9d64e9cb1b57` (0BSD). Copyright (C) 2025-2026
 ruje0504-2. The license is retained in `licenses/biko3-0bsd.txt`.
+
+The Horizon-specific patch in `patches/mesa-nak-scoped-interlock.patch`
+modifies `src/nouveau/compiler/nak_nir.c` at the pinned Mesa commit above.
+The patched file retains the upstream MIT license and its Collabora copyright
+notice. The static NRO includes the locally built object and retains the
+Mesa SDK's remaining components.

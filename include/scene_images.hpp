@@ -9,7 +9,7 @@ struct Composite;
 struct SceneSoundEvent {bool stop=false,loop=false;unsigned channel=0,category=2;float gain=1;std::string source;qlie::Bytes bytes;};
 class SceneImages {
  struct Tween {float from=0,to=0,power=100;double elapsed=0,duration=0;unsigned mode=1;};
- struct Layer {std::map<std::string,Tween> tweens;std::map<std::string,std::string> params;std::string prefix,path;std::shared_ptr<Image> pixels;std::shared_ptr<Composite> composite;double milliseconds=0,audioMilliseconds=-1;bool audioStopPending=false;};
+ struct Layer {std::map<unsigned,std::shared_ptr<Image>> uiSlots;std::map<std::string,Tween> tweens;std::map<std::string,std::string> params;std::string prefix,path;std::shared_ptr<Image> pixels;std::shared_ptr<Composite> composite;double milliseconds=0,audioMilliseconds=-1;bool audioStopPending=false;};
  unsigned windowAlpha=255;
  uint32_t particleState=particleIdentityInitialState();
  mutable bool faceWarning=false;
@@ -23,6 +23,10 @@ class SceneImages {
  std::string expand(std::string,const std::string&);
 public:
  explicit SceneImages(qlie::Assets&);
+ // UI slots are transient presentation state owned by title/choice screens.
+ void uiSlot(const std::string&layer,unsigned slot,const std::string&asset);
+ void uiSlot(const std::string&layer,unsigned slot,const Image&);
+ void uiExternal(const std::string&layer,unsigned index,float value);
  qlie::Bytes save()const;void restore(const qlie::Bytes&);
  std::vector<SceneSoundEvent> takeSoundEvents();
  void update(double milliseconds);bool command(const std::string&);void clear();void beginPage();void selectFace(const std::string&speaker,const std::string&voice);void draw(qlie::Bytes&)const;void drawScene(qlie::Bytes&)const;void drawFaces(qlie::Bytes&)const;void drawMessages(qlie::Bytes&)const;

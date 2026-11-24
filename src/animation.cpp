@@ -121,6 +121,7 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
  out.resource=a.at(6);
  auto number=[&](const qlie::Bytes&key,size_t offset){
   int v=keyI16(key,offset);
+  if(v>=32700&&v<32716&&(context.externalMask&(1u<<(v-32700))))return context.external[size_t(v-32700)];
   switch(v){case 32727:if(context.imageWidth!=UINT32_MAX)return float(context.imageWidth);break;
    case 32728:if(context.imageHeight!=UINT32_MAX)return float(context.imageHeight);break;
    case 32729:if(context.targetWidth!=UINT32_MAX)return float(context.targetWidth);break;
@@ -136,6 +137,11 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
  out.scaleY=val(0x1e,a.at(0x30),a.at(0x31)/100.f);
  out.priority=val(0x20,a.at(0x30),a.at(0x31)/100.f);
  out.rotationZ=val(0x22,a.at(0x30),a.at(0x31)/100.f);
+ out.rotationX=val(0x48,a.at(0x30),a.at(0x31)/100.f);
+ out.rotationY=val(0x4a,a.at(0x30),a.at(0x31)/100.f);
+ if(a.size()>=0x98&&b.size()>=0x98)out.scaleZ=val(0x96,a.at(0x30),a.at(0x31)/100.f);
+ out.z=sampleValue(float(int32_t(keyU32(a,0x4d))),float(int32_t(keyU32(b,0x4d))),a.at(0x30),a.at(0x31)/100.f,t,out.unsupported);
+
  out.alpha=val(0x35,a.at(0x33),a.at(0x3b)/100.f);
  if(out.kind==10){
   auto input=[&](size_t offset){return val(offset,a.at(0x2d),a.at(0x2e)/100.f);};
@@ -148,6 +154,7 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
  if(out.kind==4||out.kind==20||out.kind==21){
   auto timeValue=[&](const qlie::Bytes&key,size_t offset){
    auto value=int32_t(keyU32(key,offset));
+   if(value>=32700&&value<32716&&(context.externalMask&(1u<<(value-32700))))return context.external[size_t(value-32700)];
    if((value>=32700&&value<32716)||(value>=32720&&value<32736)){
     out.childTimeResolved=false;out.unsupported.push_back("child-time-context="+std::to_string(value));
    }
@@ -223,7 +230,7 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
  }
  if(keyI16(a,0x48)||keyI16(a,0x4a))out.unsupported.push_back("3d-rotation");
  if(out.kind==4&&(out.flags&0x7f)>8)out.unsupported.push_back("bitmap-blend="+std::to_string(out.flags&0x7f));
- if(out.kind!=0&&out.kind!=1&&out.kind!=4&&out.kind!=10&&out.kind!=15&&out.kind!=16)out.unsupported.push_back("primitive="+std::to_string(out.kind));
+ if(out.kind!=0&&out.kind!=1&&out.kind!=4&&out.kind!=10&&out.kind!=15&&out.kind!=16&&out.kind!=18)out.unsupported.push_back("primitive="+std::to_string(out.kind));
  if(layer.mode>2)out.unsupported.push_back("layer-mode="+std::to_string(layer.mode));
  return out;
 }

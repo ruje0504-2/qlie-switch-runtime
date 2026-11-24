@@ -21,6 +21,22 @@ if(argc==4&&std::string(argv[2])=="--inspect"){
  }}}
  }return 0;
 }
+if(argc==3&&std::string(argv[2])=="--external"){
+ unsigned tested=0;
+ for(auto&part:whj2::abmp(a.read("script/title/title_back01.b")))if(part.type.rfind("abdata",0)==0){
+  auto data=whj2::animation(part.type,part.data);
+  for(auto&motion:data.motions)for(auto&layer:motion.layers){
+   auto unresolved=whj2::sampleAnimation(layer,5500);
+   if(unresolved.kind!=4||unresolved.childTimeResolved)continue;
+   for(float value:{0.f,250.f,1000.f}){whj2::AnimationContext context;context.externalMask=1;context.external[0]=value;
+    auto resolved=whj2::sampleAnimation(layer,5500,context);
+    if(!resolved.childTimeResolved||resolved.childTime!=int(value))throw std::runtime_error("Title external clock mapping");
+    std::cout<<"PASS original title external[0]="<<value<<" child="<<resolved.childTime<<"\n";tested++;
+   }
+  }
+ }
+ if(tested!=3)throw std::runtime_error("Missing original external title clock");return 0;
+}
 if(argc==3&&std::string(argv[2])=="--nested"){
  for(auto&part:whj2::abmp(a.read("image/cut/eyecatch01.b")))if(part.type.rfind("abdata",0)==0){
   auto data=whj2::animation(part.type,part.data);unsigned tested=0;

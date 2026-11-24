@@ -39,8 +39,40 @@ void RenderQueue::image(const Image&i,const Affine2D&m,float pri,float alpha,uin
 void RenderQueue::snapshot(const Image&i,const Affine2D&m,float pri,float alpha,uint32_t add,uint32_t mul,unsigned blend){
  snapshots.push_back(i);image(snapshots.back(),m,pri,alpha,add,mul,blend);
 }
+void RenderQueue::triangle(const Image&i,const std::array<TextureVertex,3>&vertices,float pri,float alpha,uint32_t add,uint32_t mul,unsigned blend){
+ std::vector<TextureVertex> clipped;
+ for(unsigned n=0;n<3;n++){const auto&a=vertices[n];const auto&b=vertices[(n+1)%3];bool ai=a.depth>=10,bi=b.depth>=10;
+  if(ai)clipped.push_back(a);
+  if(ai!=bi){float t=(10-a.depth)/(b.depth-a.depth);clipped.push_back({a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t,10,a.u+(b.u-a.u)*t,a.v+(b.v-a.v)*t});}
+ }
+ for(size_t n=1;n+1<clipped.size();n++){Command c;c.image=&i;c.triangle={clipped[0],clipped[n],clipped[n+1]};c.polygon=true;c.priority=pri;c.state.alpha=alpha;c.state.addColor=add;c.state.mulColor=mul;c.state.flags=blend;commands.push_back(c);}
+}
 void RenderQueue::control(const AnimationSample&s,float pri){Command c;c.state=s;c.priority=pri;commands.push_back(c);}
 namespace {
+// Vertices carry camera-space depth (1000 - worldZ). Texture coordinates are
+// interpolated as u/depth, v/depth and 1/depth, then divided per pixel.
+void triangleRaster(qlie::Bytes&out,unsigned w,unsigned h,const Image&im,std::array<TextureVertex,3> v,const Affine2D&post,float alpha,uint32_t add,uint32_t mul,unsigned blend){
+ if(!im.width||!im.height||alpha<=0)return;
+ for(auto&p:v){if(p.depth<10)return;float ratio=1000/p.depth;float x=w*.5f+(p.x-w*.5f)*ratio,y=h*.5f+(p.y-h*.5f)*ratio;p.x=post.a*x+post.b*y+post.x;p.y=post.c*x+post.d*y+post.y;}
+ auto edge=[](const TextureVertex&a,const TextureVertex&b,float x,float y){return (b.x-a.x)*(y-a.y)-(b.y-a.y)*(x-a.x);};
+ float area=edge(v[0],v[1],v[2].x,v[2].y);if(std::abs(area)<1e-6f)return;
+ if(area<0){std::swap(v[1],v[2]);area=-area;}
+ auto topLeft=[](const TextureVertex&a,const TextureVertex&b){return b.y<a.y||(b.y==a.y&&b.x>a.x);};
+ bool include[3]={topLeft(v[1],v[2]),topLeft(v[2],v[0]),topLeft(v[0],v[1])};
+ int x0=std::max(0,int(std::floor(std::min({v[0].x,v[1].x,v[2].x})))),x1=std::min(int(w),int(std::ceil(std::max({v[0].x,v[1].x,v[2].x}))));
+ int y0=std::max(0,int(std::floor(std::min({v[0].y,v[1].y,v[2].y})))),y1=std::min(int(h),int(std::ceil(std::max({v[0].y,v[1].y,v[2].y}))));
+ for(int y=y0;y<y1;y++)for(int x=x0;x<x1;x++){
+  float e[3]={edge(v[1],v[2],x+.5f,y+.5f),edge(v[2],v[0],x+.5f,y+.5f),edge(v[0],v[1],x+.5f,y+.5f)};bool inside=true;
+  for(unsigned j=0;j<3;j++)if(e[j]<0||(e[j]==0&&!include[j]))inside=false;
+  if(!inside)continue;
+  float inverse=0,u=0,t=0;for(unsigned j=0;j<3;j++){float q=e[j]/area/v[j].depth;inverse+=q;u+=q*v[j].u;t+=q*v[j].v;}
+  int tx=std::clamp(int(std::floor(u/inverse)),0,int(im.width)-1),ty=std::clamp(int(std::floor(t/inverse)),0,int(im.height)-1);
+  const auto*src=im.pixels.data()+(size_t(ty)*im.width+unsigned(tx))*4;auto*dst=out.data()+(size_t(y)*w+unsigned(x))*4;
+  unsigned a=unsigned(src[3])*unsigned(std::clamp(alpha,0.f,255.f))/255;if(!a)continue;
+  for(unsigned n=0;n<3;n++){unsigned color=std::min(255u,unsigned(src[n])*((mul>>(8*n))&255)/255+((add>>(8*n))&255));dst[n]=blendChannel(blend,uint8_t(color),dst[n],uint8_t(a));}
+  dst[3]=blendChannel(blend,uint8_t(a),dst[3],uint8_t(a));
+ }
+}
 void raster(qlie::Bytes&out,unsigned w,unsigned h,const Image&im,const Affine2D&m,float alpha,uint32_t add,uint32_t mul,unsigned blend){
  if(!im.width||!im.height||alpha<=0)return;
  float det=m.a*m.d-m.b*m.c;if(std::abs(det)<1e-12f)return;
@@ -91,7 +123,8 @@ void RenderQueue::draw(qlie::Bytes&out,unsigned w,unsigned h)const{
  if(!stack.empty()){const auto&p=stack.back();if(p.flags&0x7f)blend=p.flags&0x7f;float r=p.rotationZ*3.14159265358979323846f/180,co=std::cos(r),si=std::sin(r),sx=p.scaleX/100,sy=p.scaleY/100,cx=w/2.f,cy=h/2.f;
  Affine2D post{sx*co,sx*si,-sy*si,sy*co,cx+sx*(co*(p.x-cx)+si*(p.y-cy)),cy+sy*(-si*(p.x-cx)+co*(p.y-cy))};
  model=affine(post,model);alpha=int(alpha)*int(p.alpha)/255;add=colorAdd(add,p.addColor);mul=colorMultiply(mul,p.mulColor);}
- raster(out,w,h,*c->image,model,alpha,add,mul,blend);
+ if(c->polygon)triangleRaster(out,w,h,*c->image,c->triangle,model,alpha,add,mul,blend);
+ else raster(out,w,h,*c->image,model,alpha,add,mul,blend);
  }
 }
 }

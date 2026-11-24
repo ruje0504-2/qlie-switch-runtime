@@ -5,6 +5,7 @@
 #include "animation.hpp"
 #include "render_queue.hpp"
 #include "gradient_mask.hpp"
+#include "model.hpp"
 #include <set>
 extern "C" {
 #include "video.h"
@@ -18,6 +19,30 @@ namespace {
 float numeric(const std::string&s){return !s.empty()&&s[0]=='$'?float(std::stoul(s.substr(1),nullptr,16)):std::stof(s);
  }
 
+struct Matrix3D {
+ float m[3][4]={{1,0,0,0},{0,1,0,0},{0,0,1,0}};
+ Vec3 point(Vec3 v)const{return {m[0][0]*v.x+m[0][1]*v.y+m[0][2]*v.z+m[0][3],m[1][0]*v.x+m[1][1]*v.y+m[1][2]*v.z+m[1][3],m[2][0]*v.x+m[2][1]*v.y+m[2][2]*v.z+m[2][3]};}
+};
+Matrix3D combine(const Matrix3D&a,const Matrix3D&b){Matrix3D r;for(unsigned i=0;i<3;i++)for(unsigned j=0;j<4;j++){r.m[i][j]=j==3?a.m[i][3]:0;for(unsigned k=0;k<3;k++)r.m[i][j]+=a.m[i][k]*b.m[k][j];}return r;}
+Matrix3D from2D(const Affine2D&a){Matrix3D r;r.m[0][0]=a.a;r.m[0][1]=a.b;r.m[0][3]=a.x;r.m[1][0]=a.c;r.m[1][1]=a.d;r.m[1][3]=a.y;return r;}
+Matrix3D placement3D(const AnimationSample&k,unsigned width,unsigned height){
+ constexpr float radians=3.14159265358979323846f/180;
+ float cx=std::cos(k.rotationX*radians),sx=std::sin(k.rotationX*radians),cy=std::cos(k.rotationY*radians),sy=std::sin(k.rotationY*radians),cz=std::cos(k.rotationZ*radians),sz=std::sin(k.rotationZ*radians);
+ Matrix3D x,y,z,scale,anchor,position;
+ x.m[1][1]=cx;x.m[1][2]=-sx;x.m[2][1]=sx;x.m[2][2]=cx;
+ y.m[0][0]=cy;y.m[0][2]=sy;y.m[2][0]=-sy;y.m[2][2]=cy;
+ z.m[0][0]=cz;z.m[0][1]=-sz;z.m[1][0]=sz;z.m[1][1]=cz;
+ scale.m[0][0]=k.scaleX/100;scale.m[1][1]=k.scaleY/100;scale.m[2][2]=k.scaleZ/100;
+ anchor.m[0][3]=-width*k.anchorX/100;anchor.m[1][3]=-height*k.anchorY/100;
+ position.m[0][3]=k.x;position.m[1][3]=k.y;position.m[2][3]=-k.z;
+ // PE ea798 applies anchor, rotation, record scale, then position.
+ return combine(position,combine(scale,combine(z,combine(y,combine(x,anchor)))));
+}
+void quad(RenderQueue&queue,const Image&texture,const Matrix3D&matrix,const AnimationSample&k,float priority){
+ std::array<TextureVertex,4> v;for(unsigned i=0;i<4;i++){float x=i==1||i==2?texture.width:0,y=i>=2?texture.height:0;auto p=matrix.point({x,y,0});v[i]={p.x,p.y,1000-p.z,x,y};}
+ queue.triangle(texture,{v[0],v[1],v[2]},priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
+ queue.triangle(texture,{v[0],v[2],v[3]},priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
+}
 const Motion* findMotion(const Animation&definition,const std::string&name){
  if(!name.empty()&&std::all_of(name.begin(),name.end(),[](unsigned char c){return c>='0'&&c<='9';})){
   auto index=std::stoul(name);return index<definition.motions.size()?&definition.motions[index]:nullptr;
@@ -59,7 +84,7 @@ struct EmbeddedVideo {
  }
 };
 struct Composite {
- struct Element {std::shared_ptr<Image>image;
+ struct Element {std::shared_ptr<Image>image;std::shared_ptr<Model>mesh;std::string name;
  std::shared_ptr<Composite>nested;
  qlie::Bytes video;
  };
@@ -79,12 +104,12 @@ struct Composite {
  for(size_t i=0;i<definition.motions.size();i++)motionIdentities.push_back(particleRandomNext(randomState));
  metadata=true;
  }
-   else if(m.type.rfind("abimg",0)==0){Element e;
+   else if(m.type.rfind("abimg",0)==0){Element e;e.name=m.name;
  if(!m.data.empty()){
     if(m.data.size()>=5&&std::equal(m.data.begin(),m.data.begin()+5,"abmp1"))e.nested=std::make_shared<Composite>(m.data,name+"#"+m.name,randomState);
     else if(m.data.size()>=4&&std::equal(m.data.begin(),m.data.begin()+4,"OggS")){e.video=std::move(m.data);
  }
-    else if(m.data.size()>=12&&std::equal(m.data.begin(),m.data.begin()+12,"ARGBModel1.0"))warn("model="+m.name);
+    else if(m.data.size()>=12&&std::equal(m.data.begin(),m.data.begin()+12,"ARGBModel1.0"))e.mesh=std::make_shared<Model>(model(m.data));
     else e.image=std::make_shared<Image>(image(m.data));
    }members.push_back(std::move(e));
  }
@@ -92,24 +117,26 @@ struct Composite {
   }
   if(!metadata)throw std::runtime_error("Composite lacks animation metadata "+name);
   for(auto&motion:definition.motions)for(auto&layer:motion.layers){if(layer.mode>2)warn("layer-mode="+std::to_string(layer.mode));
- for(auto&k:layer.keys)if(k[4]!=0&&k[4]!=1&&k[4]!=4&&k[4]!=10&&k[4]!=15&&k[4]!=16&&k[4]!=20)warn("primitive="+std::to_string(k[4]));
+ for(auto&k:layer.keys)if(k[4]!=0&&k[4]!=1&&k[4]!=4&&k[4]!=10&&k[4]!=15&&k[4]!=16&&k[4]!=18&&k[4]!=20)warn("primitive="+std::to_string(k[4]));
  }
  }
  void saveIdentity(StateWriter&w)const{w.n(identity);w.n(motionIdentities.size());for(auto v:motionIdentities)w.n(v);for(auto&e:members)if(e.nested)e.nested->saveIdentity(w);}
  void restoreIdentity(StateReader&r){identity=uint32_t(r.n());auto count=r.n();if(count!=motionIdentities.size())throw std::runtime_error("Composite identity motion count");for(auto&v:motionIdentities)v=uint32_t(r.n());for(auto&e:members)if(e.nested)e.nested->restoreIdentity(r);}
  void warn(const std::string&s)const{if(warnings.insert(s).second)std::cerr<<"PENDING-ANIMATION "<<path<<" "<<s<<"\n";
  }
- void enqueue(RenderQueue&queue,double ms,const std::string&motionName,const Affine2D&parent,float depth,float opacity,uint32_t parentAdd,uint32_t parentMul,unsigned parentBlend=0,const Image*replacement=nullptr,const Image*messageSurface=nullptr,unsigned windowAlpha=255)const{
+ void enqueue(RenderQueue&queue,double ms,const std::string&motionName,const Affine2D&parent,float depth,float opacity,uint32_t parentAdd,uint32_t parentMul,unsigned parentBlend=0,const Image*replacement=nullptr,const Image*messageSurface=nullptr,unsigned windowAlpha=255,const std::map<unsigned,const Image*>*uiSlots=nullptr,const AnimationContext*external=nullptr,const Matrix3D*parent3D=nullptr)const{
   if(definition.bounds[0]<0||definition.bounds[1]<0||definition.bounds[0]>4096||definition.bounds[1]>4096)throw std::runtime_error("Composite bounds "+path);
   const Motion*motion=findMotion(definition,motionName);
  if(!motion)throw std::runtime_error("Missing motion "+motionName+" in "+path);
   auto randomSeed=0x35246u^identity^motionIdentities[size_t(motion-&definition.motions[0])];
   randomSeed=((randomSeed&0xffff)*(randomSeed>>16))&1023;
-  auto samples=sampleMotion(*motion,ms,1280,720,false,AnimationContext{unsigned(definition.bounds[0]),unsigned(definition.bounds[1]),1280,720,randomSeed});
+  AnimationContext context{unsigned(definition.bounds[0]),unsigned(definition.bounds[1]),1280,720,randomSeed};
+  if(external){context.external=external->external;context.externalMask=external->externalMask;}
+  auto samples=sampleMotion(*motion,ms,1280,720,false,context);
   for(size_t index=0;index<samples.size();index++){
  auto&k=samples[index];
  if(parentBlend)k.flags=parentBlend;
- for(auto&w:k.unsupported)if(w!="primitive=20")warn(w);
+ for(auto&w:k.unsupported)if(w!="primitive=20"&&!(w=="3d-rotation"&&(k.kind==18||(k.kind==4&&k.resource<members.size()&&members[k.resource].nested))))warn(w);
  if(!motion->layers[index].flags||!k.kind)continue;
  k.alpha=int(k.alpha)*int(opacity)/255;if(messageSurface&&k.kind==4&&k.resource==0)k.alpha=int(k.alpha)*int(windowAlpha)/255;k.addColor=colorAdd(k.addColor,parentAdd);k.mulColor=colorMultiply(k.mulColor,parentMul);
  if(k.kind==15||k.kind==16){queue.control(k,depth+k.priority);continue;}
@@ -159,10 +186,26 @@ struct Composite {
   }
   continue;
  }
+ if(k.kind==18){
+  if(k.resource>=members.size()||!members[k.resource].mesh)throw std::runtime_error("Missing model resource "+path);
+  const auto&mesh=*members[k.resource].mesh;
+  auto matrix=combine(parent3D?*parent3D:from2D(parent),placement3D(k,0,0));
+  for(const auto&object:mesh.objects)if(object.visible)for(const auto&face:object.faces){
+   if(face.material<0)continue;
+   const auto&material=mesh.materials.at(unsigned(face.material));const Image*texture=nullptr;
+   for(const auto&member:members)if(member.name==material.name){texture=member.image.get();break;}
+   if(!texture){warn("model-material-texture="+material.name);continue;}
+   std::array<TextureVertex,4> vertices;for(unsigned i=0;i<face.corners;i++){auto point=matrix.point(object.vertices.at(face.vertices[i]));vertices[i]={point.x,point.y,1000-point.z,face.uv[i]*texture->width,face.uv[i+4]*texture->height};}
+   queue.triangle(*texture,{vertices[0],vertices[1],vertices[2]},depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
+   if(face.corners==4)queue.triangle(*texture,{vertices[0],vertices[2],vertices[3]},depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
+  }
+  warn("model-material-lighting pending");continue;
+ }
  if(k.kind!=4)continue;
  if(k.resource>=members.size())throw std::runtime_error("Composite image index "+path);
    auto&e=members[k.resource];
  const Image*slot=k.resource==0?replacement:k.resource==1?messageSurface:nullptr;
+ if(uiSlots){auto override=uiSlots->find(k.resource);if(override!=uiSlots->end())slot=override->second;}
  const Image*source=slot?slot:e.image.get();bool dynamic=false;
    if(slot){
     queue.image(*source,affine(parent,imagePlacement(k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,source->width,source->height)),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);continue;
@@ -170,6 +213,10 @@ struct Composite {
    if(e.nested){
  if(!k.childTimeResolved){warn("nested-time context unresolved");continue;}
  if(k.childMotion>=e.nested->definition.motions.size())throw std::runtime_error("Nested motion index "+path);
+ if(parent3D||k.rotationX||k.rotationY||k.z){
+  auto matrix=combine(parent3D?*parent3D:from2D(parent),placement3D(k,unsigned(e.nested->definition.bounds[0]),unsigned(e.nested->definition.bounds[1])));
+  e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,k.childTime),e.nested->definition.motions[k.childMotion].name,{},depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,nullptr,nullptr,255,nullptr,nullptr,&matrix);continue;
+ }
  auto local=imagePlacement(k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,unsigned(e.nested->definition.bounds[0]),unsigned(e.nested->definition.bounds[1]));
  e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,k.childTime),e.nested->definition.motions[k.childMotion].name,affine(parent,local),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
  continue;
@@ -182,6 +229,7 @@ struct Composite {
     warn("video-member origin alignment unverified");
  source=&clip->at(ms);dynamic=true;
    }
+   if(source&&parent3D){auto matrix=combine(*parent3D,placement3D(k,source->width,source->height));quad(queue,*source,matrix,k,depth+k.priority);continue;}
    if(source){auto place=affine(parent,imagePlacement(k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,source->width,source->height));
  if(dynamic)queue.snapshot(*source,place,depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
  else queue.image(*source,place,depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
@@ -210,6 +258,9 @@ std::string SceneImages::expand(std::string s,const std::string&type){auto&map=t
  }}if(!changed)return s;
  }throw std::runtime_error("Image template recursion");
  }
+void SceneImages::uiSlot(const std::string&name,unsigned slot,const std::string&path){if(name.rfind("ui_",0)!=0)throw std::runtime_error("UI slot owner");auto i=cache.find(path);if(i==cache.end())i=cache.emplace(path,std::make_shared<Image>(image(assets.read(path)))).first;layers.at(name).uiSlots[slot]=i->second;}
+void SceneImages::uiSlot(const std::string&name,unsigned slot,const Image&value){if(name.rfind("ui_",0)!=0)throw std::runtime_error("UI slot owner");layers.at(name).uiSlots[slot]=std::make_shared<Image>(value);}
+void SceneImages::uiExternal(const std::string&name,unsigned index,float v){if(name.rfind("ui_",0)!=0||index>=16||!std::isfinite(v))throw std::runtime_error("UI external variable");layers.at(name).params["@exv"+std::to_string(index)]=std::to_string(v);}
 void SceneImages::clear(){layers.clear();
  cache.clear();
  composites.clear();
@@ -268,13 +319,13 @@ void SceneImages::update(double ms){for(auto&entry:layers){auto&layer=entry.seco
  }}
 bool SceneImages::command(const std::string&line){auto p=line.find(44);
  auto cmd=line.substr(1,p-1);
- bool chara=cmd.rfind("chara",0)==0,face=cmd=="face",message=cmd=="message";
- if(!chara&&!face&&!message&&cmd.rfind("bg",0)!=0&&cmd!="effect"&&cmd!="env")return false;
+ bool chara=cmd.rfind("chara",0)==0,face=cmd=="face",message=cmd=="message",ui=cmd.rfind("ui_",0)==0;
+ if(!ui&&!chara&&!face&&!message&&cmd.rfind("bg",0)!=0&&cmd!="effect"&&cmd!="env")return false;
  auto&l=layers[cmd];
  const std::map<std::string,std::string> faceDefaults{{"mode","auto"},{"disp","once"},{"show","false"},{"x","0"},{"y","0"},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri","0"},{"align","left:top"},{"@face-active","false"}};
  if(face&&l.params.empty())l.params=faceDefaults;
  if(message&&l.params.empty())l.params={{"mode","cls"},{"show","false"},{"x","0"},{"y","720"},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri","1100"},{"align","left:top"},{"textarea","920:300"},{"fontsize","26:26"},{"fontcolor","$FFFFFF"}};
- if(l.params.empty())l.params={{"x","640"},{"y",chara?"720":"360"},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri",chara?"500":"0"},{"show","true"},{"align",chara?"center:bottom":cmd=="effect"?"left:top":"center:center"}};
+ if(l.params.empty())l.params={{"x",ui?"0":"640"},{"y",ui?"0":chara?"720":"360"},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri",chara?"500":"0"},{"show","true"},{"align",chara?"center:bottom":(ui||cmd=="effect")?"left:top":"center:center"}};
  if(chara){auto motion=l.params.find("motion");if(motion!=l.params.end()&&motion->second!="def"&&motion->second!="0"&&motion->second.find('+')==std::string::npos){motion->second="def";l.milliseconds=0;l.audioMilliseconds=-1;}}
  auto args=split(expand(p==line.npos?"":line.substr(p+1),chara?"chara":face?"face":message?"message":"image"),44);
  Layer before=l;bool file=false,baseChanged=false,position=false,color=false,messageShow=false;
@@ -319,7 +370,7 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  }if(chara){auto pair=split(f,58);
  if(pair.size()>1)l.prefix=pair[1];
  f=pair[0].find(47)!=std::string::npos?pair[0]:l.prefix+pair[0];
- }std::string path=(chara?"chara/":face?"face/":message?"avg/window/":"image/")+f;
+ }std::string path=(ui?"":chara?"chara/":face?"face/":message?"avg/window/":"image/")+f;
  if(!assets.exists(path)){if(assets.exists(path+".png"))path+=".png";
  else if(assets.exists(path+".b"))path+=".b";
  else throw std::runtime_error("Missing image "+path);
@@ -396,7 +447,9 @@ void SceneImages::render(qlie::Bytes&out,unsigned pass)const{
  float ax=align.rfind("center",0)==0?0.5f:align.rfind("right",0)==0?1.f:0.f,ay=align.find(":bottom")!=align.npos?1.f:align.find(":center")!=align.npos?0.5f:0.f;
  unsigned w=l->composite?unsigned(l->composite->definition.bounds[0]):l->pixels->width,h=l->composite?unsigned(l->composite->definition.bounds[1]):l->pixels->height;
  auto placement=imagePlacement(get(l,"x",640),get(l,"y",360),get(l,"scalex",100)/100,get(l,"scaley",100)/100,get(l,"rotz",0),ax,ay,w,h);
- if(l->composite){auto m=l->params.find("motion");l->composite->enqueue(queue,l->milliseconds,m==l->params.end()?"":m->second,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),0,l->params.count("@portrait")?l->pixels.get():nullptr,layers.count("message")&&l==(&layers.at("message"))?l->pixels.get():nullptr,windowAlpha);}
+ std::map<unsigned,const Image*> uiSlots;for(auto&slot:l->uiSlots)uiSlots[slot.first]=slot.second.get();
+ AnimationContext external;for(unsigned i=0;i<16;i++){auto v=l->params.find("@exv"+std::to_string(i));if(v!=l->params.end()){external.external[i]=numeric(v->second);external.externalMask|=uint16_t(1u<<i);}}
+ if(l->composite){auto m=l->params.find("motion");l->composite->enqueue(queue,l->milliseconds,m==l->params.end()?"":m->second,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),0,l->params.count("@portrait")?l->pixels.get():nullptr,layers.count("message")&&l==(&layers.at("message"))?l->pixels.get():nullptr,windowAlpha,uiSlots.empty()?nullptr:&uiSlots,&external);}
  else queue.image(*l->pixels,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)));
  }
  queue.draw(out,1280,720);

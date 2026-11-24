@@ -9,13 +9,15 @@ Affine2D imagePlacement(float x,float y,float sx,float sy,float angle,float anch
 uint8_t blendChannel(unsigned mode,uint8_t source,uint8_t destination,uint8_t alpha);
 uint32_t colorAdd(uint32_t,uint32_t);
 uint32_t colorMultiply(uint32_t,uint32_t);
+struct TextureVertex {float x=0,y=0,depth=1000,u=0,v=0;};
 class RenderQueue {
- struct Command {const Image*image=nullptr;Affine2D placement;AnimationSample state;float priority=0;};
+ struct Command {const Image*image=nullptr;Affine2D placement;AnimationSample state;float priority=0;std::array<TextureVertex,3> triangle{};bool polygon=false;};
  std::vector<Command> commands;
  std::deque<Image> snapshots;
 public:
  void image(const Image&,const Affine2D&,float priority,float alpha,uint32_t add,uint32_t mul,unsigned blend=0);
  void snapshot(const Image&,const Affine2D&,float priority,float alpha,uint32_t add,uint32_t mul,unsigned blend=0);
+ void triangle(const Image&,const std::array<TextureVertex,3>&,float priority,float alpha,uint32_t add,uint32_t mul,unsigned blend=0);
  void control(const AnimationSample&,float priority);
  void draw(qlie::Bytes&,unsigned width,unsigned height)const;
 };

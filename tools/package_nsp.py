@@ -108,8 +108,6 @@ def main():
             for language in LANGUAGES:
                 os.link(work/'icon.jpg', work/'control'/('icon_'+language+'.dat'))
             files = list(RESOURCES)
-            if (game/'movie/ed_cn.ogv').is_file():
-                files.append('movie/ed_cn.ogv')
             report['romfs'] = []
             for relative in files:
                 source, target = game/relative, work/'romfs'/relative

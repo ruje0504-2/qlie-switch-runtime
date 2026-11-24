@@ -19,6 +19,7 @@
 #endif
 #include "audio.hpp"
 #include "switch_threads.hpp"
+#include "switch_storage.hpp"
 #include "scene_images.hpp"
 #include "message_text.hpp"
 #include "scene_transition.hpp"
@@ -61,7 +62,7 @@ static std::string selectedRenderer(){
 #ifdef __SWITCH__
  std::string name;
  if(std::ifstream file{"sdmc:/switch/whj2/renderer.cfg"};file>>name)return name;
- return "vulkan";
+ return "deko3d";
 #else
  return "cpu";
 #endif
@@ -543,6 +544,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    for(auto ext:{".text",".name",".images",".transition",".flow",".message",".auto",".choice",".audio",".mixer",".history",".thumbnail"})std::filesystem::remove(slotPrefix(slot)+ext);
    status="データを削除しました。";
   }catch(const std::exception&e){std::cerr<<"DELETE FAIL "<<e.what()<<"\n";status=removed?"データを削除しましたが、一部のファイルが残っています。":"削除できませんでした。";}
+  try{whj2::commitSavePath(saveDir+"/");}catch(const std::exception&e){std::cerr<<"DELETE COMMIT FAIL "<<e.what()<<"\n";status="削除結果を保存できませんでした。";}
   slotPreviews.erase(slot);if(latestManualSlot==slot)manualSlotsScanned=false;refreshSlotFlags();
  }
  void autoSaveChoice(){
@@ -1131,12 +1133,14 @@ controllerKey(e.cbutton.button);
 #endif
 int main(int argc,char**argv){
 #ifdef __SWITCH__
+ whj2::prepareSwitchLogDirectory();
  const char*logPath=std::getenv("WHJ2_LOG");if(!logPath)logPath="sdmc:/switch/whj2/runtime.log";
  if(!std::freopen(logPath,"a",stderr))return 2;
  std::setvbuf(stderr,nullptr,_IONBF,0);
  std::cerr<<"START WHJ2 runtime argc="<<argc<<"\n";
 #endif
-try{std::string game=argc>1?argv[1]:(std::getenv("WHJ2_GAME")?std::getenv("WHJ2_GAME"):"");
+try{whj2::SwitchStorage storage;
+std::string game=argc>1?argv[1]:(std::getenv("WHJ2_GAME")?std::getenv("WHJ2_GAME"):"");
 #ifdef __SWITCH__
 if(game.empty())game="sdmc:/switch/whj2/game";
 #endif
@@ -1150,6 +1154,7 @@ if(game.empty()){std::cerr<<"usage: whj2-runtime GAME [SAVE_DIR] [--smoke-frames
 #ifdef __SWITCH__
 if(argc<3)saves="sdmc:/switch/whj2/saves";
 #endif
+storage.mount(game,saves);
 #ifdef WHJ2_MAC_GAME_PICKER
 if(!whj2_mac_can_read_game(game.c_str())){char *chosen=whj2_mac_choose_game(game.c_str());if(!chosen)return 0;game=chosen;std::free(chosen);}
 #endif

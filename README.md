@@ -186,9 +186,9 @@ compute and presentation shaders for Vulkan 1.1 and update their embedded SPIR-V
 
 ### Switch renderer selection
 
-The Switch NRO includes Mesa NVK/Vulkan and deko3d. Vulkan is the default.
-To use deko3d, put the single word `deko3d` in `sdmc:/switch/whj2/renderer.cfg`
-and restart the game. Use `vulkan` to switch back. The `WHJ2_RENDERER`
+The Switch runtime includes Mesa NVK/Vulkan and deko3d. deko3d is the default.
+To select Vulkan, put the single word `vulkan` in `sdmc:/switch/whj2/renderer.cfg`
+and restart the game. Use `deko3d` to switch back. The `WHJ2_RENDERER`
 environment variable takes precedence when set. The startup line
 `DEKO3D native display=1280x720` identifies the active deko3d path in the runtime log.
 

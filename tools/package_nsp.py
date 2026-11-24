@@ -28,6 +28,28 @@ def digest(path):
             h.update(block)
     return h.hexdigest()
 
+def check_icon(data):
+    if data[:2] != b'\xff\xd8':
+        raise ValueError('Icon is not JPEG')
+    offset = 2
+    while offset + 4 <= len(data):
+        if data[offset] != 255:
+            raise ValueError('Malformed JPEG marker')
+        marker = data[offset+1]
+        if marker == 0xda:
+            break
+        size = int.from_bytes(data[offset+2:offset+4], 'big')
+        if size < 2 or offset+2+size > len(data):
+            raise ValueError('Malformed JPEG segment')
+        if marker in (0xc0, 0xc1, 0xc2):
+            height = int.from_bytes(data[offset+5:offset+7], 'big')
+            width = int.from_bytes(data[offset+7:offset+9], 'big')
+            if marker != 0xc0 or (width, height) != (256, 256):
+                raise ValueError('HOME icon must be 256x256 baseline JPEG')
+            return
+        offset += 2 + size
+    raise ValueError('JPEG baseline frame not found')
+
 def pfs_entries(path):
     with path.open('rb') as f:
         head = f.read(16)
@@ -71,7 +93,7 @@ def main():
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
     if revision.encode() not in elf.read_bytes():
         ap.error('ELF does not contain the current fixed source revision; build it first')
-    report = {'config': config, 'commit': revision, 'elf_sha256': digest(elf), 'phase': 'building', 'icon_sha256': digest(args.icon)}
+    report = {'config': config, 'commit': revision, 'elf_sha256': digest(elf), 'phase': 'building', 'icon_sha256': digest(args.icon), 'packaging_script_sha256': digest(Path(__file__))}
     report_path = output.with_suffix('.json')
     log_path = output.with_suffix('.log')
     def save():
@@ -100,11 +122,15 @@ def main():
             for i in range(16):
                 nacp[i*0x300:i*0x300+0x200] = title_bytes.ljust(0x200, b'\0')
                 nacp[i*0x300+0x200:(i+1)*0x300] = author.ljust(0x100, b'\0')
+            struct.pack_into('<I', nacp, 0x302c, 0xffff)
             nacp[0x3025] = 1  # Require an account so SaveData has a selected user.
             struct.pack_into('<Q', nacp, 0x3078, int(title_id, 16))
             struct.pack_into('<QQ', nacp, 0x3080, config['save_size'], config['journal_size'])
             nacp_path.write_bytes(nacp)
-            run(['/usr/bin/sips', '-s', 'format', 'jpeg', '-z', '256', '256', args.icon.resolve(), '--out', work/'icon.jpg'])
+            run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-i', args.icon.resolve(), '-frames:v', '1', '-vf', 'scale=256:256', '-c:v', 'mjpeg', '-q:v', '2', '-pix_fmt', 'yuvj420p', work/'icon.jpg'])
+            icon_bytes = (work/'icon.jpg').read_bytes()
+            check_icon(icon_bytes)
+            report['icon_encoding'] = 'baseline JPEG SOF0, 256x256, yuvj420p'
             for language in LANGUAGES:
                 os.link(work/'icon.jpg', work/'control'/('icon_'+language+'.dat'))
             files = list(RESOURCES)
@@ -165,6 +191,13 @@ def main():
                 raise ValueError('Final NACP version mismatch')
             if struct.unpack_from('<QQQ', final, 0x3078) != (int(title_id, 16), config['save_size'], config['journal_size']):
                 raise ValueError('Final NACP title/save metadata mismatch')
+            if struct.unpack_from('<I', final, 0x302c)[0] != 0xffff:
+                raise ValueError('Final NACP language support mismatch')
+            for language in LANGUAGES:
+                actual_icon = (control/('icon_'+language+'.dat')).read_bytes()
+                check_icon(actual_icon)
+                if actual_icon != icon_bytes:
+                    raise ValueError('Final Control icon mismatch')
             if final[0x3025] != 1:
                 raise ValueError('Final NACP selected-user requirement missing')
             report.update(phase='complete', nsp=str(output), bytes=output.stat().st_size,

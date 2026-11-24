@@ -71,7 +71,7 @@ struct Frontend {
  std::vector<std::pair<std::string,std::string>>history;
  bool fastForward=false;unsigned selectedSlot=1;unsigned skipStart=0;unsigned autoPhase=0,autoPhaseFrame=0,titlePhase=0;
  bool fingerActive=false,fingerUiDrag=false;SDL_FingerID fingerId=0;float fingerX=0,fingerY=0;qlie::Bytes gestureStory;
- bool movieOnly=false,movieCaptured=false,touchOnlyTest=false,settingsTest=false,autoTest=false,fpsTest=false,titleTest=false,extraTest=false,musicTest=false,openingTest=false;
+ bool movieOnly=false,movieCaptured=false,touchOnlyTest=false,settingsTest=false,autoTest=false,fpsTest=false,titleTest=false,extraTest=false,musicTest=false,openingTest=false,viewTest=false;
  unsigned opening=0;double openingElapsed=0;bool openingLogoCaptured=false;uint64_t openingTitleStarted=0;unsigned openingTitleCaptures=0;float titleAxis=0,titlePointer=640;
  uint64_t mutedNonzero=0;
  qlie::Bytes touchSavedStory;std::string touchSavedText;
@@ -384,6 +384,8 @@ struct Frontend {
  SDL_FreeSurface(surface);
  std::cerr<<"SCREENSHOT "<<saveDir<<"/"<<name<<"\n";
  }
+ bool titleViewActive()const{return menu&&!opening&&!gameMenu.visible()&&!musicScreen->visible();}
+ void touchTitleView(float x,float y){if(!titleViewActive())return;int w,h;SDL_GetWindowSize(window,&w,&h);float lx,ly;SDL_RenderWindowToLogical(renderer,int(x*w),int(y*h),&lx,&ly);titlePointer=std::clamp(lx,0.f,1280.f);title->view(titlePointer);}
  void touchDrag(float x,float y,bool start){int w,h;SDL_GetWindowSize(window,&w,&h);float lx,ly;SDL_RenderWindowToLogical(renderer,int(x*w),int(y*h),&lx,&ly);if(musicScreen->visible()){bool moved=musicScreen->drag(lx,ly);if(start)fingerUiDrag=moved;return;}if(start)fingerUiDrag=gameMenu.beginDrag(lx,ly);else gameMenu.drag(lx,ly);if(fingerUiDrag&&gameMenu.settingsDirty){applySettings(false);uiSound("Sys_OnMouse");}}
  void pointer(int px,int py){float x,y;
  SDL_RenderWindowToLogical(renderer,px,py,&x,&y);
@@ -434,7 +436,7 @@ struct Frontend {
  uint64_t lastUpdate=SDL_GetTicks64();
  while(!done){auto now=SDL_GetTicks64();
  if(opening==1){openingElapsed+=double(now-lastUpdate);images->update(double(now-lastUpdate));if(openingElapsed>=4500)makerLogo();}
- if(!opening&&menu){titlePointer=std::clamp(titlePointer+titleAxis*double(now-lastUpdate)*.6,0.,1280.);title->view(titlePointer);}
+ if(titleViewActive()&&!fingerActive){titlePointer=std::clamp(titlePointer+titleAxis*double(now-lastUpdate)*.6,0.,1280.);title->view(titlePointer);}
  if(musicScreen->visible()){musicScreen->update(double(now-lastUpdate));if(musicScreen->takeSettingsChanged())applySettings();}
  else if(!opening&&menu&&!gameMenu.visible())title->update(double(now-lastUpdate));
  if(!menu&&!movie->playing()&&!gameMenu.visible()&&!upperMenu->visible()){
@@ -474,8 +476,8 @@ struct Frontend {
  }if(opening==2){showTitle();}else next();
  }}SDL_Event e;
  while(SDL_PollEvent(&e)){if(e.type==SDL_QUIT)done=true;
-else if(e.type==SDL_FINGERDOWN){if(!fingerActive){fingerActive=true;fingerId=e.tfinger.fingerId;fingerX=e.tfinger.x;fingerY=e.tfinger.y;touchDrag(fingerX,fingerY,true);}}
- else if(e.type==SDL_FINGERMOTION&&fingerActive&&e.tfinger.fingerId==fingerId&&menu&&!opening&&!gameMenu.visible()&&!fingerUiDrag&&!musicScreen->visible()){titlePointer=e.tfinger.x*1280;title->view(titlePointer);}
+else if(e.type==SDL_FINGERDOWN){if(!fingerActive){fingerActive=true;fingerId=e.tfinger.fingerId;fingerX=e.tfinger.x;fingerY=e.tfinger.y;touchTitleView(fingerX,fingerY);touchDrag(fingerX,fingerY,true);}}
+ else if(e.type==SDL_FINGERMOTION&&fingerActive&&e.tfinger.fingerId==fingerId&&titleViewActive()&&!fingerUiDrag){touchTitleView(e.tfinger.x,e.tfinger.y);}
  else if(e.type==SDL_FINGERMOTION&&fingerActive&&e.tfinger.fingerId==fingerId&&fingerUiDrag){touchDrag(e.tfinger.x,e.tfinger.y,false);}
  else if(e.type==SDL_FINGERUP&&fingerActive&&e.tfinger.fingerId==fingerId){fingerActive=false;
  float dx=(e.tfinger.x-fingerX)*1280,dy=(e.tfinger.y-fingerY)*720;
@@ -496,7 +498,20 @@ controllerKey(e.cbutton.button);
  if(movieOnly&&!movieCaptured&&movie->elapsedMs()>=1000){snapshot("movie.bmp");
  movieCaptured=true;
  std::cerr<<"MOVIE screenshot audio_clock_ms="<<movie->elapsedMs()<<"\n";
- }if(smoke){if(openingTest){if(opening==1&&frames==30)snapshot("opening-caution.bmp");if(opening==2&&!openingLogoCaptured&&movie->elapsedMs()>700){snapshot("opening-logo.bmp");openingLogoCaptured=true;}if(!opening){if(!openingLogoCaptured)throw std::runtime_error("Opening movie was not rendered");if(!openingTitleStarted)openingTitleStarted=SDL_GetTicks64();auto elapsed=SDL_GetTicks64()-openingTitleStarted;
+ }if(smoke){if(viewTest){
+ auto finger=[&](Uint32 type,float x){SDL_Event e{};e.type=type;e.tfinger.x=x;e.tfinger.y=.5f;e.tfinger.fingerId=7;if(SDL_PushEvent(&e)<0)throw std::runtime_error(SDL_GetError());};
+ auto axis=[&](Sint16 x){SDL_Event e{};e.type=SDL_CONTROLLERAXISMOTION;e.caxis.axis=SDL_CONTROLLER_AXIS_LEFTX;e.caxis.value=x;if(SDL_PushEvent(&e)<0)throw std::runtime_error(SDL_GetError());};
+ if(frames==1)finger(SDL_FINGERDOWN,.2f);
+ if(frames==3&&(std::abs(titlePointer-256)>1||!fingerActive))throw std::runtime_error("Touch-down view not immediate");
+ if(frames==30){snapshot("view-touch-left.bmp");finger(SDL_FINGERMOTION,.8f);}
+ if(frames==32&&std::abs(titlePointer-1024)>1)throw std::runtime_error("Touch-drag view not updated");
+ if(frames==60){snapshot("view-touch-right.bmp");finger(SDL_FINGERUP,.8f);axis(-32767);mutedNonzero=uint64_t(titlePointer);}
+ if(frames==75){if(titlePointer>=mutedNonzero-50)throw std::runtime_error("Left stick did not move view left");axis(0);}
+ if(frames==78)mutedNonzero=uint64_t(titlePointer);
+ if(frames==92){if(std::abs(titlePointer-float(mutedNonzero))>1)throw std::runtime_error("View did not hold after stick release");axis(32767);}
+ if(frames==108){if(titlePointer<=mutedNonzero+50||advances||!menu||title->selection()!=0)throw std::runtime_error("Stick view navigation changed menu/story");snapshot("view-stick-right.bmp");std::cerr<<"TITLE VIEW PASS immediate touch / drag / left-right stick / neutral hold / no menu selection or story change\n";done=true;}
+ if(++frames>=smoke&&!done){throw std::runtime_error("Title view test timeout");}continue;
+ }if(openingTest){if(opening==1&&frames==30)snapshot("opening-caution.bmp");if(opening==2&&!openingLogoCaptured&&movie->elapsedMs()>700){snapshot("opening-logo.bmp");openingLogoCaptured=true;}if(!opening){if(!openingLogoCaptured)throw std::runtime_error("Opening movie was not rendered");if(!openingTitleStarted)openingTitleStarted=SDL_GetTicks64();auto elapsed=SDL_GetTicks64()-openingTitleStarted;
  const unsigned times[]={1000,4500,7000};if(openingTitleCaptures<3&&elapsed>=times[openingTitleCaptures]){snapshot("opening-title-"+std::to_string(times[openingTitleCaptures])+".bmp");openingTitleCaptures++;}
  if(openingTitleCaptures==3){if(!title->ready())throw std::runtime_error("Title entrance did not finish");std::cerr<<"OPENING PASS caution4500 / original maker movie / continuous title animation7000\n";done=true;}}if(++frames>=smoke&&!done){throw std::runtime_error("Opening sequence timeout");}continue;}
  if(musicTest){
@@ -639,7 +654,8 @@ if(game.empty()){std::cerr<<"usage: whj2-runtime GAME [SAVE_DIR] [--smoke-frames
 #ifdef __SWITCH__
 if(argc<3)saves="sdmc:/switch/whj2/saves";
 #endif
-Frontend f(game,saves);if(argc>4&&std::string(argv[3])=="--title-smoke"){f.titleTest=true;smoke=unsigned(std::stoul(argv[4]));}
+Frontend f(game,saves);if(argc>4&&std::string(argv[3])=="--title-view-smoke"){f.viewTest=true;smoke=unsigned(std::stoul(argv[4]));}
+ if(argc>4&&std::string(argv[3])=="--title-smoke"){f.titleTest=true;smoke=unsigned(std::stoul(argv[4]));}
  if(argc>4&&std::string(argv[3])=="--opening-smoke"){f.openingTest=true;smoke=unsigned(std::stoul(argv[4]));}
  if(argc>4&&std::string(argv[3])=="--music-smoke"){f.musicTest=true;smoke=unsigned(std::stoul(argv[4]));}
  if(argc>4&&std::string(argv[3])=="--extra-smoke"){f.extraTest=true;smoke=unsigned(std::stoul(argv[4]));}

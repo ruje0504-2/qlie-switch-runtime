@@ -5,6 +5,7 @@
 namespace whj2 {
 JoyCon::JoyCon(){padConfigureInput(1,HidNpadStyleTag_NpadHandheld|HidNpadStyleTag_NpadJoyDual|HidNpadStyleTag_NpadJoyLeft|HidNpadStyleTag_NpadJoyRight);
  padInitializeDefault(&pad);
+ hidInitializeTouchScreen();
  }
 JoyConInput JoyCon::poll(uint64_t ms){
  padUpdate(&pad);

@@ -103,17 +103,23 @@ struct Frontend {
  whj2::FramePacer framePacer;
  whj2::FpsOverlay fpsDisplay;
  std::map<SDL_JoystickID,SDL_GameController*>controllers;
- Frontend(const std::string&game,const std::string&saves):assets(game),story(assets),pixels(1280*720*4),saveDir(saves){unsigned subsystems=SDL_INIT_VIDEO|SDL_INIT_AUDIO|SDL_INIT_EVENTS;
+ Frontend(const std::string&game,const std::string&saves):assets(game),story(assets),pixels(1280*720*4),saveDir(saves){unsigned subsystems=SDL_INIT_AUDIO|SDL_INIT_EVENTS;
+ bool nativeRequested=false;
+#ifdef WHJ2_WITH_VULKAN
+ const char*gpuMode=std::getenv("WHJ2_RENDERER");
+#ifdef __SWITCH__
+ nativeRequested=!gpuMode||std::string(gpuMode)!="cpu";
+#endif
+#endif
+ if(!nativeRequested)subsystems|=SDL_INIT_VIDEO;
 #ifndef __SWITCH__
  subsystems|=SDL_INIT_GAMECONTROLLER;
 #endif
  if(SDL_Init(subsystems))throw std::runtime_error(SDL_GetError());
- window=SDL_CreateWindow("美少女万華鏡２",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,1280,720,SDL_WINDOW_RESIZABLE);
- if(!window)throw std::runtime_error(SDL_GetError());
+ if(!nativeRequested){window=SDL_CreateWindow("美少女万華鏡２",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,1280,720,SDL_WINDOW_RESIZABLE);if(!window)throw std::runtime_error(SDL_GetError());}
 #ifdef WHJ2_WITH_VULKAN
- const char*gpuMode=std::getenv("WHJ2_RENDERER");
 #ifdef __SWITCH__
- if(!gpuMode||std::string(gpuMode)!="cpu")vulkan=std::make_unique<whj2::VulkanRaster>();
+ if(nativeRequested)vulkan=std::make_unique<whj2::VulkanRaster>();
 #else
  if(gpuMode&&std::string(gpuMode)=="vulkan")vulkan=std::make_unique<whj2::VulkanRaster>();
 #endif
@@ -386,7 +392,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  void upperAction(whj2::UpperMenu::Action action){if(action==whj2::UpperMenu::None)return;upperMenu->close();
  if(action==whj2::UpperMenu::Quit){performUi(whj2::GameMenu::Quit);return;}
  if(action==whj2::UpperMenu::Title){performUi(whj2::GameMenu::Title);return;}
- if(action==whj2::UpperMenu::Screen){auto flags=SDL_GetWindowFlags(window);if(SDL_SetWindowFullscreen(window,(flags&SDL_WINDOW_FULLSCREEN_DESKTOP)?0:SDL_WINDOW_FULLSCREEN_DESKTOP))std::cerr<<"PENDING-UPPERMENU screen mode: "<<SDL_GetError()<<"\n";}
+ if(action==whj2::UpperMenu::Screen){if(!window)return;auto flags=SDL_GetWindowFlags(window);if(SDL_SetWindowFullscreen(window,(flags&SDL_WINDOW_FULLSCREEN_DESKTOP)?0:SDL_WINDOW_FULLSCREEN_DESKTOP))std::cerr<<"PENDING-UPPERMENU screen mode: "<<SDL_GetError()<<"\n";}
  }
  void openCg(){replayScreen->close();cgScreen->open();menu=true;audio->stopAll();auto path="music/wbgm08.ogg";audio->play(0,assets.read(path),true,255.f/256,0,path,0);}
  void cgAction(whj2::CgScreen::Action action){if(action==whj2::CgScreen::None)return;uiSound(action==whj2::CgScreen::Back?"Sys_Cancel":"Sys_OnClick");if(action==whj2::CgScreen::Back){cgScreen->close();title->setExtraPage(true);leaveMusic();}else if(action==whj2::CgScreen::Replay){cgScreen->close();openReplay();}else if(action==whj2::CgScreen::Music){cgScreen->close();musicScreen->open();}}
@@ -441,9 +447,19 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  std::cerr<<"SCREENSHOT "<<saveDir<<"/"<<name<<"\n";
  }
  bool titleViewActive()const{return menu&&!opening&&!gameMenu.visible()&&!musicScreen->visible()&&!replayScreen->visible()&&!cgScreen->visible();}
- void windowToLogical(int px,int py,float*x,float*y){if(renderer){SDL_RenderWindowToLogical(renderer,px,py,x,y);return;}int width,height;SDL_GetWindowSize(window,&width,&height);float scale=std::min(width/1280.f,height/720.f);*x=(px-(width-1280*scale)*.5f)/scale;*y=(py-(height-720*scale)*.5f)/scale;}
- void touchTitleView(float x,float y){if(!titleViewActive())return;int w,h;SDL_GetWindowSize(window,&w,&h);float lx,ly;windowToLogical(int(x*w),int(y*h),&lx,&ly);titlePointer=std::clamp(lx,0.f,1280.f);title->view(titlePointer);}
- void touchDrag(float x,float y,bool start){int w,h;SDL_GetWindowSize(window,&w,&h);float lx,ly;windowToLogical(int(x*w),int(y*h),&lx,&ly);if(cgScreen->visible()){if(start)fingerUiDrag=false;if(cgScreen->inView())cgScreen->pan(lx,ly);return;}if(replayScreen->visible()){if(start)fingerUiDrag=false;return;}if(musicScreen->visible()){bool moved=musicScreen->drag(lx,ly);if(start)fingerUiDrag=moved;return;}if(start)fingerUiDrag=gameMenu.beginDrag(lx,ly);else gameMenu.drag(lx,ly);if(fingerUiDrag&&gameMenu.settingsDirty){applySettings(false);uiSound("Sys_OnMouse");}}
+ void windowSize(int*w,int*h){if(window)SDL_GetWindowSize(window,w,h);else{*w=1280;*h=720;}}
+#ifdef __SWITCH__
+ bool nativeTouchDown=false;float nativeTouchX=0,nativeTouchY=0;Sint64 nativeTouchId=0;
+ void pollNativeTouch(){
+  HidTouchScreenState state{};bool touching=hidGetTouchScreenStates(&state,1)>0&&state.count>0;
+  auto emit=[&](Uint32 type,float x,float y,Sint64 id){SDL_Event event{};event.type=type;event.tfinger.touchId=0;event.tfinger.fingerId=id;event.tfinger.x=x;event.tfinger.y=y;event.tfinger.pressure=type==SDL_FINGERUP?0.f:1.f;if(SDL_PushEvent(&event)<0)throw std::runtime_error(SDL_GetError());};
+  if(nativeTouchDown&&(!touching||Sint64(state.touches[0].finger_id)!=nativeTouchId)){emit(SDL_FINGERUP,nativeTouchX,nativeTouchY,nativeTouchId);nativeTouchDown=false;}
+  if(touching){auto&t=state.touches[0];float x=t.x/1280.f,y=t.y/720.f;Sint64 id=t.finger_id;if(!nativeTouchDown)emit(SDL_FINGERDOWN,x,y,id);else if(x!=nativeTouchX||y!=nativeTouchY)emit(SDL_FINGERMOTION,x,y,id);nativeTouchDown=true;nativeTouchX=x;nativeTouchY=y;nativeTouchId=id;}
+ }
+#endif
+ void windowToLogical(int px,int py,float*x,float*y){if(renderer){SDL_RenderWindowToLogical(renderer,px,py,x,y);return;}int width,height;windowSize(&width,&height);float scale=std::min(width/1280.f,height/720.f);*x=(px-(width-1280*scale)*.5f)/scale;*y=(py-(height-720*scale)*.5f)/scale;}
+ void touchTitleView(float x,float y){if(!titleViewActive())return;int w,h;windowSize(&w,&h);float lx,ly;windowToLogical(int(x*w),int(y*h),&lx,&ly);titlePointer=std::clamp(lx,0.f,1280.f);title->view(titlePointer);}
+ void touchDrag(float x,float y,bool start){int w,h;windowSize(&w,&h);float lx,ly;windowToLogical(int(x*w),int(y*h),&lx,&ly);if(cgScreen->visible()){if(start)fingerUiDrag=false;if(cgScreen->inView())cgScreen->pan(lx,ly);return;}if(replayScreen->visible()){if(start)fingerUiDrag=false;return;}if(musicScreen->visible()){bool moved=musicScreen->drag(lx,ly);if(start)fingerUiDrag=moved;return;}if(start)fingerUiDrag=gameMenu.beginDrag(lx,ly);else gameMenu.drag(lx,ly);if(fingerUiDrag&&gameMenu.settingsDirty){applySettings(false);uiSound("Sys_OnMouse");}}
  void pointer(int px,int py){float x,y;
  windowToLogical(px,py,&x,&y);
  if(opening){activate();return;}if(menu){titlePointer=x;title->view(x);}
@@ -488,7 +504,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }}
  int run(unsigned smoke){
 #ifdef __SWITCH__
- std::cerr<<"INPUT libnx Joy-Con and SDL touch\n";
+ std::cerr<<"INPUT libnx Joy-Con and "<<(window?"SDL":"libnx")<<" touch\n";
 #else
  std::cerr<<"INPUT physical joysticks="<<SDL_NumJoysticks()<<"\n";
  for(int i=0;i<SDL_NumJoysticks();i++)controllerAdded(i);
@@ -521,7 +537,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
 #ifdef __SWITCH__
  if(!appletMainLoop()){done=true;
  break;
- }auto pad=joycon.poll(now);
+ }if(!window)pollNativeTouch();auto pad=joycon.poll(now);
  fastForward=pad.fastForward;titleAxis=pad.viewAxis;titleAxisY=pad.viewAxisY;
  if(pad.skipToggle)toggleSkip();
  if(pad.fps)controllerKey(SDL_CONTROLLER_BUTTON_BACK);
@@ -549,7 +565,7 @@ else if(e.type==SDL_FINGERDOWN){if(!fingerActive){fingerActive=true;fingerId=e.t
  float dx=(e.tfinger.x-fingerX)*1280,dy=(e.tfinger.y-fingerY)*720;
  if(fingerUiDrag){touchDrag(e.tfinger.x,e.tfinger.y,false);gameMenu.endDrag();fingerUiDrag=false;applySettings();}
  else if(!menu&&!gameMenu.visible()&&upperMenu->swipe(dx,dy)){std::cerr<<"INPUT downward swipe upper menu\n";}
- else if(std::abs(dx)<24&&std::abs(dy)<24){int w,h;SDL_GetWindowSize(window,&w,&h);std::cerr<<"INPUT touch\n";pointer(int(e.tfinger.x*w),int(e.tfinger.y*h));}
+ else if(std::abs(dx)<24&&std::abs(dy)<24){int w,h;windowSize(&w,&h);std::cerr<<"INPUT touch\n";pointer(int(e.tfinger.x*w),int(e.tfinger.y*h));}
  }else if(e.type==SDL_CONTROLLERAXISMOTION&&e.caxis.axis==SDL_CONTROLLER_AXIS_LEFTY){titleAxisY=std::abs(e.caxis.value)>6000?e.caxis.value/32767.f:0;}else if(e.type==SDL_CONTROLLERAXISMOTION&&e.caxis.axis==SDL_CONTROLLER_AXIS_LEFTX){titleAxis=std::abs(e.caxis.value)>6000?e.caxis.value/32767.f:0;}else if(e.type==SDL_CONTROLLERAXISMOTION&&e.caxis.axis==SDL_CONTROLLER_AXIS_TRIGGERLEFT){bool held=e.caxis.value>16000;if(held&&!leftTrigger)toggleSkip();leftTrigger=held;}else if(e.type==SDL_CONTROLLERAXISMOTION&&e.caxis.axis==SDL_CONTROLLER_AXIS_TRIGGERRIGHT){fastForward=e.caxis.value>16000;}else if(e.type==SDL_CONTROLLERDEVICEADDED)controllerAdded(e.cdevice.which);
  else if(e.type==SDL_CONTROLLERDEVICEREMOVED){auto i=controllers.find(e.cdevice.which);
  if(i!=controllers.end()){SDL_GameControllerClose(i->second);

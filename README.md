@@ -104,7 +104,9 @@ Mesa 26.2.4, commit `0ff52079ca9e9e837ed27eb95a8d239f439a1864`.
 The authored flower particles, sky mesh, texture sampling, ordered integer
 blending and left-stick/touch viewpoint remain in the same scene graph.
 Compute dispatches write the title frame and a Vulkan fullscreen pass presents it
-directly through the native NWindow swapchain, including the FPS overlay. Modal
+directly through the native NWindow swapchain, including the FPS overlay.
+On this path, SDL provides audio/events only; Joy-Con and touchscreen input use
+libnx. SDL does not create a video window or claim the NWindow. Modal
 panels use a readback for the existing CPU UI composition. Other game scenes
 currently retain CPU composition and use the same Vulkan native presentation.
 

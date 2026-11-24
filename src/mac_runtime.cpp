@@ -599,7 +599,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(gameMenu.panel==UI::Fonts){
   line("フォント選択",350,150,30);int first=gameMenu.focus/5*5;
   for(int row=0;row<5&&first+row<int(fontFiles.size());row++){int index=first+row;auto label=index?fontFiles[index]:"標準フォント";if(index==selectedFont)label="* "+label;line(label,340,220+row*60,24,index==gameMenu.focus?0xffff88:0xffffff);}
-  if(first>0)line("前へ",840,170,24);if(first+5<int(fontFiles.size()))line("次へ",840,555,24);
+  if(first>0)line("前へ",840,170,24);
+  if(first+5<int(fontFiles.size()))line("次へ",840,555,24);
   line("キャンセル",570,565,24);if(!status.empty())line(status,320,525,18);return;
  }
  if(gameMenu.panel==UI::Settings&&gameMenu.allowSceneReturn)line("回想を終了",520,680,26,gameMenu.focus==16?0xffff88:0xffffff);

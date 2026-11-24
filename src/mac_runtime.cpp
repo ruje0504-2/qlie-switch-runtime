@@ -354,6 +354,12 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }else audio->volume(ch,volumes[ch],ms);
  return true;
  }
+ void playSceneSounds(){
+ for(auto&event:images->takeSoundEvents()){
+  if(event.stop)audio->volume(event.channel,0,0,true);
+  else audio->play(event.channel,event.bytes,event.loop,event.gain,0,event.source,event.category);
+ }
+ }
  void playVoice(const std::string&id,bool historyReplay=false){
  if(!historyReplay&&!voices->forcePlay&&normalSkip){audio->stop(3);return;}
  if(id.empty())return;
@@ -450,7 +456,10 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   size_t used=0;auto index=std::stoul(e.value.substr(5,e.value.size()-6),&used);
   if(index>=16||used!=e.value.size()-6)throw std::runtime_error("Direct sound channel out of range");
   audio->stop(8+unsigned(index));continue;
- }if(e.type=="command"&&(audioCommand(e.value)||images->command(e.value)))continue;
+ }if(e.type=="command"){
+  if(audioCommand(e.value))continue;
+  if(images->command(e.value)){playSceneSounds();continue;}
+ }
  if(e.type=="create"||e.type=="free"){audio->stopAll();
  images->clear();
  transition->reset();
@@ -828,10 +837,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  auto waitAction=sentenceWait.tick(double(now-lastUpdate),audio->playing(3));
  if(waitAction==whj2::SentenceWait::None&&sentenceWait.waitingForMessage()&&autoPlay.ready(messageText->finished(),audio->playing(3),settings.get("AutoPlayVoiceWait")))waitAction=sentenceWait.force();
  if(waitAction==whj2::SentenceWait::Next)next();else if(waitAction==whj2::SentenceWait::Resume)next(true);
- for(auto&event:images->takeSoundEvents()){
-  if(event.stop)audio->volume(event.channel,0,0,true);
-  else audio->play(event.channel,event.bytes,event.loop,event.gain,0,event.source,event.category);
- }
+ playSceneSounds();
 }
  lastUpdate=now;
 #ifdef __SWITCH__

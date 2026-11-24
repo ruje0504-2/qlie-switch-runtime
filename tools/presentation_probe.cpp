@@ -22,6 +22,14 @@ if(argc==3&&std::string(argv[2])=="--face-render"){
  scene.beginPage();scene.selectFace("","");actual.assign(actual.size(),0);scene.drawFaces(actual);if(actual!=background)throw std::runtime_error("Narration kept automatic once portrait");
  std::cout<<"PASS original face placement, overlay isolation, once/keep/show/clear and saved state\n";return 0;
 }
+if(argc==3&&std::string(argv[2])=="--named-filter"){
+ for(const auto&item:std::vector<std::pair<std::string,std::string>>{{"pass","0"},{"point","1"},{"linear","2"}}){
+  whj2::SceneImages named(a),numeric(a);auto base="^bg01,$base_bg,file:cut/eyecatch01,scalex:37,scaley:37,texfilter:";
+  named.command(base+item.first);numeric.command(base+item.second);named.update(700);numeric.update(700);
+  qlie::Bytes x(1280*720*4),y(x.size());named.draw(x);numeric.draw(y);if(x!=y)throw std::runtime_error("Named filter differs from numeric "+item.first);
+  std::cout<<"PASS named texture filter "<<item.first<<" equals "<<item.second<<"\n";
+ }return 0;
+}
 if(argc==3&&std::string(argv[2])=="--dynamic-instances"){
  unsigned failures=0;
  for(const std::string resource:{"cut/eyecatch01","cut/c_万華鏡"}){

@@ -329,7 +329,9 @@ std::vector<SceneSoundEvent> SceneImages::takeSoundEvents(){
 }
 float SceneImages::value(const Layer&layer,const std::string&key,float fallback){
  auto tween=layer.tweens.find(key);
- if(tween==layer.tweens.end()){auto param=layer.params.find(key);return param==layer.params.end()?fallback:numeric(param->second);}
+ if(tween==layer.tweens.end()){auto param=layer.params.find(key);if(param==layer.params.end())return fallback;
+ if(key=="texfilter"){if(param->second=="pass")return 0;if(param->second=="point")return 1;if(param->second=="linear")return 2;}
+ return numeric(param->second);}
  const auto&t=tween->second;double q=t.duration>0?std::clamp(t.elapsed/t.duration,0.,1.):1;
  double exponent=1+1.4*t.power/100;
  if(q<1)switch(t.mode){case 0:q=0;break;case 1:break;case 3:q=1-std::pow(1-q,exponent);break;case 4:q=std::pow(q,exponent);break;default:throw std::runtime_error("Unsupported image tween mode");}

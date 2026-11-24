@@ -106,7 +106,7 @@ struct Frontend {
  whj2::RenderTarget*frameTarget=nullptr;
  struct CachedGlyph {KFontGlyphBounds bounds{};whj2::Image image;};
  std::map<std::tuple<uint32_t,unsigned,unsigned,uint32_t>,CachedGlyph>uiGlyphs;
- struct SlotPreview {bool exists=false;whj2::Image thumbnail;std::vector<uint32_t>excerpt;};
+ struct SlotPreview {bool exists=false,damaged=false;whj2::Image thumbnail;std::vector<uint32_t>excerpt;};
  std::map<unsigned,SlotPreview>slotPreviews;
  std::string text,name,status="",saveDir;
  bool menu=true,done=false,hidden=false,fpsVisible=false;
@@ -519,7 +519,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(action==UI::DeleteSlot){selectedSlot=unsigned(gameMenu.slot());if(std::filesystem::exists(slotPrefix(selectedSlot)+".story"))gameMenu.ask(UI::DeleteSlot);else status="保存データがありません。";return;}
  if(action==UI::Slot){selectedSlot=unsigned(gameMenu.slot());
  if(gameMenu.panel==UI::Save){if(std::filesystem::exists(slotPrefix(selectedSlot)+".story")){gameMenu.ask(UI::Slot);return;}save(selectedSlot);}
- else if(gameMenu.panel==UI::Load){if(std::filesystem::exists(slotPrefix(selectedSlot)+".story"))gameMenu.ask(UI::Slot);else status="保存データがありません。";}
+ else if(gameMenu.panel==UI::Load){auto&preview=slotPreview(selectedSlot);if(!preview.exists)status="保存データがありません。";else if(preview.damaged)status="保存データが不完全です。削除または上書きしてください。";else gameMenu.ask(UI::Slot);}
  }
  }
  void openPanel(whj2::GameMenu::Panel panel){if(movie->playing()||(replayActive&&(panel==whj2::GameMenu::Save||panel==whj2::GameMenu::Load)))return;if(panel==whj2::GameMenu::Save&&menu)return;slotPreviews.clear();upperMenu->close();normalSkip=false;status.clear();gameMenu.allowSceneReturn=replayActive;gameMenu.open(panel);if(panel==whj2::GameMenu::Save||panel==whj2::GameMenu::Load){auto slot=newestManualSlot()-1;gameMenu.page=int(slot/8);gameMenu.focus=int(slot%8);}refreshSlotFlags();historyVoicePlayed=false;historyVoiceCacheOffset=-1;gameMenu.historyMaxOffset=int(history.size()>4?history.size()-4:0);gameMenu.historyRows=int(std::min<size_t>(4,history.size()));}
@@ -540,8 +540,15 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  void back(){if(normalSkip){normalSkip=false;return;}if(cgScreen->visible()){cgAction(cgScreen->back());return;}if(replayScreen->visible()){replayAction(whj2::ReplayScreen::Back);return;}if(musicScreen->visible()){if(musicScreen->back())leaveMusic();return;}if(gameMenu.asking){performUi(whj2::GameMenu::No);return;}if(gameMenu.visible()){performUi(whj2::GameMenu::Close);return;}if(upperMenu->visible()){upperMenu->close();return;}if(!menu)hidden=!hidden;}
  SlotPreview&slotPreview(unsigned slot){
  auto at=slotPreviews.find(slot);if(at!=slotPreviews.end())return at->second;
- SlotPreview preview;preview.exists=std::filesystem::exists(slotPrefix(slot)+".story");
- if(preview.exists){if(std::filesystem::exists(slotPrefix(slot)+".thumbnail")){preview.thumbnail={160,90,qlie::file(slotPrefix(slot)+".thumbnail")};if(preview.thumbnail.pixels.size()!=160*90*4)throw std::runtime_error("Thumbnail size");preview.thumbnail.version.publish();}auto content=qlie::file(slotPrefix(slot)+".text");preview.excerpt=utf8(std::string(content.begin(),content.end()));}
+ SlotPreview preview;
+ try{
+  preview.exists=std::filesystem::exists(slotPrefix(slot)+".story");
+  if(preview.exists){
+   for(auto ext:{".text",".name",".images",".audio",".mixer"})if(!std::filesystem::exists(slotPrefix(slot)+ext))preview.damaged=true;
+   if(!preview.damaged){if(std::filesystem::exists(slotPrefix(slot)+".thumbnail")){preview.thumbnail={160,90,qlie::file(slotPrefix(slot)+".thumbnail")};if(preview.thumbnail.pixels.size()!=160*90*4)throw std::runtime_error("Thumbnail size");preview.thumbnail.version.publish();}auto content=qlie::file(slotPrefix(slot)+".text");preview.excerpt=utf8(std::string(content.begin(),content.end()));}
+  }
+ }catch(const std::exception&e){std::cerr<<"SAVE PREVIEW FAIL slot="<<slot<<" "<<e.what()<<"\n";preview.exists=true;preview.damaged=true;}
+ if(preview.damaged){preview.thumbnail={};preview.excerpt=utf8("保存データが不完全です");}
  return slotPreviews.emplace(slot,std::move(preview)).first->second;
  }
  void drawPanel(){++panelDraws;using UI=whj2::GameMenu;

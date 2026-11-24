@@ -45,9 +45,9 @@ Mac和Switch运行循环统一限制为最高60 FPS，保留垂直同步；输�
 - 原标题与选择框资源、动画和碰撞矩形；选项确认保留两段250ms退出过程，支持点击加速，退出中的选择状态可存读；天空模型的纹理三角形、单轴嵌套三维变换、透视UV与近裁剪。无光照材质使用原始颜色；多轴精度和其他光照模式仍待完成。
 - 双纹理位图遮罩、蓝通道阈值。GPU直接采样原图与遮罩；CPU回退的动态遮罩和影片帧保有队列内快照，静态图片继续共享。
 - 角色基础动作与独立立绘替换槽、命名/数字动作、直接后向关键帧循环。显式与自动头像选择、逐页/持续显隐、前景层。
-- 图层位置/颜色渐变、相对位移、播放速度。原消息框显示/隐藏动画、逐字正文（换行不增加逐字或自动等待）、姓名别名，以及spd速度标签与pc居中标签。
+- 图层位置/颜色渐变、相对位移、播放速度。原消息框显示/隐藏动画、逐字正文（换行不增加逐字或自动等待）、姓名别名，以及spd速度、pc居中、换行与原OF外字标签。正文和历史按原替换表使用图集字形。静态位图支持原blur10/blur20与sepia滤镜。
 - 音乐/音效、顶层动画内嵌音频及独立direct总线、音量和播放位置保存。剧情音乐切换用独立的当前/上一曲声道按脚本时间交叉淡化，两轨游标和淡化进度均进入音频存档。独立Theora影片按音频采样时钟播放。
-- 设置页高/低画质开关沿用原版交替扫描行语义；低画质保留另一半上一帧画面，Switch使用GPU缓冲复制，高画质为默认。设置页包含原位置的五类音量测试按钮，Joy-Con选择/A播放及触摸均接入同一个原版测试音和当前分类音量。独立系统通关进度与原版额外菜单。音乐鉴赏已接入18曲原资源、PCM游标计时/定位、曲目切换/循环、专用音量和控制器/触摸操作；原选项及音乐页操作音已接线，音乐页首次取消按250ms淡出；底部跨模式导航及完整图库/回想仍待接线。
+- 设置页高/低画质开关沿用原版交替扫描行语义；低画质保留另一半上一帧画面，Switch使用GPU缓冲复制，高画质为默认。设置页包含原位置的五类音量测试按钮，Joy-Con选择/A播放及触摸均接入同一个原版测试音和当前分类音量。独立系统通关进度与原版额外菜单。音乐鉴赏已接入18曲原资源、PCM游标计时/定位、曲目切换/循环、专用音量和控制器/触摸操作；原选项及音乐页操作音已接线，音乐页首次取消按250ms淡出；图库与回想的已接入范围见下文，完整视听行为仍待验收。
 - 场景交叠/cut/catch/原规则图渐变、点击/固定/正文等待和原生等待续行。图像、音轨、过渡、逐字及等待状态可以保存和恢复。
 
 CG目录支持原33组784个差分资源，按已显示资源解锁整组；支持原按钮分页、图片/动画差分、放大和平移，以及CG/回想/音乐页面互跳。显示与已读记录保存在进度v3，旧进度v1/v2可读取，缺失的已读记录保持未读。动画CG按原关键帧时间循环；34个影片资源中24个音轨解码后为全零PCM，10个无音轨。完整原UI转场仍待接线。
@@ -94,9 +94,9 @@ build/whj2-runtime /absolute/path/to/game /absolute/path/to/empty-test-saves --t
 
 ### Controller and touch navigation
 
-L opens the save panel; R opens the load panel. A confirms a selected slot, and B cancels a panel. X opens the settings page, Up opens text history, ZL toggles auto-play, and ZR toggles skip according to the configured read/unread modeping, stopping at an unread page or a choice. During dialogue B hides or restores the text box; A first restores hidden text without advancing. Y or a downward swipe opens the original upper menu. No controller legend or permanent touch overlay is drawn.
+L opens the save panel; R opens the load panel. A confirms a selected slot, and B cancels a panel. X opens the settings page, Up opens text history, ZL toggles auto-play, and ZR toggles skipping according to the configured read/unread mode. Both modes stop at choices; read-only mode also stops at unread pages. During dialogue B hides or restores the text box; A first restores hidden text without advancing. Y or a downward swipe opens the original upper menu. No controller legend or permanent touch overlay is drawn.
 
-Save/load panels use the original resources, 15 pages of eight local slots, and small scene thumbnails. History contains displayed pages and is included with each slot. The settings page supports nine sliders for text speed, text-window opacity, auto-play delay, and six volume controls, plus click-to-stop voice and auto-play voice-wait toggles. Sliders support captured touch drags and controller adjustment, with local persistence and reset confirmation. The original auto-play button controls timed progression and waits for text completion and, when selected, voice completion. Remaining font, display-quality, and character-voice controls are pending; this is not full settings parity. Confirmation dialogs currently use original artwork without the original transition timing. Physical controller/touch and Switch runtime acceptance remain pending.
+Save/load panels use the original resources, 15 pages of eight local slots, and small scene thumbnails. History contains displayed pages and is included with each slot. Up/down selects a record, left/right scrolls long text within that record, and A replays its voice. Touch supports row selection, text dragging and the original scrollbar. The settings page supports nine sliders for text speed, text-window opacity, auto-play delay, and six volume controls, plus click-to-stop voice and auto-play voice-wait toggles. Sliders support captured touch drags and controller adjustment, with local persistence and reset confirmation. The original auto-play button controls timed progression and waits for text completion and, when selected, voice completion. Font selection includes collection faces, antialiasing, bold, shadow, outline and color controls. The display-quality setting selects the original alternating-scanline mode. Dialogue voice volume and playback are connected; current Switch behavior and exact original-font parity remain unverified. Confirmation dialogs currently use original artwork without the original transition timing. Physical controller/touch and Switch runtime acceptance remain pending.
 
 
 ## Vulkan renderer

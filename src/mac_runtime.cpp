@@ -1,5 +1,15 @@
+#if defined(WHJ2_WITH_VULKAN) || defined(WHJ2_WITH_DEKO3D)
+#define WHJ2_WITH_GPU
+#include "gpu_raster.hpp"
+#endif
 #ifdef WHJ2_WITH_VULKAN
 #include "vulkan_raster.hpp"
+#endif
+#ifdef WHJ2_WITH_DEKO3D
+#include "deko3d_raster.hpp"
+#endif
+#ifdef __SWITCH__
+#include <fstream>
 #endif
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Incremental native frontend: graphics/audio integration remains in progress.
@@ -45,6 +55,18 @@ extern "C" {
 #include <cmath>
 #include <cstdio>
 #include <tuple>
+#ifdef WHJ2_WITH_GPU
+static std::string selectedRenderer(){
+ if(const char* mode=std::getenv("WHJ2_RENDERER");mode&&*mode)return mode;
+#ifdef __SWITCH__
+ std::string name;
+ if(std::ifstream file{"sdmc:/switch/whj2/renderer.cfg"};file>>name)return name;
+ return "vulkan";
+#else
+ return "cpu";
+#endif
+}
+#endif
 static std::vector<uint32_t> utf8(const std::string&s){std::vector<uint32_t>o;
  for(size_t p=0;p<s.size();){unsigned c=uint8_t(s[p++]),n=0;
  if(c>=240){c&=7;
@@ -110,8 +132,8 @@ struct Frontend {
  SDL_Window*window=nullptr;
  SDL_Renderer*renderer=nullptr;
  SDL_Texture*texture=nullptr;
-#ifdef WHJ2_WITH_VULKAN
- std::unique_ptr<whj2::VulkanRaster>vulkan;
+#ifdef WHJ2_WITH_GPU
+ std::unique_ptr<whj2::GpuRaster> gpu;
 #endif
  qlie::Bytes pixels;
  whj2::RenderTarget*frameTarget=nullptr;
@@ -128,10 +150,10 @@ struct Frontend {
  std::map<SDL_JoystickID,SDL_GameController*>controllers;
  Frontend(const std::string&game,const std::string&saves):assets(game),story(assets),pixels(1280*720*4),saveDir(saves),gameDir(game){unsigned subsystems=SDL_INIT_AUDIO|SDL_INIT_EVENTS;
  bool nativeRequested=false;
-#ifdef WHJ2_WITH_VULKAN
- const char*gpuMode=std::getenv("WHJ2_RENDERER");
+#ifdef WHJ2_WITH_GPU
+ const std::string gpuMode=selectedRenderer();
 #ifdef __SWITCH__
- nativeRequested=!gpuMode||std::string(gpuMode)!="cpu";
+ nativeRequested=gpuMode!="cpu";
 #endif
 #endif
  if(!nativeRequested)subsystems|=SDL_INIT_VIDEO;
@@ -140,19 +162,25 @@ struct Frontend {
 #endif
  if(SDL_Init(subsystems))throw std::runtime_error(SDL_GetError());
  if(!nativeRequested){window=SDL_CreateWindow("美少女万華鏡２",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,1280,720,SDL_WINDOW_RESIZABLE);if(!window)throw std::runtime_error(SDL_GetError());}
+#ifdef WHJ2_WITH_DEKO3D
+ if(gpuMode=="deko3d")gpu=std::make_unique<whj2::Deko3dRaster>();
+#endif
 #ifdef WHJ2_WITH_VULKAN
 #ifdef __SWITCH__
- if(nativeRequested)vulkan=std::make_unique<whj2::VulkanRaster>();
+ if(nativeRequested&&!gpu){
+  if(gpuMode!="vulkan")std::fprintf(stderr,"Unknown renderer '%s', selecting vulkan\n",gpuMode.c_str());
+  gpu=std::make_unique<whj2::VulkanRaster>();
+ }
 #else
- if(gpuMode&&std::string(gpuMode)=="vulkan")vulkan=std::make_unique<whj2::VulkanRaster>();
+ if(gpuMode=="vulkan")gpu=std::make_unique<whj2::VulkanRaster>();
 #endif
 #endif
 
- bool nativeVulkan=false;
-#ifdef WHJ2_WITH_VULKAN
- nativeVulkan=vulkan&&vulkan->nativePresentation();
+ bool nativeGpu=false;
+#ifdef WHJ2_WITH_GPU
+ nativeGpu=gpu&&gpu->nativePresentation();
 #endif
- if(!nativeVulkan){
+ if(!nativeGpu){
  renderer=SDL_CreateRenderer(window,-1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);
  if(!renderer)renderer=SDL_CreateRenderer(window,-1,SDL_RENDERER_SOFTWARE);
  if(!renderer)throw std::runtime_error(SDL_GetError());
@@ -160,7 +188,7 @@ struct Frontend {
  texture=SDL_CreateTexture(renderer,SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STREAMING,1280,720);
  }
  font=kfont_open(nullptr,0);
- if(!font||(!nativeVulkan&&!texture))throw std::runtime_error("Font/texture initialization failed");
+ if(!font||(!nativeGpu&&!texture))throw std::runtime_error("Font/texture initialization failed");
  std::filesystem::create_directories(saveDir);
  {
   std::istringstream values(qlie::cp932(assets.read("avg/setting.txt")));std::string line;
@@ -201,8 +229,8 @@ struct Frontend {
  }
  ~Frontend(){
  readAhead.reset();
-#ifdef WHJ2_WITH_VULKAN
- vulkan.reset();
+#ifdef WHJ2_WITH_GPU
+ gpu.reset();
 #endif
 cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  for(auto&c:controllers)SDL_GameControllerClose(c.second);
@@ -294,8 +322,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  int fontChanged=kfont_set_antialias(font,1u<<settings.get("FontAA"));fontChanged|=kfont_set_style(font,unsigned(settings.get("FontStyle")),uint32_t(settings.get("FontStyleColor")));
  if(fontChanged>0){uiGlyphs.clear();refreshFontPreviews();if(!text.empty())refreshMessage();if(story.state.awaiting){auto state=choiceScreen->save();choiceScreen->restore(state,font);}}
  bool interlace=settings.get("Interlace")!=0;bool cpuMode=interlace;
-#ifdef WHJ2_WITH_VULKAN
- if(vulkan){vulkan->setInterlaced(interlace);cpuMode=false;}
+#ifdef WHJ2_WITH_GPU
+ if(gpu){gpu->setInterlaced(interlace);cpuMode=false;}
 #endif
  if(cpuInterlaced!=cpuMode){cpuInterlaced=cpuMode;if(cpuMode)cpuScanlineHistory=pixels;else cpuScanlineHistory.clear();}
  audio->setUserGains(settings.gains());images->setWindowAlpha(unsigned(settings.get("WindowAlpha")));messageText->setSpeed(settings.get("TextSpeed"));if(!text.empty())refreshMessage();if(persist&&gameMenu.panel!=whj2::GameMenu::Fonts)qlie::write_file(saveDir+"/settings.cfg",settings.save());gameMenu.settingsDirty=false;}
@@ -435,9 +463,9 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   transition->commandWithCapture(e.value,[this,&timing]{
    auto start=LoadClock::now();
    qlie::Bytes scene(1280*720*4);
-#ifdef WHJ2_WITH_VULKAN
-   if(vulkan&&vulkan->nativePresentation()){
-    vulkan->begin(0xff141923u);images->drawScene(*vulkan);transition->blend(*vulkan);vulkan->end(scene);
+#ifdef WHJ2_WITH_GPU
+   if(gpu&&gpu->nativePresentation()){
+    gpu->begin(0xff141923u);images->drawScene(*gpu);transition->blend(*gpu);gpu->end(scene);
     timing.capture+=std::chrono::duration<double,std::milli>(LoadClock::now()-start).count();return scene;
    }
 #endif
@@ -679,27 +707,27 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  KImage*newImage(){static KImage dst;dst={0,0,1280,720,1280*4,pixels.data()};return &dst;}
  void recordShown(){auto shown=images->takeShownFiles();auto cgShown=cgScreen->takeShownFiles();shown.insert(cgShown.begin(),cgShown.end());if(progress.captureFiles(shown))qlie::write_file(saveDir+"/system.progress",progress.save());}
  void present(){recordShown();if(fpsVisible)fpsDisplay.draw(pixels);
-#ifdef WHJ2_WITH_VULKAN
- if(vulkan&&vulkan->nativePresentation()){framePacer.wait();if(auto stamp=vulkan->presentPixels(pixels))fpsDisplay.presented(*stamp);return;}
+#ifdef WHJ2_WITH_GPU
+ if(gpu&&gpu->nativePresentation()){framePacer.wait();if(auto stamp=gpu->presentPixels(pixels))fpsDisplay.presented(*stamp);return;}
 #endif
  bool cpuScanlines=true;
-#ifdef WHJ2_WITH_VULKAN
- cpuScanlines=!vulkan;
+#ifdef WHJ2_WITH_GPU
+ cpuScanlines=!gpu;
 #endif
  cpuScanlinePhase^=1;
  if(cpuScanlines&&cpuInterlaced){if(cpuScanlineHistory.size()!=pixels.size())cpuScanlineHistory=pixels;else for(unsigned y=cpuScanlinePhase;y<720;y+=2)std::copy_n(pixels.data()+size_t(y)*1280*4,1280*4,cpuScanlineHistory.data()+size_t(y)*1280*4);pixels=cpuScanlineHistory;}
  SDL_UpdateTexture(texture,nullptr,pixels.data(),1280*4);SDL_RenderClear(renderer);SDL_RenderCopy(renderer,texture,nullptr,nullptr);framePacer.wait();SDL_RenderPresent(renderer);fpsDisplay.presented(SDL_GetTicks64());}
-#ifdef WHJ2_WITH_VULKAN
+#ifdef WHJ2_WITH_GPU
  void drawNative(){
  if(uiGlyphs.size()>1024)uiGlyphs.clear();
- frameTarget=vulkan.get();
- if(cgScreen->visible()){vulkan->begin(0u);cgScreen->draw(*frameTarget);}
- else if(replayScreen->visible()){vulkan->begin(0u);replayScreen->draw(*frameTarget);}
- else if(opening==1){vulkan->begin(0u);images->draw(*frameTarget);}
- else if(musicScreen->visible()){vulkan->begin(0u);musicScreen->draw(*frameTarget);}
- else if(movie->playing()){vulkan->beginVideo(movie->image());upperMenu->draw(*frameTarget);if(gameMenu.visible())drawPanel();}
+ frameTarget=gpu.get();
+ if(cgScreen->visible()){gpu->begin(0u);cgScreen->draw(*frameTarget);}
+ else if(replayScreen->visible()){gpu->begin(0u);replayScreen->draw(*frameTarget);}
+ else if(opening==1){gpu->begin(0u);images->draw(*frameTarget);}
+ else if(musicScreen->visible()){gpu->begin(0u);musicScreen->draw(*frameTarget);}
+ else if(movie->playing()){gpu->beginVideo(movie->image());upperMenu->draw(*frameTarget);if(gameMenu.visible())drawPanel();}
  else{
-  vulkan->begin(menu?0xff000000u:0xff141923u);
+  gpu->begin(menu?0xff000000u:0xff141923u);
   if(menu){if(titleStarting)transition->blend(*frameTarget);else title->draw(*frameTarget);}
   else{
    images->drawScene(*frameTarget);transition->blend(*frameTarget);
@@ -715,12 +743,12 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  recordShown();if(fpsVisible)fpsDisplay.draw(*frameTarget);frameTarget=nullptr;
  // FIFO presentation supplies the native 60 Hz limit. A second software sleep
  // before acquisition can miss the next vblank and halve the frame rate.
- if(auto stamp=vulkan->present(fpsVisible))fpsDisplay.presented(*stamp);
+ if(auto stamp=gpu->present(fpsVisible))fpsDisplay.presented(*stamp);
  }
 #endif
  void draw(){panelDraws=0;
-#ifdef WHJ2_WITH_VULKAN
- if(vulkan&&vulkan->nativePresentation()){drawNative();return;}
+#ifdef WHJ2_WITH_GPU
+ if(gpu&&gpu->nativePresentation()){drawNative();return;}
 #endif
  if(cgScreen->visible()){std::fill(pixels.begin(),pixels.end(),0);cgScreen->draw(pixels);present();return;}if(replayScreen->visible()){std::fill(pixels.begin(),pixels.end(),0);replayScreen->draw(pixels);present();return;}if(opening==1){std::fill(pixels.begin(),pixels.end(),0);images->draw(pixels);present();return;}if(musicScreen->visible()){std::fill(pixels.begin(),pixels.end(),0);musicScreen->draw(pixels);present();return;}if(movie->playing()){pixels=movie->image().pixels;
  upperMenu->draw(pixels);
@@ -733,8 +761,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  pixels[i+3]=255;
  }if(!menu){images->drawScene(pixels);transition->blend(pixels);}
  if(menu){
-#ifdef WHJ2_WITH_VULKAN
- if(vulkan&&!titleStarting){vulkan->begin(pixels);title->draw(*vulkan);vulkan->end(pixels);}else
+#ifdef WHJ2_WITH_GPU
+ if(gpu&&!titleStarting){gpu->begin(pixels);title->draw(*gpu);gpu->end(pixels);}else
 #endif
  if(titleStarting)transition->blend(pixels);else title->draw(pixels);
  }else if(!hidden&&gameMenu.panel!=whj2::GameMenu::History){images->drawMessages(pixels);
@@ -1082,8 +1110,8 @@ controllerKey(e.cbutton.button);
  }}else {frames++;
 
  }}
-#ifdef WHJ2_WITH_VULKAN
- if(vulkan&&vulkan->nativePresentation())vulkan->finishPresentation();
+#ifdef WHJ2_WITH_GPU
+ if(gpu&&gpu->nativePresentation())gpu->finishPresentation();
 #endif
  auto ast=audio->stats();
  std::cerr<<"AUDIO output_frames="<<ast.frames<<" nonzero_frames="<<ast.nonzero<<"\n";

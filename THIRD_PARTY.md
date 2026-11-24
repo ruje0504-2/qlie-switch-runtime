@@ -46,3 +46,10 @@ modifies `src/nouveau/compiler/nak_nir.c` at the pinned Mesa commit above.
 The patched file retains the upstream MIT license and its Collabora copyright
 notice. The static NRO includes the locally built object and retains the
 Mesa SDK's remaining components.
+
+## deko3d
+
+The optional Switch backend links devkitPro deko3d 0.5.0, copyright
+2018–2020 fincs, under the zlib license. The build uses devkitPro uam
+1.1.0 to compile this project's tile shader to Maxwell DKSH.
+[deko3d 0.5.0](https://github.com/devkitPro/deko3d/tree/v0.5.0) · [uam](https://github.com/devkitPro/uam)

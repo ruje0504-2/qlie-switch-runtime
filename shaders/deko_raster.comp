@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+#version 430
+layout(local_size_x=16,local_size_y=16) in;
+layout(binding=0,std430) readonly buffer Source { uint source[]; };
+layout(binding=1,std430) buffer Destination { uint destination[]; };
+#include "raster_types.glsl"
+layout(binding=2,std430) readonly buffer Commands { Draw draws[]; };
+layout(binding=3,std430) readonly buffer Tiles { uint tiles[]; };
+layout(std140,binding=0) uniform Parameters { vec4 p0;vec4 p1;vec4 p2;vec4 p3;ivec4 rect;uvec4 meta;uvec4 colors; } frame;
+// uam lowers dynamic integer division through floating point. Correct the
+// small color quotients explicitly; large dim numerators use integer division by shifts.
+uint exactQuotient(uint n,uint d){
+ if(n<d)return 0u;
+ if(n<0x1000000u){
+  uint q=uint(float(n)/float(d));
+  uint product=q*d;
+  if(product<=n&&n-product<d)return q;
+ }
+ uint q=0u;
+ for(int bit=findMSB(n)-findMSB(d);bit>=0;--bit){
+  uint part=d<<bit;
+  if(n>=part){n-=part;q|=1u<<bit;}
+ }
+ return q;
+}
+uvec3 exactQuotient(uvec3 n,uint d){
+ return uvec3(exactQuotient(n.x,d),exactQuotient(n.y,d),exactQuotient(n.z,d));
+}
+#define RASTER_DIV(n,d) exactQuotient(n,d)
+#include "raster_pixels.glsl"
+#include "raster_tiles.glsl"

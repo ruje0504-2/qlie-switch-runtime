@@ -184,6 +184,20 @@ The exact source, artifact and Rust versions/checksums are recorded in
 `config/graphics-dependencies.json`. Run `python3 tools/build_graphics_shaders.py` to compile the scene,
 compute and presentation shaders for Vulkan 1.1 and update their embedded SPIR-V.
 
+### Switch renderer selection
+
+The Switch NRO includes Mesa NVK/Vulkan and deko3d. Vulkan is the default.
+To use deko3d, put the single word `deko3d` in `sdmc:/switch/whj2/renderer.cfg`
+and restart the game. Use `vulkan` to switch back. The `WHJ2_RENDERER`
+environment variable takes precedence when set. The startup line
+`DEKO3D native display=1280x720` identifies the active deko3d path in the runtime log.
+
+The deko3d backend uses the devkitPro deko3d library and the uam shader compiler.
+The normal Switch build embeds its DKSH in the same NRO. A compute workgroup
+composites each changed 16×16 tile in draw order, including perspective layers,
+masks, particles and transitions. Presentation copies the changed regions to the
+acquired BGRA swapchain image. These commands run on the GPU.
+
 The host build remains available without Vulkan. A Vulkan-enabled host build
 can be built with `WHJ2_HOST_VULKAN=1 sh build-host.sh --runtime-only` and
 selected with `WHJ2_RENDERER=vulkan`; `WHJ2_VULKAN_LIBRARY` specifies the

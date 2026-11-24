@@ -13,7 +13,7 @@ vulkan_source=
 if [ "${WHJ2_HOST_VULKAN:-0}" = 1 ]; then
   mesa=${WHJ2_MESA_SDK:-$PWD/local/mesa-sdk/opt/devkitpro/portlibs/switch}
   common="$common -ffp-contract=off -Wno-missing-field-initializers -DWHJ2_WITH_VULKAN -I$mesa/include"
-  vulkan_source=src/vulkan_raster.cpp
+  vulkan_source="src/gpu_raster.cpp src/vulkan_raster.cpp"
 fi
 runtime_flags=
 mac_object=

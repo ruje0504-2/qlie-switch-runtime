@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+#ifndef RASTER_DIV
+#define RASTER_DIV(n,d) ((n)/(d))
+#endif
 uint loadTexel(uint address){
 #ifdef NATIVE_SCENE
  if(address<frame.colors.z)return texelFetch(packedTexels,int(address)).r;
@@ -10,7 +13,7 @@ uint pack(uvec4 c){return c.x|(c.y<<8)|(c.z<<16)|(c.w<<24);}
 float divide(float a,float b);
 uint maskAlpha(uint sourceAlpha,uint blue,uint amount,uint mode){
  if(amount==255u)return sourceAlpha;
- uint power=1u<<min(mode&15u,7u),span=256u/power;
+ uint power=1u<<min(mode&15u,7u),span=RASTER_DIV(256u,power);
  int threshold=(255-int(amount))*int(span+255u)/255-int(span);
  int value=(mode&128u)!=0u?255-int(blue):int(blue);
  int wrapped=((value-threshold)*int(power))&65535;if(wrapped>=32768)wrapped-=65536;
@@ -59,7 +62,7 @@ uvec4 composite(uint mode,uvec4 s,uvec4 d){
 }
 uvec4 glyphOver(uvec4 s,uvec4 d){
  uint a=s.a+d.a*(255u-s.a)/255u;
- return uvec4((s.rgb*s.a+d.rgb*d.a*(255u-s.a)/255u)/a,a);
+ return uvec4(RASTER_DIV(s.rgb*s.a+d.rgb*d.a*(255u-s.a)/255u,a),a);
 }
 uint ruleAlpha(Draw p,uvec2 q){
  if(p.meta.w==255u)return 255u;

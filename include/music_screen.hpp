@@ -9,6 +9,7 @@ class MusicScreen {
  struct Track {std::string title,path;};std::vector<Track> tracks;
  bool opened=false,loop=false,audible=false,dirty=false;int selected=0,playing=-1,volumeValue=100;std::string caption;
  void highlight();void play(int);void text(const std::string&,unsigned,const std::string&,unsigned,unsigned,unsigned);void refresh();
+ void uiSound(const char*);
 public:
  enum Destination {NoDestination,CG,Replay};
  Destination destination=NoDestination;

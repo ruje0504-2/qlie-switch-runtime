@@ -9,7 +9,7 @@ public:
  void show(const std::vector<std::string>&,KFont*);
  void update(double ms){scene.update(ms);elapsed+=ms;}
  bool ready()const{return elapsed>=250;}
- void select(int);int hit(float,float)const;
+ bool select(int);int hit(float,float)const;
  void draw(qlie::Bytes&pixels)const{scene.draw(pixels);}
  void draw(RenderTarget&target)const{scene.draw(target);}
 };

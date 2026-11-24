@@ -461,7 +461,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  else if(action==whj2::TitleScreen::Back)title->setExtraPage(false);
  else if(action==whj2::TitleScreen::Quit)performUi(whj2::GameMenu::Quit);
  else std::cerr<<"PENDING-TITLE extra modes\n";
- }else if(story.state.awaiting){if(!choiceScreen->ready())return;story.choose(unsigned(focus));
+ }else if(story.state.awaiting){if(!choiceScreen->ready())return;uiSound("Sys_OnClick");story.choose(unsigned(focus));
  next();
  }else {if(sentenceWait.blocksClick())return;
  if(settings.get("ClickVoiceStop"))audio->volume(3,0,250,true);
@@ -642,7 +642,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(!menu&&!hidden&&images->messageVisible()&&std::abs(x-1170)<=14&&std::abs(y-700)<=14){autoPlay.enabled=!autoPlay.enabled;normalSkip=false;uiSound("Sys_OnClick");return;}
  if(!menu&&!hidden&&images->messageVisible()&&std::abs(x-1200)<=14&&std::abs(y-700)<=14){toggleSkip();uiSound("Sys_OnClick");return;}
  if(menu){if(!title->ready()){activate();return;}int target=title->hit(x,y);if(!title->select(target))return;focus=title->selection();
- }else if(story.state.awaiting){int target=choiceScreen->hit(x,y);if(target<0)return;focus=target;choiceScreen->select(focus);
+ }else if(story.state.awaiting){int target=choiceScreen->hit(x,y);if(target<0)return;focus=target;if(choiceScreen->select(focus))uiSound("Sys_OnMouse");
  }activate();
  }
  void controllerAdded(int index){if(!SDL_IsGameController(index))return;
@@ -669,8 +669,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:openPanel(UI::Load);break;
  case SDL_CONTROLLER_BUTTON_X:openPanel(UI::Settings);break;
  case SDL_CONTROLLER_BUTTON_DPAD_UP:if(!menu)openPanel(UI::History);else focus=(focus+2)%3;break;
- case SDL_CONTROLLER_BUTTON_DPAD_DOWN:{int count=menu?3:int(story.state.choices.size());if(count){focus=(focus+1)%count;if(story.state.awaiting)choiceScreen->select(focus);}break;}
- case SDL_CONTROLLER_BUTTON_DPAD_LEFT:case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:if(story.state.awaiting&&!story.state.choices.empty()){int count=int(story.state.choices.size());focus=(focus+count+(button==SDL_CONTROLLER_BUTTON_DPAD_LEFT?-1:1))%count;choiceScreen->select(focus);}break;
+ case SDL_CONTROLLER_BUTTON_DPAD_DOWN:{int count=menu?3:int(story.state.choices.size());if(count){focus=(focus+1)%count;if(story.state.awaiting)if(choiceScreen->select(focus))uiSound("Sys_OnMouse");}break;}
+ case SDL_CONTROLLER_BUTTON_DPAD_LEFT:case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:if(story.state.awaiting&&!story.state.choices.empty()){int count=int(story.state.choices.size());focus=(focus+count+(button==SDL_CONTROLLER_BUTTON_DPAD_LEFT?-1:1))%count;if(choiceScreen->select(focus))uiSound("Sys_OnMouse");}break;
  default:break;
  }}
  int run(unsigned smoke){

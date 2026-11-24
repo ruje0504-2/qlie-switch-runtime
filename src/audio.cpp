@@ -82,7 +82,8 @@ void Audio::stopAll(){SDL_LockAudioDevice(device);
 AudioStats Audio::stats()const{return {frames.load(),nonzero.load()};
  }
 qlie::Bytes Audio::save(){StateWriter w;
- w.str("WHJ2-audio-1");
+ w.str("WHJ2-audio-2");
+ w.n(channels.size());
  SDL_LockAudioDevice(device);
  for(auto&c:channels){w.str(c.path);
  w.n(c.pos);
@@ -105,9 +106,11 @@ qlie::Bytes audioSource(qlie::Assets&assets,const std::string&path){
 }
 }
 void Audio::restore(const qlie::Bytes&bytes,qlie::Assets&assets){StateReader r{bytes};
- if(r.str()!="WHJ2-audio-1")throw std::runtime_error("Audio state version");
- std::array<Channel,8>next;
- for(auto&c:next){c.path=r.str();
+ auto version=r.str();bool legacy=version=="WHJ2-audio-1";
+ if(!legacy&&version!="WHJ2-audio-2")throw std::runtime_error("Audio state version");
+ auto count=legacy?8:r.n();if(count>channels.size())throw std::runtime_error("Audio state channel count");
+ std::array<Channel,24>next;
+ for(size_t index=0;index<count;++index){auto&c=next[index];c.path=r.str();
  c.pos=r.n();
  c.loop=r.n()!=0;
  c.stop=r.n()!=0;
@@ -126,10 +129,11 @@ void Audio::restore(const qlie::Bytes&bytes,qlie::Assets&assets){StateReader r{b
  }if(!c.path.empty())std::cerr<<"AUDIO restore path="<<c.path<<" stereo_cursor="<<c.pos/2<<" gain="<<c.gain<<" fade_remaining="<<c.fade<<"\n";
  if(c.pos>c.pcm.size()||c.pos%2)throw std::runtime_error("Invalid audio cursor");
  }r.end();
+ if(legacy)for(unsigned i=4;i<=6;++i)if(next[i].path.rfind("@abmp:",0)==0){next[i+4]=std::move(next[i]);next[i]=Channel{};}
  SDL_LockAudioDevice(device);
  channels=std::move(next);
  SDL_UnlockAudioDevice(device);
- std::cerr<<"AUDIO restored 8 channels\n";
+ std::cerr<<"AUDIO restored 24 channels\n";
  }
 
 bool Audio::playing(unsigned n){if(n>=channels.size())throw std::runtime_error("Audio channel index");

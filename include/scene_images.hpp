@@ -7,7 +7,7 @@ namespace whj2 {
 struct Composite;
 struct SceneSoundEvent {bool stop=false,loop=false;unsigned channel=0;float gain=1;std::string source;qlie::Bytes bytes;};
 class SceneImages {
- struct Layer {std::map<std::string,std::string> params;std::string prefix,path;std::shared_ptr<Image> pixels;std::shared_ptr<Composite> composite;double milliseconds=0,audioMilliseconds=-1;};
+ struct Layer {std::map<std::string,std::string> params;std::string prefix,path;std::shared_ptr<Image> pixels;std::shared_ptr<Composite> composite;double milliseconds=0,audioMilliseconds=-1;bool audioStopPending=false;};
  uint32_t particleState=particleIdentityInitialState();
  qlie::Assets&assets;std::map<std::string,Layer>layers;std::map<std::string,std::map<std::string,std::string>>templates;std::map<std::string,std::shared_ptr<Image>>cache;
  std::map<std::string,std::shared_ptr<Composite>>composites;

@@ -198,14 +198,20 @@ void SceneImages::clear(){layers.clear();
  }
 std::vector<SceneSoundEvent> SceneImages::takeSoundEvents(){
  std::vector<SceneSoundEvent> result;
- for(auto&entry:layers){auto&layer=entry.second;if(!layer.composite)continue;
+ for(auto&entry:layers){auto&layer=entry.second;
+  int base=layer.params.count("dchannel")?std::stoi(layer.params.at("dchannel")):0;
+  if(base<0||base>=16)throw std::runtime_error("Direct sound channel out of range");
+  int volume=layer.params.count("vol")?int(std::stof(layer.params.at("vol"))*256/100):256;
+  if(layer.audioStopPending){SceneSoundEvent sound;sound.stop=true;sound.channel=8+unsigned(base);result.push_back(sound);layer.audioStopPending=false;}
+  if(!layer.composite)continue;
   auto&object=*layer.composite;const Motion*motion=nullptr;auto i=layer.params.find("motion");
   if(i!=layer.params.end())for(auto&m:object.definition.motions)if(m.name==i->second)motion=&m;
   if(!motion&&!object.definition.motions.empty()&&(i==layer.params.end()||i->second==""||i->second=="def"||i->second=="0"))motion=&object.definition.motions.front();
   if(!motion)continue;
   for(auto event:animationSoundEvents(*motion,layer.audioMilliseconds,layer.milliseconds)){
-   if(event.channel>2)throw std::runtime_error("Embedded sound channel exceeds configured mixer bus");
-   SceneSoundEvent sound; sound.stop=event.stop;sound.loop=event.loop;sound.channel=event.channel+4;sound.gain=event.gain;
+   if(unsigned(base)+event.channel>=16)throw std::runtime_error("Embedded sound channel out of range");
+   SceneSoundEvent sound; sound.stop=event.stop;sound.loop=event.loop;sound.channel=8+unsigned(base)+event.channel;sound.gain=std::clamp(int(event.gain*256)*volume/256,0,256)/256.f;
+   if(!event.stop&&sound.gain==0)continue;
    if(!event.stop){if(event.resource>=object.sounds.size()||object.sounds[event.resource].empty())throw std::runtime_error("Embedded sound resource missing "+layer.path);
     sound.source="@abmp:"+std::to_string(event.resource)+":"+layer.path;sound.bytes=object.sounds[event.resource];
    }result.push_back(std::move(sound));
@@ -233,8 +239,9 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  continue;
  }l.params[key]=v;
  if(key=="file")file=true;
+ if(key=="vol"&&std::stof(v)==0)l.audioStopPending=true;
  if(key=="motion"){l.milliseconds=0;l.audioMilliseconds=-1;}
- if(key!="motion"&&key!="file"&&key!="x"&&key!="y"&&key!="scalex"&&key!="scaley"&&key!="alpha"&&key!="show"&&key!="pri"&&key!="align"&&key!="texfilter"&&key!="rotz"&&key!="mulcolor"&&key!="addcolor")std::cerr<<"PENDING-IMAGE-PROPERTY "<<cmd<<" "<<key<<"="<<v<<"\n";
+ if(key!="vol"&&key!="dchannel"&&key!="motion"&&key!="file"&&key!="x"&&key!="y"&&key!="scalex"&&key!="scaley"&&key!="alpha"&&key!="show"&&key!="pri"&&key!="align"&&key!="texfilter"&&key!="rotz"&&key!="mulcolor"&&key!="addcolor")std::cerr<<"PENDING-IMAGE-PROPERTY "<<cmd<<" "<<key<<"="<<v<<"\n";
  }
  if(file){std::string f=l.params["file"];
  if(f=="none"||f=="none:none"){l.path.clear();
@@ -286,7 +293,7 @@ void SceneImages::draw(qlie::Bytes&out)const{
 }
 
 qlie::Bytes SceneImages::save()const{StateWriter w;
- w.str("WHJ2-images-4");
+ w.str("WHJ2-images-5");
  w.n(particleState);
  w.n(layers.size());
  for(auto&entry:layers){w.str(entry.first);
@@ -295,6 +302,7 @@ qlie::Bytes SceneImages::save()const{StateWriter w;
  w.str(l.path);
  w.n(uint64_t(l.milliseconds*1000));
  w.n(l.audioMilliseconds<0?0:uint64_t(l.audioMilliseconds*1000)+1);
+ w.n(l.audioStopPending);
  w.n(l.params.size());
  for(auto&p:l.params){w.str(p.first);
  w.str(p.second);
@@ -302,7 +310,7 @@ qlie::Bytes SceneImages::save()const{StateWriter w;
  }return w.bytes;
  }
 void SceneImages::restore(const qlie::Bytes&b){StateReader r{b};
- auto version=r.str();bool v4=version=="WHJ2-images-4",v3=v4||version=="WHJ2-images-3";
+ auto version=r.str();bool v5=version=="WHJ2-images-5",v4=v5||version=="WHJ2-images-4",v3=v4||version=="WHJ2-images-3";
  if(!v3&&version!="WHJ2-images-2")throw std::runtime_error("Image state version");
  auto savedParticleState=v3?uint32_t(r.n()):particleState;
  std::map<std::string,Layer>next;
@@ -316,6 +324,7 @@ void SceneImages::restore(const qlie::Bytes&b){StateReader r{b};
  l.path=r.str();
  l.milliseconds=r.n()/1000.;
  if(v4){auto cursor=r.n();l.audioMilliseconds=cursor?(cursor-1)/1000.:-1;}else l.audioMilliseconds=l.milliseconds;
+ if(v5)l.audioStopPending=r.n()!=0;
  auto n=r.n();
  if(n>256)throw std::runtime_error("Image property count");
  while(n--){auto k=r.str();

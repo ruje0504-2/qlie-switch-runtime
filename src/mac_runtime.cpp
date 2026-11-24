@@ -485,7 +485,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  else if(gameMenu.panel==UI::Load){if(std::filesystem::exists(slotPrefix(selectedSlot)+".story")){load(selectedSlot);gameMenu.close();}else status="保存データがありません。";}
  }
  }
- void openPanel(whj2::GameMenu::Panel panel){if(movie->playing()||(replayActive&&(panel==whj2::GameMenu::Save||panel==whj2::GameMenu::Load)))return;if(panel==whj2::GameMenu::Save&&menu)return;slotPreviews.clear();upperMenu->close();normalSkip=false;status.clear();gameMenu.allowSceneReturn=replayActive;gameMenu.open(panel);historyVoicePlayed=false;historyVoiceCacheOffset=-1;gameMenu.historyMaxOffset=int(history.size()>4?history.size()-4:0);}
+ void openPanel(whj2::GameMenu::Panel panel){if(movie->playing()||(replayActive&&(panel==whj2::GameMenu::Save||panel==whj2::GameMenu::Load)))return;if(panel==whj2::GameMenu::Save&&menu)return;slotPreviews.clear();upperMenu->close();normalSkip=false;status.clear();gameMenu.allowSceneReturn=replayActive;gameMenu.open(panel);historyVoicePlayed=false;historyVoiceCacheOffset=-1;gameMenu.historyMaxOffset=int(history.size()>4?history.size()-4:0);gameMenu.historyRows=int(std::min<size_t>(4,history.size()));}
  void upperAction(whj2::UpperMenu::Action action){if(action==whj2::UpperMenu::None)return;upperMenu->close();
  if(action==whj2::UpperMenu::Quit){performUi(whj2::GameMenu::Quit);return;}
  if(action==whj2::UpperMenu::Title){performUi(whj2::GameMenu::Title);return;}
@@ -511,6 +511,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(gameMenu.panel==UI::History){
   gameMenu.historyMaxOffset=int(history.size()>4?history.size()-4:0);
   gameMenu.historyOffset=std::clamp(gameMenu.historyOffset,0,gameMenu.historyMaxOffset);
+  gameMenu.historyRows=int(std::min<size_t>(4,history.size()-size_t(gameMenu.historyOffset)));
+  gameMenu.focus=std::clamp(gameMenu.focus,0,std::max(0,gameMenu.historyRows-1));
   if(historyVoiceCacheOffset!=gameMenu.historyOffset){
    historyVoiceCacheOffset=gameMenu.historyOffset;gameMenu.historyVoices.fill(false);
    for(size_t row=0;row<4&&row+size_t(gameMenu.historyOffset)<history.size();row++){
@@ -892,7 +894,7 @@ controllerKey(e.cbutton.button);
  if(frames==60){if(!gameMenu.asking||done)throw std::runtime_error("Quit bypassed confirmation");snapshot("confirmation.bmp");controller(SDL_CONTROLLER_BUTTON_B);}
  if(frames==62){if(gameMenu.visible())throw std::runtime_error("B did not cancel dialog");controller(SDL_CONTROLLER_BUTTON_DPAD_UP);}
  if(frames==64){if(history.size()<4||gameMenu.panel!=whj2::GameMenu::History)throw std::runtime_error("History lost previous pages");snapshot("history-menu.bmp");controller(SDL_CONTROLLER_BUTTON_DPAD_UP);}
- if(frames==66){if(gameMenu.historyOffset!=1)throw std::runtime_error("History navigation");controller(SDL_CONTROLLER_BUTTON_B);}
+ if(frames==66){if(gameMenu.historyOffset!=0||gameMenu.focus!=1)throw std::runtime_error("History row navigation");controller(SDL_CONTROLLER_BUTTON_B);}
  if(frames==68&&gameMenu.visible())throw std::runtime_error("History cancel");
  if(++frames>=smoke){snapshot("touch.bmp");std::cerr<<"TARGET INPUT PASS L/R panels and slots / X settings / history / B text visibility / A confirm / Y and swipe / ZR hold-release / cancel dialog\n";done=true;}continue;
  }if(frames==1 || (frames>=12 && frames%12==0)){SDL_Event input{};input.type=SDL_CONTROLLERBUTTONDOWN;input.cbutton.button=SDL_CONTROLLER_BUTTON_A;if(SDL_PushEvent(&input)<0)throw std::runtime_error(SDL_GetError());

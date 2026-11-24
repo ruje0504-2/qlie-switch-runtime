@@ -18,7 +18,7 @@ public:
  Action requested=Nothing;
  bool settingsDirty=false,allowSceneReturn=false;
  std::array<bool,4> historyVoices{};
- int historyVoiceRow=-1,historyMaxOffset=0;
+ int historyVoiceRow=-1,historyMaxOffset=0,historyRows=0;
  explicit GameMenu(qlie::Assets&a,whj2::Settings&s):assets(a),settings(s){}
  void open(Panel p){panel=p;focus=p==Settings?3:0;asking=false;historyOffset=0;historyVoiceRow=-1;historyVoices.fill(false);}
  void close(){panel=None;asking=false;draggedSlider=-1;}

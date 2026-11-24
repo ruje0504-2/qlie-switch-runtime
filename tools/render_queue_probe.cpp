@@ -25,6 +25,6 @@ int main(){try{
  rotated.control(push,-10);rotated.image(red,imagePlacement(4,4,1,1,0,0,0,1,1),0,255,0,0xffffff);rotated.draw(out,8,8);
  check(pixel(4,3,0)==255&&pixel(5,3,0)==255,"nonuniform scale after centered rotation");
  out.assign(out.size(),0);RenderQueue alpha;alpha.image(blue,imagePlacement(1,2,1,1,0,0,0,1,1),0,255,0,0xffffff);alpha.image(red,imagePlacement(1,2,1,1,0,0,0,1,1),1,128,0,0xffffff);alpha.draw(out,8,8);
- check(pixel(1,2,0)==128&&pixel(1,2,2)==127&&pixel(1,2,3)==255,"straight-alpha layering");
+ check(pixel(1,2,0)==127&&pixel(1,2,2)==127&&pixel(1,2,3)==191,"native fixed-point alpha layering");
  std::cout<<"PASS cross-scene translation, depth pop, centered scaling/rotation, frame reset and alpha pixels\n";
  return 0;}catch(const std::exception&e){std::cerr<<e.what()<<"\n";return 1;}}

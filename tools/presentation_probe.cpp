@@ -1,5 +1,7 @@
 #include "story.hpp"
 #include "scene_images.hpp"
+#include "animation.hpp"
+#include <fstream>
 #include <iostream>
 int main(int argc,char**argv){try{if(argc<2)return 2;qlie::Assets a(argv[1]);
 if(argc==3&&std::string(argv[2])=="--effect-render"){
@@ -26,5 +28,30 @@ if(argc==3&&std::string(argv[2])=="--rectangle-render"){
  std::cout<<"Original volley rectangle white_pixels="<<white<<" total="<<1280*720<<"\n";
  if(white!=1280*720)throw std::runtime_error("Volley full-frame white rectangle mismatch");
  std::cout<<"PASS original rectangle rendering\n";return 0;
+}
+if(argc==4&&std::string(argv[2])=="--flash-render"){
+ std::ifstream input(argv[3],std::ios::binary);qlie::Bytes lut((std::istreambuf_iterator<char>(input)),{});
+ if(lut.size()!=131072)throw std::runtime_error("Original MMX reference table size");
+ whj2::SceneImages im(a);im.command("^bg01,file:cut/c_青空1");
+ qlie::Bytes base(1280*720*4),frame(base.size());im.draw(base);
+ im.command("^effect,file:effect/effect01,motion:フラッシュ,x:0,y:0,pri:-10");
+ unsigned alpha=256;uint32_t tint=0;
+ for(auto&part:whj2::abmp(a.read("image/effect/effect01.b")))if(part.type.rfind("abdata",0)==0){
+  auto definition=whj2::animation(part.type,part.data);
+  for(auto&motion:definition.motions)if(motion.name=="フラッシュ")for(auto&layer:motion.layers)if(layer.flags){
+   auto k=whj2::sampleAnimation(layer,50,whj2::AnimationContext{1280,720,1280,720});
+   if(k.kind==1){alpha=unsigned(k.alpha);tint=k.mulColor;}
+  }
+ }
+ if(alpha!=255)throw std::runtime_error("Flash reference table requires opaque source alpha");
+ im.update(50);im.draw(frame);
+ size_t mismatch=0;
+ for(size_t i=0;i<base.size();i+=4){
+  for(unsigned c=0;c<3;c++)if(frame[i+c]!=lut[((((tint>>(8*c))&255)*256)+base[i+c])*2])mismatch++;
+  if(frame[i+3]!=lut[(((alpha)*256)+255)*2+1])mismatch++;
+ }
+ std::cout<<"Original flash alpha="<<alpha<<" compared_channels="<<base.size()<<" mismatches="<<mismatch<<"\n";
+ if(mismatch)throw std::runtime_error("Flash pixels differ from original MMX");
+ std::cout<<"PASS original flash whole-frame blend\n";return 0;
 }
 whj2::Story s(a);whj2::SceneImages images(a);s.start();std::string bits=argc>2?argv[2]:"000100";unsigned decisions=0,commands=0;for(unsigned n=0;n<2000000;n++){auto e=s.next();try{if(e.type=="choice")s.choose(decisions<bits.size()?unsigned(bits[decisions++]-48):0);else if(e.type=="create"||e.type=="free")images.clear();else if(e.type=="command"&&images.command(e.value))commands++;else if(e.type=="finish"||e.type=="finished"){std::cout<<"PASS static image bindings commands="<<commands<<" (animation/property warnings remain unimplemented)\n";return 0;}}catch(const std::exception&x){throw std::runtime_error(e.file+":"+std::to_string(e.line)+" "+e.value+": "+x.what());}}throw std::runtime_error("No ending");}catch(const std::exception&e){std::cerr<<"FAIL "<<e.what()<<"\n";return 1;}}

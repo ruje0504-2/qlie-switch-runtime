@@ -83,7 +83,7 @@ struct Composite {
  }
  void warn(const std::string&s)const{if(warnings.insert(s).second)std::cerr<<"PENDING-ANIMATION "<<path<<" "<<s<<"\n";
  }
- void enqueue(RenderQueue&queue,double ms,const std::string&motionName,const Affine2D&parent,float depth,float opacity,uint32_t parentAdd,uint32_t parentMul)const{
+ void enqueue(RenderQueue&queue,double ms,const std::string&motionName,const Affine2D&parent,float depth,float opacity,uint32_t parentAdd,uint32_t parentMul,unsigned parentBlend=0)const{
   if(definition.bounds[0]<=0||definition.bounds[1]<=0||definition.bounds[0]>4096||definition.bounds[1]>4096)throw std::runtime_error("Composite bounds "+path);
   const Motion*motion=nullptr;
  for(auto&m:definition.motions)if(m.name==motionName)motion=&m;
@@ -92,17 +92,18 @@ struct Composite {
   auto samples=sampleMotion(*motion,ms,1280,720,false,AnimationContext{unsigned(definition.bounds[0]),unsigned(definition.bounds[1]),1280,720});
   for(size_t index=0;index<samples.size();index++){
  auto&k=samples[index];
+ if(parentBlend)k.flags=parentBlend;
  for(auto&w:k.unsupported)warn(w);
  if(!motion->layers[index].flags||!k.kind)continue;
  k.alpha=int(k.alpha)*int(opacity)/255;k.addColor=colorAdd(k.addColor,parentAdd);k.mulColor=colorMultiply(k.mulColor,parentMul);
  if(k.kind==15||k.kind==16){queue.control(k,depth+k.priority);continue;}
  if(k.kind==1){
-  if(k.flags){warn("rectangle-blend="+std::to_string(k.flags));continue;}
+  if((k.flags&0x7f)>8){warn("rectangle-blend="+std::to_string(k.flags));continue;}
   if(std::abs(k.scaleX)>=32700||std::abs(k.scaleY)>=32700){warn("rectangle-symbolic-size");continue;}
   // PE eaff0/ea798: rectangle dimensions are pixels, not image scale percentages.
   static const Image white{1,1,{255,255,255,255}};
   auto shape=imagePlacement(k.x,k.y,k.scaleX,k.scaleY,k.rotationZ,k.anchorX/100,k.anchorY/100,1,1);
-  queue.image(white,affine(parent,shape),depth+k.priority,k.alpha,k.addColor,k.mulColor);
+  queue.image(white,affine(parent,shape),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
   continue;
  }
  if(k.kind!=4)continue;
@@ -111,7 +112,7 @@ struct Composite {
  const Image*source=e.image.get();
    if(e.nested){warn("nested-motion origin alignment unverified");
  auto local=imagePlacement(k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,unsigned(e.nested->definition.bounds[0]),unsigned(e.nested->definition.bounds[1]));
- e.nested->enqueue(queue,ms,"",affine(parent,local),depth+k.priority,k.alpha,k.addColor,k.mulColor);
+ e.nested->enqueue(queue,ms,"",affine(parent,local),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
  continue;
  }
    else if(!e.video.empty()){
@@ -122,7 +123,7 @@ struct Composite {
     warn("video-member origin alignment unverified");
  source=&clip->at(ms);
    }
-   if(source)queue.image(*source,affine(parent,imagePlacement(k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,source->width,source->height)),depth+k.priority,k.alpha,k.addColor,k.mulColor);
+   if(source)queue.image(*source,affine(parent,imagePlacement(k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,source->width,source->height)),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
   }
  }
 };
@@ -153,7 +154,7 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  bool chara=cmd.rfind("chara",0)==0;
  if(!chara&&cmd.rfind("bg",0)!=0&&cmd!="effect"&&cmd!="env")return false;
  auto&l=layers[cmd];
- if(l.params.empty())l.params={{"x","640"},{"y",chara?"720":"360"},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri",chara?"500":"0"},{"show","true"},{"align",chara?"center:bottom":"center:center"}};
+ if(l.params.empty())l.params={{"x","640"},{"y",chara?"720":"360"},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri",chara?"500":"0"},{"show","true"},{"align",chara?"center:bottom":cmd=="effect"?"left:top":"center:center"}};
  auto args=split(expand(p==line.npos?"":line.substr(p+1),chara?"chara":"image"),44);
  bool file=false;
  for(auto&s:args){if(s.empty())continue;

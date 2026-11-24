@@ -31,7 +31,7 @@ Joy-Con：A推进/确认，B或＋/－返回菜单，上下方向/摇杆选择�
 
 已实现资源解密、日文文字、原始剧情控制流和四个结局路径、段落提交、静态背景与角色、音乐/音效、静态画面及音轨位置存读档。空存档读档会提示并留在菜单。
 
-独立Theora影片按音频采样时钟播放，Mac完整片尾自然结束已有证据。复合动画目前支持基本图像轨道、部分缓动与嵌套/影片成员；粒子、模型、部分控制/效果、嵌套时间对齐与内嵌音轨尚未完成。对白语音ID映射未闭合。未实现路径显式写入PENDING日志，不作为完整演出通过。
+独立Theora影片按音频采样时钟播放，Mac完整片尾自然结束已有证据。复合动画已接入跨场景图元排序、两套变换栈、周期运动轨道、上下文尺寸、矩形与位图混合（透明、屏幕、乘法、差值、最大/最小、加减）。混合使用原版定点运算规则；普通矩形、震动和闪光有原资源像素验证。粒子、模型、部分运动函数与属性、嵌套时间对齐和内嵌音轨尚未完成。对白语音ID映射未闭合。未实现路径显式写入PENDING日志，不作为完整演出通过。
 
 保存格式仍为开发格式；完整动画存档和实机可玩性均未验收。
 
@@ -40,6 +40,10 @@ Joy-Con：A推进/确认，B或＋/－返回菜单，上下方向/摇杆选择�
 ```sh
 build/story-probe /absolute/path/to/game 000100
 build/presentation-probe /absolute/path/to/game 000100
+build/presentation-probe /absolute/path/to/game --effect-render
+build/presentation-probe /absolute/path/to/game --rectangle-render
+build/render-queue-probe
+build/animation-stack-probe
 build/whj2-runtime /absolute/path/to/game /absolute/path/to/empty-test-saves --touch-smoke 120
 build/whj2-runtime /absolute/path/to/game /absolute/path/to/test-saves --movie movie/ed
 ```

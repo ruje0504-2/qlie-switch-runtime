@@ -9,7 +9,9 @@
 namespace whj2 {
 // Installed titles read their bundled data from RomFS. Homebrew keeps its SD paths.
 class SwitchStorage {
+ #ifdef __SWITCH__
  bool romfs=false,save=false;
+ #endif
 public:
  SwitchStorage()=default;
  SwitchStorage(const SwitchStorage&)=delete;

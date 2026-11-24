@@ -108,7 +108,42 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms){
  };
  out.addColor=color(0x24);
  out.mulColor=color(0x28);
- for(unsigned n=0;n<4;n++)if(a.at(0x51+12*n)&&a.at(0x52+12*n))out.unsupported.push_back("procedural-track="+std::to_string(n));
+ // PE f1468 interpolates four signed parameters before invoking the
+ // waveform and property tables. Time is relative to this key (f15ed).
+ for(unsigned n=0;n<4;n++){
+  size_t q=0x51+12*n;unsigned op=a.at(q),target=a.at(q+1);
+  if(!op||!target)continue;
+  float p[4];
+  for(unsigned j=0;j<4;j++)p[j]=val(q+4+j*2,a.at(q+2),a.at(q+3)/100.f);
+  float value=0;bool known=true;
+  auto trig=[](float radians,bool cosine){
+   // a18c4 quantizes the phase to the engine's 1024-entry sine table.
+   int phase=int(radians*512.f/3.14159265f)+(cosine?256:0);
+   return float(std::sin((phase&1023)*2.0*3.14159265358979323846/1024));
+  };
+  if(op==2||op==3)value=trig(p[0]*3.14159265f/180,op==3)*p[1];
+  else if(op==4)value=p[0];
+  else if(op>=7&&op<=10){
+   int period=int(std::round(p[2]));
+   if(period==0){out.unsupported.push_back("procedural-period=0");continue;}
+   int elapsed=int(ms-keyU32(a,0));int remainder=period>1?elapsed%period:1;
+   float phase=float(remainder)/period;
+   if(op==7||op==8)value=(p[0]+p[1])*.5f+(p[1]-p[0])*.5f*trig(phase*2*3.14159265f,op==8);
+   else if(op==9){phase*=2;if(phase>1)phase=2-phase;value=p[0]+(p[1]-p[0])*phase;}
+   else value=phase<.5f?p[0]:p[1];
+  }else known=false;
+  if(!known){out.unsupported.push_back("procedural-function="+std::to_string(op));continue;}
+  switch(target){
+   case 1:out.resource=unsigned(std::clamp(int(out.resource)+int(std::round(value)),0,255));break;
+   case 13:out.x+=value;break;case 14:out.y+=value;break;
+   case 15:out.scaleX+=value;break;case 16:out.scaleY+=value;break;
+   case 17:out.rotationZ+=value;break;
+   case 21:out.priority+=value;break;
+   case 24:out.alpha=std::clamp(out.alpha+std::round(value),0.f,255.f);break;
+   case 28:out.scaleX*=value/100;break;case 29:out.scaleY*=value/100;break;
+   default:out.unsupported.push_back("procedural-target="+std::to_string(target));break;
+  }
+ }
  if(keyI16(a,0x48)||keyI16(a,0x4a))out.unsupported.push_back("3d-rotation");
  if(out.kind!=0&&out.kind!=4&&out.kind!=15&&out.kind!=16)out.unsupported.push_back("primitive="+std::to_string(out.kind));
  if(layer.mode>2)out.unsupported.push_back("layer-mode="+std::to_string(layer.mode));

@@ -45,5 +45,17 @@ int main(){try{
  check(near(s[1].screen.a,0)&&near(s[1].screen.b,1)&&near(s[1].screen.c,-1),"render rotation orientation");
  check(near(s[1].screen.x,10)&&near(s[1].screen.y,90),"render rotation screen center");
  m.layers[0].flags=0;s=sampleMotion(m,0);check(s[1].screen.a==1&&s[1].screen.x==0,"disabled render-control layer");
+ auto wave=layer(0,0,100,16);
+ auto set16=[&](size_t o,int value){wave.keys[0][o]=value&255;wave.keys[0][o+1]=(value>>8)&255;};
+ wave.keys[0][0]=232;wave.keys[0][1]=3; // key starts at1000ms
+ wave.keys[0][0x51]=7;wave.keys[0][0x52]=13;
+ set16(0x55,-4);set16(0x57,4);set16(0x59,80);
+ check(near(sampleAnimation(wave,1020).x,4),"sine uses key-local phase");
+ check(near(sampleAnimation(wave,1060).x,-4),"sine negative quarter");
+ wave.keys[0][0x51]=8;check(near(sampleAnimation(wave,1000).x,4),"cosine phase");
+ wave.keys[0][0x51]=9;check(near(sampleAnimation(wave,1040).x,4),"triangle peak");
+ wave.keys[0][0x51]=10;check(near(sampleAnimation(wave,1039).x,-4)&&near(sampleAnimation(wave,1040).x,4),"square edge");
+ wave.keys[0][0x51]=4;check(near(sampleAnimation(wave,1020).x,-4),"constant track");
+ wave.keys[0][0x51]=1;check(!sampleAnimation(wave,1020).unsupported.empty(),"unimplemented random stays visible");
  std::cout<<"PASS nested push/apply/pop, inactive keys, empty pop, tint, alpha, primitive3\n";
  return 0;}catch(const std::exception&e){std::cerr<<e.what()<<"\n";return 1;}}

@@ -13,7 +13,7 @@ struct AnimationSample {
  ParticleParameters particles;
  struct Mask {float sourceX=0,sourceY=0,width=0,height=0,x=0,y=0,maskWidth=0,maskHeight=0,alignX=0,alignY=0;uint8_t amount=0,mode=0;} mask;
  int32_t childTime=0;unsigned childMotion=0;bool childTimeResolved=true;
- float z=0,scaleZ=100,rotationX=0,rotationY=0;
+ float z=0,scaleZ=100,rotationX=0,rotationY=0;unsigned rotationOrder=0;
  unsigned kind=0,flags=0,resource=0;float x=0,y=0,scaleX=100,scaleY=100,rotationZ=0,priority=0,anchorX=50,anchorY=50,alpha=255;
  uint32_t addColor=0,mulColor=0xffffff;std::vector<std::string> unsupported;
 };

@@ -137,6 +137,8 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
  out.scaleY=val(0x1e,a.at(0x30),a.at(0x31)/100.f);
  out.priority=val(0x20,a.at(0x30),a.at(0x31)/100.f);
  out.rotationZ=val(0x22,a.at(0x30),a.at(0x31)/100.f);
+ // PE f1ce9/f1cf1: packed 0x93 becomes runtime rotation order +0xa9.
+ if(a.size()>0x93)out.rotationOrder=a[0x93];
  out.rotationX=val(0x48,a.at(0x30),a.at(0x31)/100.f);
  out.rotationY=val(0x4a,a.at(0x30),a.at(0x31)/100.f);
  if(a.size()>=0x98&&b.size()>=0x98)out.scaleZ=val(0x96,a.at(0x30),a.at(0x31)/100.f);
@@ -151,7 +153,7 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
   out.mask.amount=uint8_t(std::clamp(int(std::round(val(0x37,a.at(0x33),a.at(0x3b)/100.f))),0,255));out.mask.mode=a.at(0x3a);
   out.childMotion=a.at(7);
  }
- if(out.kind==4||out.kind==20||out.kind==21){
+ if(out.kind==0||out.kind==4||out.kind==20||out.kind==21){
   auto timeValue=[&](const qlie::Bytes&key,size_t offset){
    auto value=int32_t(keyU32(key,offset));
    if(value>=32700&&value<32716&&(context.externalMask&(1u<<(value-32700))))return context.external[size_t(value-32700)];
@@ -164,7 +166,8 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
   out.childMotion=a.at(7);
  }
  if((out.kind==20||out.kind==21)&&a.size()<152)out.unsupported.push_back("particle-layout="+std::to_string(layer.version));
- if((out.kind==20||out.kind==21)&&a.size()>=152){
+ // Generic group records carry these fields too (PE f6de0..f6e18).
+ if(a.size()>=152){
   auto particleValue=[&](size_t offset){return val(offset,a.at(0x2d),a.at(0x2e)/100.f);};
   out.particles.count=particleValue(8);out.particles.edge=particleValue(0xa);
   out.particles.divisions=particleValue(0xc);out.particles.scaleOffset=particleValue(0x46);
@@ -241,9 +244,15 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
 std::vector<AnimationSample> sampleMotion(const Motion&motion,double ms,unsigned width,unsigned height,bool applyRenderState,const AnimationContext&context){
  std::vector<AnimationSample> result,stack;
  auto compose=[](AnimationSample value,const AnimationSample&parent){
-  value.x+=parent.x;value.y+=parent.y;
-  if(value.kind!=3){value.scaleX*=parent.scaleX/100;value.scaleY*=parent.scaleY/100;}
-  value.rotationZ+=parent.rotationZ;value.priority+=parent.priority;
+  value.x+=parent.x;value.y+=parent.y;value.z+=parent.z;
+  if(value.kind!=3){value.scaleX*=parent.scaleX/100;value.scaleY*=parent.scaleY/100;value.scaleZ*=parent.scaleZ/100;}
+  value.rotationX+=parent.rotationX;value.rotationY+=parent.rotationY;value.rotationZ+=parent.rotationZ;value.priority+=parent.priority;
+  value.childTime+=parent.childTime;
+  value.particles.count+=parent.particles.count;value.particles.edge+=parent.particles.edge;
+  value.particles.divisions+=parent.particles.divisions;value.particles.scaleOffset+=parent.particles.scaleOffset;
+  for(unsigned axis=0;axis<3;axis++)value.particles.phase[axis]+=parent.particles.phase[axis];
+  value.particles.timeBegin+=parent.particles.timeBegin;value.particles.timeEnd+=parent.particles.timeEnd;
+  value.particles.extent={value.scaleX,value.scaleY,value.scaleZ};
   value.alpha=float(int(value.alpha)*int(parent.alpha)/255);
   uint32_t add=0,mul=0;
   for(unsigned n=0;n<3;n++){
@@ -264,6 +273,7 @@ std::vector<AnimationSample> sampleMotion(const Motion&motion,double ms,unsigned
      parent=compose(value,stack.back());
      parent.scaleX=value.scaleX*stack.back().scaleX/100;
      parent.scaleY=value.scaleY*stack.back().scaleY/100;
+     parent.scaleZ=value.scaleZ*stack.back().scaleZ/100;
     }
     stack.push_back(parent);
    }

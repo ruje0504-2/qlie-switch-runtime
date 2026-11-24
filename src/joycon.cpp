@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "joycon.hpp"
+#include <cstdlib>
 #ifdef __SWITCH__
 namespace whj2 {
 JoyCon::JoyCon(){padConfigureInput(1,HidNpadStyleTag_NpadHandheld|HidNpadStyleTag_NpadJoyDual|HidNpadStyleTag_NpadJoyLeft|HidNpadStyleTag_NpadJoyRight);
@@ -8,7 +9,7 @@ JoyCon::JoyCon(){padConfigureInput(1,HidNpadStyleTag_NpadHandheld|HidNpadStyleTa
 JoyConInput JoyCon::poll(uint64_t ms){
  padUpdate(&pad);
  uint64_t down=padGetButtonsDown(&pad),held=padGetButtons(&pad);
- JoyConInput out;
+ JoyConInput out;auto stick=padGetStickPos(&pad,0);out.viewAxis=std::abs(stick.x)>6000?stick.x/32767.f:0;
  out.confirm=down&(HidNpadButton_A|HidNpadButton_AnySL);
  out.back=down&(HidNpadButton_B|HidNpadButton_AnySR);
  out.save=down&HidNpadButton_L;

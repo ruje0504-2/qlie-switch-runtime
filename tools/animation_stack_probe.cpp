@@ -51,7 +51,7 @@ int main(){try{
  auto z=layer(0,0,100);z.keys[0][0x22]=90;z.keys[0][0x4a]=12;
  auto single=sampleAnimation(z,0);check(single.rotationZ==90,"Z comes from0x22, not Y0x4a");
  check(!single.unsupported.empty(),"3D rotation stays explicit");
- m.layers={layer(0,10,200,16),layer(0,0,100),layer(0,3,50,16),layer(0,0,100),layer(0,0,100,15),layer(0,0,100),layer(0,0,100,15),layer(0,0,100)};
+ m.layers={layer(0,10,200,16),layer(0,0,100),layer(0,3,50,16),layer(0,0,100),layer(0,0,100,17),layer(0,0,100),layer(0,0,100,17),layer(0,0,100)};
  s=sampleMotion(m,0,100,80);
  check(near(s[1].screen.a,2)&&near(s[1].screen.x,-30),"render translate then center-scale");
  check(near(s[3].screen.a,1)&&near(s[3].screen.x,13),"render nested composition");

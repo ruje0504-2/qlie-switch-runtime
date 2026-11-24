@@ -36,8 +36,12 @@ Matrix3D placement3D(const AnimationSample&k,unsigned width,unsigned height){
  scale.m[0][0]=k.scaleX/100;scale.m[1][1]=k.scaleY/100;scale.m[2][2]=k.scaleZ/100;
  anchor.m[0][3]=-float(width)*k.anchorX/100;anchor.m[1][3]=-float(height)*k.anchorY/100;
  position.m[0][3]=k.x;position.m[1][3]=k.y;position.m[2][3]=-k.z;
- // PE ea798 applies anchor, rotation, record scale, then position.
- return combine(position,combine(scale,combine(z,combine(y,combine(x,anchor)))));
+ // PE ea798/a14ec uses row vectors: anchor, scale, axis rotations, position.
+ static constexpr unsigned orders[6][3]={{0,1,2},{0,2,1},{1,0,2},{1,2,0},{2,0,1},{2,1,0}};
+ if(k.rotationOrder>=6)throw std::runtime_error("Invalid rotation order");
+ Matrix3D axes[3]={x,y,z},rotation;
+ for(unsigned axis:orders[k.rotationOrder])rotation=combine(axes[axis],rotation);
+ return combine(position,combine(rotation,combine(scale,anchor)));
 }
 void quad(RenderQueue&queue,const Image&texture,const Matrix3D&matrix,const AnimationSample&k,float priority){
  std::array<TextureVertex,4> v;for(unsigned i=0;i<4;i++){float x=i==1||i==2?texture.width:0,y=i>=2?texture.height:0;auto p=matrix.point({x,y,0});v[i]={p.x,p.y,1000-p.z,x,y};}

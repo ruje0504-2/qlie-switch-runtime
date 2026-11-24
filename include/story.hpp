@@ -15,11 +15,12 @@ struct StoryState {
 };
 class Story {
  struct Op {std::string text;unsigned line;int end=-1,otherwise=-1;};
- struct Script {std::vector<Op> ops;std::map<std::string,size_t> labels;};
+ struct Script {std::vector<Op> ops;std::map<std::string,size_t> labels;std::map<size_t,std::vector<std::string>> labelsAt;};
  qlie::Assets&assets;std::map<std::string,Script> scripts;
  Script&script(const std::string&);
  std::string value(std::string)const;
  bool condition(const std::string&)const;
+ void resetState();
  void jump(std::string,std::string);
  void native(const Op&);
  void caret(const Op&);
@@ -27,7 +28,7 @@ class Story {
 public:
  StoryState state;uint64_t operations=0;std::set<std::string> visited;
  explicit Story(qlie::Assets&a):assets(a){}
- void start();
+ void start();void startReplay(const std::string&script);
  Event next();
  void choose(unsigned);
  qlie::Bytes save()const;

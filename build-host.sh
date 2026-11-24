@@ -8,7 +8,7 @@ mkdir -p build
 common="-O2 -Wall -Wextra -Werror -Iinclude -Isrc"
 $cxx -std=c++17 $common src/qlie.cpp tools/probe.cpp -o build/qlie-probe
 $cxx -std=c++17 $common src/qlie.cpp src/story.cpp tools/story_probe.cpp -o build/story-probe
-$cxx -std=c++17 $common src/qlie.cpp src/story.cpp src/progress.cpp tools/progress_probe.cpp -o build/progress-probe
+$cxx -std=c++17 $common src/qlie.cpp src/story.cpp src/progress.cpp src/replay_catalog.cpp tools/progress_probe.cpp -o build/progress-probe
 $cc -std=c11 $common $($pc --cflags freetype2) -c src/font.c -o build/font.o
 $cc -std=c11 $common $($pc --cflags libavformat libavcodec libswscale libswresample libavutil) -c src/video.c -o build/video.o
 $cxx -std=c++17 $common $($pc --cflags libpng libjpeg) src/qlie.cpp src/image.cpp src/model.cpp tools/media_probe.cpp build/video.o $($pc --libs libavformat libavcodec libswscale libswresample libavutil libpng libjpeg) -o build/media-probe
@@ -49,3 +49,6 @@ $cxx -std=c++17 $common src/fps_overlay.cpp tools/fps_overlay_probe.cpp -o build
 $cxx -std=c++17 $common $($pc --cflags freetype2 libpng libjpeg) src/qlie.cpp src/story.cpp src/image.cpp src/animation.cpp src/particles.cpp src/scene_images.cpp src/model.cpp src/message_text.cpp src/gradient_mask.cpp src/render_queue.cpp src/title_screen.cpp src/choice_screen.cpp tools/ui_probe.cpp build/font.o build/video.o $($pc --libs freetype2 libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -o build/ui-probe
 
 $cxx -std=c++17 $common $($pc --cflags sdl2 libpng libjpeg) src/qlie.cpp src/image.cpp src/audio.cpp tools/audio_transport_probe.cpp build/video.o $($pc --libs sdl2 libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -o build/audio-transport-probe
+
+$cxx -std=c++17 $common src/qlie.cpp src/story.cpp src/progress.cpp src/replay_catalog.cpp tools/replay_probe.cpp -o build/replay-probe
+$cxx -std=c++17 $common $($pc --cflags libpng libjpeg) src/qlie.cpp src/image.cpp src/animation.cpp src/particles.cpp tools/title_phase_probe.cpp $($pc --libs libpng libjpeg) -o build/title-phase-probe

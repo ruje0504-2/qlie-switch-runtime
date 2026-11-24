@@ -33,7 +33,7 @@ MessageText::MessageText(qlie::Assets&assets,bool useStoryLineBreaking):storyLin
 }
 std::string messageDisplayName(const std::string&raw){if(raw.empty())return {};auto name=raw;if(name.rfind("【",0)==0){name.erase(0,3);auto end=name.find("】");if(end!=name.npos)name.resize(end);}auto alias=name.find("＠");if(alias!=name.npos)name=name.substr(alias+3);return "【"+name+"】";}
 void MessageText::index(){glyphs.clear();double time=0,currentSpeed=speed;
- auto append=[&](const std::string&value,bool center){size_t begin=glyphs.size();for(auto cp:codepoints(value)){time+=std::max(0.,currentSpeed);glyphs.push_back({cp,time,0});}if(center&&glyphs.size()>begin)glyphs[begin].centeredRun=glyphs.size()-begin;};
+ auto append=[&](const std::string&value,bool center){size_t begin=glyphs.size();for(auto cp:codepoints(value)){if(cp!='\n')time+=std::max(0.,currentSpeed);glyphs.push_back({cp,time,0});}if(center&&glyphs.size()>begin)glyphs[begin].centeredRun=glyphs.size()-begin;};
  for(size_t pos=0;pos<text.size();){
   if(text[pos]=='['){auto end=text.find(']',pos+1);if(end!=text.npos){auto token=text.substr(pos+1,end-pos-1);auto comma=token.find(',');auto command=token.substr(0,comma);
    if(command=="spd"){currentSpeed=comma==token.npos?speed:std::stod(token.substr(comma+1));if(currentSpeed<0)currentSpeed=speed;pos=end+1;continue;}
@@ -47,6 +47,7 @@ void MessageText::setSpeed(double value){auto count=visible();speed=std::clamp(v
 void MessageText::start(const std::string&value){text=value;index();elapsed=0;}
 void MessageText::update(double ms){elapsed+=std::max(0.,ms);}
 size_t MessageText::visible()const{return size_t(std::upper_bound(glyphs.begin(),glyphs.end(),elapsed,[](double time,const Glyph&g){return time<g.deadline;})-glyphs.begin());}
+size_t MessageText::timedCharacters(size_t first,size_t last)const{first=std::min(first,glyphs.size());last=std::min(last,glyphs.size());size_t count=0;for(size_t i=first;i<last;++i)count+=glyphs[i].codepoint!='\n';return count;}
 bool MessageText::finished()const{return visible()==glyphs.size();}
 bool MessageText::reveal(){if(finished())return false;elapsed=glyphs.empty()?0:glyphs.back().deadline;return true;}
 Image MessageText::render(KFont*font,const MessageStyle&style)const{if(!style.width||!style.height)throw std::runtime_error("Message surface dimensions");Image out{style.width,style.height,qlie::Bytes(size_t(style.width)*style.height*4)};KImage dst{0,0,out.width,out.height,size_t(out.width)*4,out.pixels.data()};unsigned x=0,y=0;size_t count=visible();bool paragraphStart=true;

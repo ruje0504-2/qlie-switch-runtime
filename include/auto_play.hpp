@@ -7,7 +7,8 @@ class AutoPlay {
 public:
  bool enabled=false;
  void page(double clickWait){remaining=clickWait;counted=0;}
- void tick(double milliseconds,size_t visible,double textWait,double textSpeed);
+ size_t countedGlyphs()const{return counted;}
+ void tick(double milliseconds,size_t visible,double textWait,double textSpeed,size_t timedCharacters=size_t(-1));
  bool ready(bool textFinished,bool voicePlaying,bool waitVoice)const{return enabled&&textFinished&&remaining<=0&&(!waitVoice||!voicePlaying);}
  double pending()const{return remaining;}
  qlie::Bytes save()const;void restore(const qlie::Bytes&);

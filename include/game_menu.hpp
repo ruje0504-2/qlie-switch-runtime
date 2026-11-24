@@ -11,6 +11,7 @@ class GameMenu {
  int volumeTestAt(float,float);
  int qualityAt(float,float);
  int draggedSlider=-1;
+ int promptFocus=0;
  std::array<Image,2> textPreviews;
  void put(RenderQueue&,const std::string&,float,float,bool center=false,unsigned opacity=255);
  void render(qlie::Bytes*,RenderTarget*);
@@ -28,7 +29,8 @@ public:
  void open(Panel p){panel=p;focus=p==Settings?3:0;asking=false;historyOffset=0;historyVoiceRow=-1;historyVoices.fill(false);}
  void close(){panel=None;asking=false;draggedSlider=-1;}
  bool visible()const{return panel!=None||asking;}
- void ask(Action a){requested=a;asking=true;focus=0;draggedSlider=-1;}
+ void ask(Action a){requested=a;promptFocus=focus;asking=true;focus=0;draggedSlider=-1;}
+ void dismissPrompt(){asking=false;focus=promptFocus;}
  int slot()const{return page*8+focus+1;}
  void move(int dx,int dy);
  Action confirm();

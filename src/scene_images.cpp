@@ -155,7 +155,7 @@ struct Composite {
   auto randomSeed=0x35246u^identity^motionIdentities[size_t(motion-&definition.motions[0])];
   randomSeed=((randomSeed&0xffff)*(randomSeed>>16))&1023;
   AnimationContext context{unsigned(definition.bounds[0]),unsigned(definition.bounds[1]),1280,720,randomSeed};
-  if(external){context.external=external->external;context.externalMask=external->externalMask;}
+  if(external){context.external=external->external;context.externalMask=external->externalMask;context.randomCursor=external->randomCursor;}
   auto samples=sampleMotion(*motion,ms,1280,720,false,context);
   for(size_t index=0;index<samples.size();index++){
  auto&k=samples[index];if(filterOverride)k.textureFilter=filterOverride;
@@ -261,12 +261,13 @@ struct Composite {
    if(e.nested){
  if(!k.childTimeResolved){warn("nested-time context unresolved");continue;}
  if(k.childMotion>=e.nested->definition.motions.size())throw std::runtime_error("Nested motion index "+path);
+ AnimationContext nestedContext;nestedContext.randomCursor=context.randomCursor;
  if(parent3D||k.rotationX||k.rotationY||k.z){
   auto matrix=combine(parent3D?*parent3D:from2D(parent),placement3D(k,unsigned(e.nested->definition.bounds[0]),unsigned(e.nested->definition.bounds[1])));
-  e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,k.childTime),e.nested->definition.motions[k.childMotion].name,{},depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,nullptr,nullptr,255,nullptr,nullptr,&matrix,filterOverride);continue;
+  e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,k.childTime),e.nested->definition.motions[k.childMotion].name,{},depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,nullptr,nullptr,255,nullptr,&nestedContext,&matrix,filterOverride);continue;
  }
  auto local=imagePlacement(k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,unsigned(e.nested->definition.bounds[0]),unsigned(e.nested->definition.bounds[1]));
- e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,k.childTime),e.nested->definition.motions[k.childMotion].name,affine(parent,local),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,nullptr,nullptr,255,nullptr,nullptr,nullptr,filterOverride);
+ e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,k.childTime),e.nested->definition.motions[k.childMotion].name,affine(parent,local),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,nullptr,nullptr,255,nullptr,&nestedContext,nullptr,filterOverride);
  continue;
  }
    else if(!e.video.empty()){
@@ -589,7 +590,7 @@ void SceneImages::render(qlie::Bytes&out,unsigned pass,RenderTarget*target)const
  unsigned w=l->composite?unsigned(l->composite->definition.bounds[0]):l->pixels->width,h=l->composite?unsigned(l->composite->definition.bounds[1]):l->pixels->height;
  auto placement=imagePlacement(get(l,"x",640),get(l,"y",360),get(l,"scalex",100)/100,get(l,"scaley",100)/100,get(l,"rotz",0),ax,ay,w,h);
  std::map<unsigned,const Image*> uiSlots;for(auto&slot:l->uiSlots)uiSlots[slot.first]=slot.second.get();if(l->scriptReplacement)uiSlots[0]=l->scriptReplacement.get();
- AnimationContext external;for(unsigned i=0;i<16;i++){auto v=l->params.find("@exv"+std::to_string(i));if(v!=l->params.end()){external.external[i]=numeric(v->second);external.externalMask|=uint16_t(1u<<i);}}
+ AnimationContext external;external.randomCursor=&waveformCursor;for(unsigned i=0;i<16;i++){auto v=l->params.find("@exv"+std::to_string(i));if(v!=l->params.end()){external.external[i]=numeric(v->second);external.externalMask|=uint16_t(1u<<i);}}
  if(l->composite){auto m=l->params.find("motion");l->composite->enqueue(queue,l->milliseconds,m==l->params.end()?"":m->second,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),0,l->params.count("@portrait")?l->pixels.get():nullptr,layers.count("message")&&l==(&layers.at("message"))?l->pixels.get():nullptr,windowAlpha,uiSlots.empty()?nullptr:&uiSlots,&external,nullptr,unsigned(get(l,"texfilter",0)));}
  else queue.image(*l->pixels,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),0,unsigned(get(l,"texfilter",0)));
  if(queue.imageCount()>beforeImages){if(qlie::canonical(l->path).rfind("image/ev/",0)==0)shownFiles.insert(qlie::canonical(l->path));auto replacement=l->params.find("@replacement");if(replacement!=l->params.end()&&qlie::canonical(replacement->second).rfind("image/ev/",0)==0)shownFiles.insert(qlie::canonical(replacement->second));}
@@ -598,8 +599,9 @@ void SceneImages::render(qlie::Bytes&out,unsigned pass,RenderTarget*target)const
 }
 
 qlie::Bytes SceneImages::save()const{StateWriter w;
- w.str("WHJ2-images-6");
+ w.str("WHJ2-images-7");
  w.n(particleState);
+ w.n(waveformCursor);
  w.n(layers.size());
  for(auto&entry:layers){w.str(entry.first);
  auto&l=entry.second;
@@ -616,9 +618,11 @@ qlie::Bytes SceneImages::save()const{StateWriter w;
  }return w.bytes;
  }
 void SceneImages::restore(const qlie::Bytes&b){StateReader r{b};
- auto version=r.str();bool v6=version=="WHJ2-images-6",v5=v6||version=="WHJ2-images-5",v4=v5||version=="WHJ2-images-4",v3=v4||version=="WHJ2-images-3";
+ auto version=r.str();bool v7=version=="WHJ2-images-7",v6=v7||version=="WHJ2-images-6",v5=v6||version=="WHJ2-images-5",v4=v5||version=="WHJ2-images-4",v3=v4||version=="WHJ2-images-3";
  if(!v3&&version!="WHJ2-images-2")throw std::runtime_error("Image state version");
  auto savedParticleState=v3?uint32_t(r.n()):particleState;
+ const auto savedWaveformCursor=v7?r.n():0;
+ if(savedWaveformCursor>1023)throw std::runtime_error("Image waveform cursor");
  std::map<std::string,Layer>next;
  auto count=r.n();
  if(count>256)throw std::runtime_error("Image layer count");
@@ -649,6 +653,7 @@ void SceneImages::restore(const qlie::Bytes&b){StateReader r{b};
  }r.end();
  layers=std::move(next);
  particleState=savedParticleState;
+ waveformCursor=uint32_t(savedWaveformCursor);
  }
 
 }

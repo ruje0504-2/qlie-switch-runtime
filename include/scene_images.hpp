@@ -15,6 +15,7 @@ class SceneImages {
  struct Layer {std::map<unsigned,std::shared_ptr<const Image>> uiSlots;std::map<std::string,Tween> tweens;std::map<std::string,std::string> params;std::string prefix,path;std::shared_ptr<const Image> pixels,scriptReplacement;std::shared_ptr<Composite> composite;double milliseconds=0,audioMilliseconds=-1;bool audioStopPending=false;};
  unsigned windowAlpha=255;
  uint32_t particleState=particleIdentityInitialState();
+ mutable uint32_t waveformCursor=0;
  mutable bool faceWarning=false;
  mutable std::set<std::string> shownFiles;
  std::map<std::string,std::string> faceRepId,faceRepFile;

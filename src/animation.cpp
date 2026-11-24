@@ -213,7 +213,15 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
    int phase=int(radians*512.f/3.14159265f)+(cosine?256:0);
    return sine[phase&1023];
   };
-  if(op==5){
+  if(op==1){
+   if(!context.randomCursor){out.unsupported.push_back("sequential-random-context");continue;}
+   static const auto randomTable=particleRandomTable();
+   auto&cursor=*context.randomCursor;cursor=(cursor+1)&1023;
+   const unsigned number=randomTable[cursor]%0xffffffu;
+   const float scaled=float(static_cast<long double>(number)*float(p[1]-p[0])/16777215.L);
+   value=p[0]+scaled;
+  }
+  else if(op==5){
    // PE f0f90: table index uses the time quotient, not the remainder.
    static const auto randomTable=particleRandomTable();
    int period=int(std::round(p[2]));int elapsed=int(ms-keyU32(a,0));

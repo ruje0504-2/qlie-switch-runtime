@@ -623,6 +623,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  name="";
  return;
  }if(e.type=="command"&&e.value.rfind("^sentence",0)==0){
+  whj2::profile::applySentenceTiming(e);
   std::vector<std::string> rules;
   for(const auto&path:transition->ruleAssets(e.value)){
    transition->warmRule(path,true);

@@ -170,6 +170,9 @@ struct PreparedEmbeddedOpening {
   return size;
  }
 };
+namespace {
+constexpr auto eyecatchPath="image/cut/eyecatch01.b";
+}
 struct Composite {
  struct Element {std::shared_ptr<const Image>image;std::shared_ptr<Model>mesh;std::string name;
  std::shared_ptr<Composite>nested;
@@ -179,6 +182,7 @@ struct Composite {
  bool hasVideo=false;
  uint32_t identity=0;std::vector<uint32_t>motionIdentities;
  std::vector<Element>members;
+ qlie::Bytes eyecatchFallback;
  std::vector<qlie::Bytes>sounds;
  std::string path;
  mutable std::set<std::string>warnings;
@@ -199,6 +203,9 @@ struct Composite {
     else if(kvideo_is_container(m.data.data(),m.data.size())){e.video=std::make_shared<const qlie::Bytes>(std::move(m.data));
  }
     else if(m.data.size()>=12&&std::equal(m.data.begin(),m.data.begin()+12,"ARGBModel1.0"))e.mesh=std::make_shared<Model>(model(m.data));
+    // The story cards supply a portrait for slot zero. Keep the embedded
+    // bitmap compressed until a caller draws the card without a replacement.
+    else if(path==eyecatchPath&&members.empty())eyecatchFallback=std::move(m.data);
     else e.image=sceneBitmap(image(m.data));
    }
    hasVideo=hasVideo||bool(e.video)||(e.nested&&e.nested->hasVideo);
@@ -226,8 +233,13 @@ struct Composite {
   for(auto&id:motionIdentities)id=values.at(id);
   for(auto&e:members)if(e.nested)e.nested->resolveIdentities(values);
  }
+ void loadEyecatchFallback(){
+  if(eyecatchFallback.empty())return;
+  members.front().image=sceneBitmap(image(eyecatchFallback));
+  qlie::Bytes{}.swap(eyecatchFallback);
+ }
  size_t bytesHeld()const{
-  size_t size=0;
+  size_t size=eyecatchFallback.size();
   for(const auto&e:members){if(e.image)size+=e.image->pixels.size();if(e.nested)size+=e.nested->bytesHeld();if(e.video)size+=e.video->size();}
   for(const auto&sound:sounds)size+=sound.size();
   for(const auto&clip:clips)size+=clip.second->frame->pixels.size();
@@ -674,6 +686,9 @@ void SceneImages::transition(Layer&layer,const Layer&before,bool position,bool c
 }
 void SceneImages::update(double ms){for(auto&entry:layers){auto&layer=entry.second;
  double speed=layer.params.count("speed")?numeric(layer.params.at("speed")):100;
+ // The portrait exits at 3750 ms in the card's motion. Match its exit to
+ // the 5000 ms script hold without changing this layer's authored speed.
+ if(layer.path==eyecatchPath)speed*=0.75;
  layer.milliseconds+=ms*std::max(0.,speed)/100;
  for(auto&t:layer.tweens)t.second.elapsed=std::min(t.second.duration,t.second.elapsed+ms);
  if(layer.params.count("@hiding")&&layer.params.at("@hiding")=="true"&&layer.composite){auto*motion=findMotion(layer.composite->definition,"*Disable");if(motion){auto samples=sampleMotion(*motion,layer.milliseconds);if(std::none_of(samples.begin(),samples.end(),[](auto&sample){return sample.kind!=0;})){layer.params["show"]="false";layer.params.erase("@hiding");}}}
@@ -898,6 +913,8 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
  bool spatial=transform.z!=0||transform.rotationX!=0||transform.rotationY!=0||transform.scaleZ!=100;
  Matrix3D matrix;if(spatial)matrix=placement3D(transform,w,h);
  std::map<unsigned,const Image*> uiSlots;for(auto&slot:l->uiSlots)uiSlots[slot.first]=slot.second.get();if(l->scriptReplacement)uiSlots[0]=l->scriptReplacement.get();
+ if(l->path==eyecatchPath&&l->composite&&!uiSlots.count(0))
+  l->composite->loadEyecatchFallback();
  std::string filter=l->params.count("imgfilter")?l->params.at("imgfilter"):"none";
  auto filtered=[&](unsigned slot,const std::shared_ptr<const Image>&source)->const Image*{
   auto&cached=l->filtered[slot];if(filter.empty()||filter=="none"){cached={};return source.get();}

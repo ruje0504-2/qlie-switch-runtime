@@ -11,8 +11,48 @@
 #include <algorithm>
 #include <array>
 namespace whj2 {
+namespace {
+template<unsigned Radius>
+Image boxBlur(const Image&source){
+ constexpr unsigned diameter=2*Radius+1,area=diameter*diameter;
+ const auto width=source.width,height=source.height;
+ Image out{width,height,qlie::Bytes(source.pixels.size())};
+ // The horizontal window includes replicated edge columns. Padding keeps
+ // the per-pixel loop free of bounds checks, including for very narrow images.
+ std::vector<std::array<uint32_t,4>> columns(size_t(width)+diameter);
+ auto*const center=columns.data()+Radius;
+ auto row=[&](int y){
+  return source.pixels.data()+size_t(std::clamp(y,0,int(height)-1))*width*4;
+ };
+ for(int y=-int(Radius);y<=int(Radius);y++){
+  auto*input=row(y);
+  for(unsigned x=0;x<width;x++,input+=4)
+   for(unsigned c=0;c<4;c++)center[x][c]+=input[c];
+ }
+ auto*output=out.pixels.data();
+ for(unsigned y=0;y<height;y++){
+  std::fill_n(columns.data(),Radius,center[0]);
+  std::fill_n(center+width,Radius+1,center[width-1]);
+  std::array<uint32_t,4> sum{};
+  for(unsigned x=0;x<diameter;x++)
+   for(unsigned c=0;c<4;c++)sum[c]+=columns[x][c];
+  for(unsigned x=0;x<width;x++,output+=4)
+   for(unsigned c=0;c<4;c++){
+    output[c]=uint8_t(sum[c]/area);
+    sum[c]=sum[c]+columns[x+diameter][c]-columns[x][c];
+   }
+  auto*leaving=row(int(y)-int(Radius));
+  auto*entering=row(int(y)+int(Radius)+1);
+  for(unsigned x=0;x<width;x++,leaving+=4,entering+=4)
+   for(unsigned c=0;c<4;c++)center[x][c]=center[x][c]+entering[c]-leaving[c];
+ }
+ return out;
+}
+}
 Image filterImage(const Image&source,const std::string&name){
  if(!source.width||!source.height||source.pixels.size()!=size_t(source.width)*source.height*4)throw std::runtime_error("Filter source dimensions");
+ if(name=="blur10")return boxBlur<5>(source);
+ if(name=="blur20")return boxBlur<10>(source);
  Image out{source.width,source.height,source.pixels};
  if(name=="none"||name.empty())return out;
  if(name=="mono"||name=="sepia"){
@@ -22,25 +62,37 @@ Image filterImage(const Image&source,const std::string&name){
   }
   return out;
  }
- int radius=name=="blur10"?5:name=="blur20"?10:0;
- if(!radius)throw std::runtime_error("Unsupported image filter "+name);
- const int width=int(source.width),height=int(source.height);const unsigned area=unsigned((radius*2+1)*(radius*2+1));
- std::vector<std::array<uint32_t,4>> columns(source.width);
- auto addRow=[&](int y,int sign){y=std::clamp(y,0,height-1);for(int x=0;x<width;x++)for(unsigned c=0;c<4;c++){auto value=source.pixels[(size_t(y)*source.width+unsigned(x))*4+c];if(sign>0)columns[x][c]+=value;else columns[x][c]-=value;}};
- for(int y=-radius;y<=radius;y++)addRow(y,1);
- for(int y=0;y<height;y++){
-  std::array<uint32_t,4> sum{};
-  for(int x=-radius;x<=radius;x++)for(unsigned c=0;c<4;c++)sum[c]+=columns[std::clamp(x,0,width-1)][c];
-  for(int x=0;x<width;x++){
-   for(unsigned c=0;c<4;c++)out.pixels[(size_t(y)*source.width+unsigned(x))*4+c]=uint8_t(sum[c]/area);
-   for(unsigned c=0;c<4;c++){sum[c]-=columns[std::clamp(x-radius,0,width-1)][c];sum[c]+=columns[std::clamp(x+radius+1,0,width-1)][c];}
+ throw std::runtime_error("Unsupported image filter "+name);
+}
+struct Cursor {const qlie::Bytes&b;size_t p=0;uint32_t n(unsigned size){if(size>4||p+size>b.size())throw std::runtime_error("Truncated image structure");uint32_t v=0;for(unsigned i=0;i<size;i++)v|=uint32_t(b[p++])<<(8*i);return v;}qlie::Bytes data(size_t len){if(len>b.size()-p)throw std::runtime_error("Truncated image payload");qlie::Bytes v(b.begin()+p,b.begin()+p+len);p+=len;return v;}void skip(size_t n0){if(n0>b.size()-p)throw std::runtime_error("Truncated image field");p+=n0;}std::string tag(){auto v=data(16);auto p0=std::find(v.begin(),v.end(),0);return std::string(v.begin(),p0);}};
+std::vector<Member> abmp(const qlie::Bytes&b){
+ if(b.size()<16||std::memcmp(b.data(),"abmp1",5))throw std::runtime_error("Unsupported ABMP version");
+ Cursor r{b,16};std::vector<Member>out;
+ auto add=[&](std::string type,std::string name){
+  const auto size=r.n(4);const auto offset=r.p;
+  auto data=r.data(size);
+  if(data.size()>=4&&!std::memcmp(data.data(),"1PC\xff",4))data=qlie::decompress(data);
+  out.push_back({std::move(type),std::move(name),std::move(data),offset,size});
+ };
+ while(r.p<b.size()){
+  auto section=r.tag();
+  if(section.rfind("abdata",0)==0){add(std::move(section),{});continue;}
+  if(section!="abimage10"&&section!="absound10")throw std::runtime_error("Unsupported ABMP section "+section);
+  unsigned count=r.n(1);
+  for(unsigned i=0;i<count;i++){
+   auto type=r.tag();auto name=qlie::cp932(r.data(r.n(2)));
+   if(type!="abimgdat10"&&type!="absnddat10"){
+    r.skip(r.n(2));
+    if(type=="abimgdat13")r.skip(12);
+    else if(type=="abimgdat14")r.skip(76);
+    else if(type!="abimgdat11"&&type!="abimgdat12"&&type!="absnddat11")throw std::runtime_error("Unsupported ABMP member "+type);
+   }
+   r.n(1);
+   add(std::move(type),std::move(name));
   }
-  addRow(y-radius,-1);addRow(y+radius+1,1);
  }
  return out;
 }
-struct Cursor {const qlie::Bytes&b;size_t p=0;uint32_t n(unsigned size){if(size>4||p+size>b.size())throw std::runtime_error("Truncated image structure");uint32_t v=0;for(unsigned i=0;i<size;i++)v|=uint32_t(b[p++])<<(8*i);return v;}qlie::Bytes data(size_t len){if(len>b.size()-p)throw std::runtime_error("Truncated image payload");qlie::Bytes v(b.begin()+p,b.begin()+p+len);p+=len;return v;}void skip(size_t n0){if(n0>b.size()-p)throw std::runtime_error("Truncated image field");p+=n0;}std::string tag(){auto v=data(16);auto p0=std::find(v.begin(),v.end(),0);return std::string(v.begin(),p0);}};
-std::vector<Member> abmp(const qlie::Bytes&b){if(b.size()<16||std::memcmp(b.data(),"abmp1",5))throw std::runtime_error("Unsupported ABMP version");Cursor r{b,16};std::vector<Member>out;while(r.p<b.size()){std::string t=r.tag();if(t.rfind("abdata",0)==0){auto d=r.data(r.n(4));if(d.size()>=4&&!std::memcmp(d.data(),"1PC\xff",4))d=qlie::decompress(d);out.push_back({t,"",std::move(d)});continue;}if(t!="abimage10"&&t!="absound10")throw std::runtime_error("Unsupported ABMP section "+t);unsigned count=r.n(1);for(unsigned i=0;i<count;i++){auto type=r.tag();std::string name=qlie::cp932(r.data(r.n(2)));if(type!="abimgdat10"&&type!="absnddat10"){r.skip(r.n(2));if(type=="abimgdat13")r.skip(12);else if(type=="abimgdat14")r.skip(76);else if(type!="abimgdat11"&&type!="abimgdat12"&&type!="absnddat11")throw std::runtime_error("Unsupported ABMP member "+type);}r.n(1);auto d=r.data(r.n(4));if(d.size()>=4&&!std::memcmp(d.data(),"1PC\xff",4))d=qlie::decompress(d);out.push_back({type,name,std::move(d)});}}return out;}
 static Image canvas(unsigned w,unsigned h){if(!w||!h||w>16384||h>16384||uint64_t(w)*h>64*1024*1024)throw std::runtime_error("Invalid image dimensions");return {w,h,qlie::Bytes(size_t(w)*h*4)};}
 struct JError {jpeg_error_mgr base;jmp_buf jump;char message[JMSG_LENGTH_MAX];};
 static void jfail(j_common_ptr c){auto*e=reinterpret_cast<JError*>(c->err);(*c->err->format_message)(c,e->message);longjmp(e->jump,1);}

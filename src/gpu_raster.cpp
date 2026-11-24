@@ -1,10 +1,77 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+#include "diagnostics.h"
 #include "raster_scene.hpp"
+#include "video_surface_image.hpp"
 #include <cmath>
+#include <condition_variable>
+#include <cstdarg>
 #include <cstdio>
+#include <deque>
+#include <mutex>
+#include <thread>
 #include <utility>
 
 namespace whj2::gpu {
+// Frame samples must not wait for the SD log. If storage falls far behind,
+// keep the queue bounded and report how many samples could not be recorded.
+class FrameTrace {
+ const char* const backend;
+ std::mutex mutex;
+ std::condition_variable changed;
+ std::deque<std::string> records;
+ unsigned dropped=0;
+ bool stopping=false;
+ std::thread worker;
+
+ void write(){
+  std::deque<std::string> batch;
+  for(;;){
+   unsigned missed;
+   {
+    std::unique_lock<std::mutex> lock(mutex);
+    changed.wait(lock,[this]{return stopping||!records.empty();});
+    if(records.empty())return;
+    batch.swap(records);
+    missed=std::exchange(dropped,0);
+   }
+   for(const auto&record:batch)std::fwrite(record.data(),1,record.size(),stderr);
+   if(missed)QLIE_LOGF("%s TRACE dropped=%u\n",backend,missed);
+   batch.clear();
+  }
+ }
+public:
+ explicit FrameTrace(const char*name):backend(name),worker([this]{write();}){}
+ ~FrameTrace(){
+  {
+   std::lock_guard<std::mutex> lock(mutex);
+   stopping=true;
+  }
+  changed.notify_one();
+  worker.join();
+ }
+ void enqueue(std::string record){
+  {
+   std::lock_guard<std::mutex> lock(mutex);
+   if(records.size()>=16){++dropped;return;}
+   records.push_back(std::move(record));
+  }
+  changed.notify_one();
+ }
+};
+Scene::Scene(const char*name,bool backgroundTrace):backendName(name){
+ if(qlie::diagnostics&&backgroundTrace)frameTrace=std::make_unique<FrameTrace>(name);
+}
+Scene::~Scene()=default;
+void Scene::traceFrame(const char*format,...){
+ std::va_list args;
+ va_start(args,format);
+ if(frameTrace){
+  char line[768];
+  const int size=std::vsnprintf(line,sizeof(line),format,args);
+  if(size>0)frameTrace->enqueue(std::string(line,std::min(size_t(size),sizeof(line)-1)));
+ }else std::vfprintf(stderr,format,args);
+ va_end(args);
+}
 void Scene::freeSpan(Span span){
   auto next=freeSpans.lower_bound(span.offset);
   if(next!=freeSpans.begin()){auto previous=std::prev(next);if(previous->first+previous->second==span.offset){span.offset=previous->first;span.size+=previous->second;freeSpans.erase(previous);}}
@@ -27,8 +94,8 @@ void Scene::completeFrame(){
   }
   pendingReclaim.swap(retired);
   std::swap(previous,current);
-  if(frames==1||frames%120==0){
-   std::fprintf(stderr,"%s FRAME %llu draws=%u dispatches=%u dirty_tiles=%zu/%u cached_prefix_refs=%u textures=%zu texture_checks=%u upload_bytes=%zu cpu_build_ms=%.3f prior_wait_ms=%.3f reused_display=%d ordered_geometry=%d folded_solids=%u occluded_tile_refs=%u direct_base=%d\n",
+  if(qlie::diagnostics&&(frames==1||frames%120==0)){
+   traceFrame("%s FRAME %llu draws=%u dispatches=%u dirty_tiles=%zu/%u cached_prefix_refs=%u textures=%zu texture_checks=%u upload_bytes=%zu cpu_build_ms=%.3f prior_wait_ms=%.3f reused_display=%d ordered_geometry=%d folded_solids=%u occluded_tile_refs=%u direct_base=%d\n",
                 backendName,(unsigned long long)frames,draws,dispatches,workTiles.size(),TileCount,cachedReferences,textures.size(),textureChecks,uploadBytes,cpuBuildMs,priorWaitMs,int(reusedDisplay),int(previous->geometry),foldedSolids,occludedReferences,int(baseCopy!=UINT32_MAX));
   }
  }
@@ -37,7 +104,14 @@ Scene::Span Scene::allocateSpan(size_t size){
   Span span{textureEnd,size};textureEnd+=size;return span;
  }
 uint32_t Scene::texture(const Image&i,uint64_t&uploadId,bool*opaque){
-  const size_t bytes=i.pixels.size();
+  if(i.videoSurface){
+   if(auto address=videoTexture(i.videoSurface->surface,uploadId)){
+    if(opaque)*opaque=true;
+    return *address;
+   }
+  }
+  const auto&pixels=i.videoSurface?i.videoSurface->pixels():i.pixels;
+  const size_t bytes=pixels.size();
   if(bytes!=size_t(i.width)*i.height*4||!bytes)throw std::runtime_error("GPU texture dimensions");
   const uint64_t version=i.version.get();
   auto at=textures.find(&i);
@@ -47,8 +121,8 @@ uint32_t Scene::texture(const Image&i,uint64_t&uploadId,bool*opaque){
    if(!same&&t.width==i.width&&t.height==i.height){
     if(version){same=t.pixelVersion==version;}
     else if(t.unversionedCopy.size()==bytes){
-     ++textureChecks;
-     same=std::memcmp(t.unversionedCopy.data(),i.pixels.data(),bytes)==0;
+     if constexpr (qlie::diagnostics) ++textureChecks;
+     same=std::memcmp(t.unversionedCopy.data(),pixels.data(),bytes)==0;
     }
    }
    if(!same){
@@ -62,16 +136,16 @@ uint32_t Scene::texture(const Image&i,uint64_t&uploadId,bool*opaque){
    waitForPrevious();
    Texture t;t.width=i.width;t.height=i.height;t.storage=allocateSpan(bytes);
    t.uploadId=nextUploadId++;t.pixelVersion=version;
-   if(!version)t.unversionedCopy=i.pixels;
-   uploadTexture(t.storage,i.pixels);
-   uploadBytes+=bytes;
+   if(!version)t.unversionedCopy=pixels;
+   uploadTexture(t.storage,pixels);
+   if constexpr (qlie::diagnostics) uploadBytes+=bytes;
    at=textures.emplace(&i,std::move(t)).first;
   }
   auto&t=at->second;t.lastUsed=frames+1;t.checkedBatch=batch;uploadId=t.uploadId;
   if(opaque){
    if(!t.opaque.has_value()){
     bool solid=true;
-    for(size_t n=3;n<bytes;n+=4)if(i.pixels[n]!=255){solid=false;break;}
+    for(size_t n=3;n<bytes;n+=4)if(pixels[n]!=255){solid=false;break;}
     t.opaque=solid;
    }
    *opaque=*t.opaque;
@@ -84,7 +158,7 @@ void Scene::append(Push p,DrawSources sources){
   p.rect[2]=std::min(int(Width),p.rect[2]);p.rect[3]=std::min(int(Height),p.rect[3]);
   if(p.rect[2]<=p.rect[0]||p.rect[3]<=p.rect[1])return;
   current->commands.push_back({p,{},{},{}});current->sources.push_back(sources);
-  ++draws;
+  if constexpr (qlie::diagnostics) ++draws;
  }
  // Masks are attached after the image is queued. Bin only the final commands.
 void Scene::binDraw(uint32_t index){
@@ -140,11 +214,46 @@ void Scene::binDraw(uint32_t index){
    }
    auto tile=y*Columns+x;auto&list=current->tiles[tile];
    if(op==4||insideTriangle||(opaque&&axis.covers(x*Tile,y*Tile,Tile,Tile))){
-    occludedReferences+=unsigned(list.size());list.clear();current->covered.set(tile);
+    if constexpr (qlie::diagnostics) occludedReferences+=unsigned(list.size());list.clear();current->covered.set(tile);
    }
    list.push_back(index);
   }
  }
+void Scene::rememberAlignedBitmap(const Image& image,uint64_t upload){
+ if(upload==alignedUpload)return;
+ priorAlignedUpload=alignedUpload;
+ alignedUpload=upload;
+ if(alignedPixels.empty()){
+  alignedPixels=image.pixels;
+  return;
+ }
+ equalBitmapTiles.set();
+ constexpr size_t rowBytes=Width*sizeof(uint32_t),bandBytes=Tile*rowBytes;
+ for(unsigned y=0;y<Rows;++y){
+  const auto* next=image.pixels.data()+y*bandBytes;
+  auto* last=alignedPixels.data()+y*bandBytes;
+  if(std::memcmp(next,last,bandBytes)==0)continue;
+  for(unsigned x=0;x<Columns;++x){
+   size_t offset=x*Tile*sizeof(uint32_t);
+   for(unsigned row=0;row<Tile;++row,offset+=rowBytes){
+    if(std::memcmp(next+offset,last+offset,Tile*sizeof(uint32_t))==0)continue;
+    equalBitmapTiles.reset(y*Columns+x);
+    break;
+   }
+  }
+  std::memcpy(last,next,bandBytes);
+ }
+}
+bool Scene::canReuseBitmapTiles()const{
+ const auto now=current->alignedBitmap,old=previous->alignedBitmap;
+ if(now==UINT32_MAX||old==UINT32_MAX||current->sources[now].primary!=alignedUpload||
+    previous->sources[old].primary!=priorAlignedUpload||equalBitmapTiles.none())return false;
+ const auto& a=current->commands[now];
+ if(a.image.meta[2]&262144u)return false; // A mask can remap the source rectangle.
+ auto b=previous->commands[old];
+ b.image.colors[2]=a.image.colors[2]; // Only the packed source address may differ.
+ return std::memcmp(&a,&b,sizeof(a))==0;
+}
 void Scene::dispatch(const Image&i,Push&p,float alpha,uint32_t add,uint32_t mul,unsigned blend,unsigned filter){
   if(!recording)throw std::runtime_error("GPU frame not begun");if(!i.width||!i.height||alpha<=0)return;if(blend>8)throw std::runtime_error("GPU unsupported blend");
   if(p.rect[2]<=0||p.rect[3]<=0||p.rect[0]>=int(Width)||p.rect[1]>=int(Height))return;
@@ -152,25 +261,42 @@ void Scene::dispatch(const Image&i,Push&p,float alpha,uint32_t add,uint32_t mul,
   bool mayOcclude=blend<2&&p.meta[3]==255;
   p.colors[2]=texture(i,sources.primary,mayOcclude?&sources.opaque:nullptr);
   if(i.width==1&&i.height==1)std::memcpy(&sources.singlePixel,i.pixels.data(),4);
+  if(compareAlignedBitmaps&&!i.videoSurface&&current->cleared&&current->alignedBitmap==UINT32_MAX&&(p.meta[2]&524288u)&&
+     i.width==Width&&i.height==Height&&p.p[1][0]==0.f&&p.p[1][1]==0.f){
+   current->alignedBitmap=uint32_t(current->commands.size());
+   rememberAlignedBitmap(i,sources.primary);
+  }
   append(p,sources);
  }
 void Scene::beginFrame(bool clear,uint32_t color){
   if(recording)throw std::runtime_error("GPU frame already begun");
-  cpuFrameStart=Clock::now();priorWaitMs=0;
+  if constexpr (qlie::diagnostics){cpuFrameStart=Clock::now();priorWaitMs=0;}
   current->reset(clear,color);
-  draws=dispatches=textureChecks=cachedReferences=occludedReferences=foldedSolids=0;baseCopy=UINT32_MAX;uploadBytes=0;
-  recording=true;inBatch=false;reusedDisplay=false;uploadBase=false;
+  if constexpr (qlie::diagnostics){draws=dispatches=textureChecks=cachedReferences=occludedReferences=foldedSolids=0;uploadBytes=0;}
+  baseCopy=UINT32_MAX;
+  recording=true;inBatch=false;if constexpr (qlie::diagnostics) reusedDisplay=false;uploadBase=false;
  }
+bool Scene::readCoveredSolid(qlie::Bytes&pixels){
+ if(!current->cleared||current->commands.empty())return false;
+ const auto&p=current->commands.back().image;
+ const auto texel=current->sources.back().singlePixel;
+ if(!coversCanvasWithSolid(p)||!replacesWithSolid(p,texel))return false;
+ const auto color=overClear(p,texel,current->color);
+ for(size_t n=0;n<pixels.size();n+=sizeof(color))std::memcpy(pixels.data()+n,&color,sizeof(color));
+ // The snapshot needs no submission. Keep the last GPU canvas and tile
+ // history as the base for the next real submission.
+ recording=false;
+ return true;
+}
 void Scene::planTiles(){
   workTiles.clear();workIndices.clear();
   uint32_t first=0;
   if(current->cleared){
    for(uint32_t id=0;id<current->commands.size();++id){
     const auto&p=current->commands[id].image;
-    if((p.meta[2]>>20)!=0||(p.meta[2]&262144u)||p.meta[0]!=1||p.meta[1]!=1||!axisBounds(p).covers(0,0,Width,Height))continue;
+    if(!coversCanvasWithSolid(p))continue;
     uint32_t texel=current->sources[id].singlePixel;
-    bool replaces=(texel>>24)==255&&p.meta[3]==255&&((p.meta[2]>>8)&255)<2;
-    if(id==first||replaces){current->color=overClear(p,texel,current->color);first=id+1;++foldedSolids;}
+    if(id==first||replacesWithSolid(p,texel)){current->color=overClear(p,texel,current->color);first=id+1;if constexpr (qlie::diagnostics) ++foldedSolids;}
    }
   }
   for(uint32_t id=first;id<current->commands.size();++id)binDraw(id);
@@ -179,6 +305,7 @@ void Scene::planTiles(){
    unchangedDraw.resize(std::min(current->commands.size(),previous->commands.size()));
    for(size_t i=0;i<unchangedDraw.size();++i)unchangedDraw[i]=current->sameDraw(i,*previous,i);
   }
+  const bool compareBitmap=sameBase&&canReuseBitmapTiles();
   for(unsigned tile=0;tile<TileCount;++tile){
    const auto&list=current->tiles[tile];
    const auto&old=previous->tiles[tile];
@@ -187,7 +314,7 @@ void Scene::planTiles(){
     while(common<list.size()&&common<old.size()){
      uint32_t i=list[common],j=old[common];
      bool matches=i==j?unchangedDraw[i]!=0:current->sameDraw(i,*previous,j);
-     if(!matches)break;
+     if(!matches&&!(compareBitmap&&i==current->alignedBitmap&&j==previous->alignedBitmap&&equalBitmapTiles[tile]))break;
      ++common;
     }
     if(common==list.size()&&common==old.size())continue; // final pixels still valid
@@ -199,7 +326,7 @@ void Scene::planTiles(){
    uint32_t control=(start?0x80000000u:0u)|(common-start);
    workTiles.push_back({origin,uint32_t(workIndices.size()),uint32_t(list.size()-start),control});
    workIndices.insert(workIndices.end(),list.begin()+start,list.end());
-   cachedReferences+=start;
+   if constexpr (qlie::diagnostics) cachedReferences+=start;
   }
  }
 
@@ -249,13 +376,20 @@ void GpuRaster::end(qlie::Bytes& pixels){
  impl->readCanvas(pixels);
 }
 void GpuRaster::begin(uint32_t color){impl->beginFrame(true,color);}
+void Scene::appendVideo(uint32_t address,uint64_t identity){
+ Push p;p.rect[2]=Width;p.rect[3]=Height;p.meta[2]=4u<<20;p.colors[2]=address;
+ DrawSources source;source.primary=identity;
+ append(p,source);
+}
 void GpuRaster::beginVideo(const Image&image){
  if(image.width!=Width||image.height!=Height)throw std::runtime_error("GPU video dimensions");
  begin(0u);
- Push p;p.rect[2]=Width;p.rect[3]=Height;p.meta[2]=4u<<20;
- DrawSources sources;p.colors[2]=impl->texture(image,sources.primary);
- impl->append(p,sources);
+ uint64_t identity=0;
+ const auto address=impl->texture(image,identity);
+ impl->appendVideo(address,identity);
 }
+bool GpuRaster::supportsVideoSurfaces()const{return impl->supportsVideoSurfaces();}
+bool GpuRaster::beginVideoSurface(const KVideoSurface&surface){return impl->beginVideoSurface(surface);}
 void GpuRaster::beginBatch(){++impl->batch;impl->inBatch=true;}
 void GpuRaster::endBatch(){impl->inBatch=false;}
 void GpuRaster::maskedImage(const Image&source,const Image&mask,const AnimationSample::Mask&settings,const Affine2D&m,float alpha,uint32_t add,uint32_t mul,unsigned blend,unsigned filter){

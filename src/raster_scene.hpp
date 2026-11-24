@@ -35,6 +35,13 @@ inline AxisBounds axisBounds(const Push&p){
  float x=p.p[1][0],y=p.p[1][1],right=x+p.p[0][0]*p.meta[0],bottom=y+p.p[0][3]*p.meta[1];
  return {std::min(x,right),std::min(y,bottom),std::max(x,right),std::max(y,bottom)};
 }
+inline bool coversCanvasWithSolid(const Push&p){
+ return (p.meta[2]>>20)==0&&!(p.meta[2]&262144u)&&p.meta[0]==1&&p.meta[1]==1&&
+        axisBounds(p).covers(0,0,Width,Height);
+}
+inline bool replacesWithSolid(const Push&p,uint32_t texel){
+ return (texel>>24)==255&&p.meta[3]==255&&((p.meta[2]>>8)&255)<2;
+}
 inline uint32_t overClear(const Push&p,uint32_t texel,uint32_t background){
  unsigned a=(texel>>24)*p.meta[3]/255,mode=(p.meta[2]>>8)&255;
  if(!a)return background;
@@ -52,7 +59,7 @@ struct RasterFrame {
  std::array<std::vector<uint32_t>,TileCount> tiles;
  SwapDamage::Mask covered;
  bool geometry=false,cleared=false;
- uint32_t color=0;
+ uint32_t color=0,alignedBitmap=UINT32_MAX;
 
  void reset(bool clear,uint32_t background){
   commands.clear();
@@ -60,7 +67,7 @@ struct RasterFrame {
   for(auto&tile:tiles)tile.clear();
   covered.reset();
   geometry=false;cleared=clear;
-  color=background;
+  color=background;alignedBitmap=UINT32_MAX;
  }
  bool sameDraw(size_t i,const RasterFrame&old,size_t j)const{
   return sources[i].primary==old.sources[j].primary&&sources[i].secondary==old.sources[j].secondary&&
@@ -68,9 +75,10 @@ struct RasterFrame {
  }
 };
 // Command encoding, texture lifetimes and tile history are independent of the device API.
+class FrameTrace;
 struct Scene {
- explicit Scene(const char* name):backendName(name){}
- virtual ~Scene()=default;
+ explicit Scene(const char* name,bool backgroundTrace=false);
+ virtual ~Scene();
  const char* const backendName;
  struct Span {size_t offset=0,size=0;};
  struct Texture {
@@ -80,6 +88,14 @@ struct Scene {
   std::optional<bool> opaque;
  };
 
+ // Compare a replacement full-screen bitmap once when its uploaded pixels
+ // change. Moving, filtering and blending still run entirely on the GPU.
+ bool compareAlignedBitmaps=false;
+ qlie::Bytes alignedPixels;
+ uint64_t alignedUpload=0,priorAlignedUpload=0;
+ SwapDamage::Mask equalBitmapTiles;
+ void rememberAlignedBitmap(const Image&,uint64_t);
+ bool canReuseBitmapTiles()const;
  bool uploadBase=false;
  std::map<const Image*,Texture>textures;std::vector<Span>retired;std::map<size_t,size_t>freeSpans;size_t textureEnd=0;
  RasterFrame frameA,frameB;
@@ -104,18 +120,26 @@ struct Scene {
  virtual void readCanvas(qlie::Bytes&)=0;
  virtual std::optional<uint64_t> presentNative(bool)=0;
  virtual void setInterlaced(bool)=0;
+ virtual bool supportsVideoSurfaces()const{return false;}
+ virtual bool beginVideoSurface(const KVideoSurface&){return false;}
+ virtual std::optional<uint32_t> videoTexture(const KVideoSurface&,uint64_t&){return std::nullopt;}
 
  void freeSpan(Span);
  Span allocateSpan(size_t);
  uint32_t texture(const Image&,uint64_t& uploadId,bool* opaque=nullptr);
  void waitForPrevious();
  void completeFrame();
+ void traceFrame(const char* format,...) __attribute__((format(printf,2,3)));
  void append(Push,DrawSources={});
+ void appendVideo(uint32_t address,uint64_t identity);
  void binDraw(uint32_t);
  void dispatch(const Image&,Push&,float,uint32_t,uint32_t,unsigned,unsigned);
  void beginFrame(bool,uint32_t);
+ bool readCoveredSolid(qlie::Bytes&);
  void planTiles();
  SwapDamage::Mask changedTiles(bool interlaced) const;
  void writeTileList(uint32_t*) const;
+private:
+ std::unique_ptr<FrameTrace> frameTrace;
 };
 }

@@ -1,0 +1,97 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+#version 430
+layout(local_size_x=16,local_size_y=16) in;
+layout(binding=0,std430) readonly buffer Source { uint source[]; };
+layout(binding=1,std430) buffer Destination { uint destination[]; };
+layout(r32ui,binding=0) uniform writeonly uimage2D presentImage;
+#include "raster_types.glsl"
+layout(binding=2,std430) readonly buffer Commands { Draw draws[]; };
+layout(binding=3,std430) readonly buffer Tiles { uint tiles[]; };
+layout(std140,binding=0) uniform Parameters { vec4 p0;vec4 p1;vec4 p2;vec4 p3;ivec4 rect;uvec4 meta;uvec4 colors; } frame;
+#define DEKO_RASTER
+#define DEKO_MOTION_KERNEL
+#include "raster_pixels.glsl"
+
+float edge(vec2 a,vec2 b,vec2 q){precise float e=(b.x-a.x)*(q.y-a.y)-(b.y-a.y)*(q.x-a.x);return e;}
+#include "deko_tile_coords.glsl"
+
+uint projected(Draw p,ivec2 origin,ivec2 q){
+ vec2 a=p.p0.xy,b=p.p1.xy,c=p.p2.xy,point=vec2(q)+0.5;
+ uint mode=tileCoordMode(p,origin);
+ if(mode!=0u){
+  if(gl_LocalInvocationID.y==0u)prepareTileCoord(p,origin,mode);
+  barrier();
+ }
+ vec2 column=mode==0u?vec2(0):tileCoords[gl_LocalInvocationID.x];
+ precise vec3 t=vec3(mode==EdgeBC?column.y:divide(divide(edge(b,c,point),p.p3.w),p.p3.x),
+                     mode==EdgeCA?column.y:divide(divide(edge(c,a,point),p.p3.w),p.p3.y),
+                     mode==EdgeAB?column.y:divide(divide(edge(a,b,point),p.p3.w),p.p3.z));
+ precise float sum=t.x+t.y+t.z;
+ precise float u=t.x*p.p0.z+t.y*p.p1.z+t.z*p.p2.z;
+ precise float v=t.x*p.p0.w+t.y*p.p1.w+t.z*p.p2.w;
+ ivec2 texel=clamp(ivec2(floor(vec2(divide(u,sum),divide(v,sum)))),ivec2(0),ivec2(p.meta.xy)-1);
+ return source[p.colors.z+uint(texel.y)*p.meta.x+uint(texel.x)];
+}
+
+shared ivec4 taps[16];
+shared vec2 weights[16];
+shared vec4 horizontal[17*16];
+
+vec4 horizontalSample(Draw p,int row,ivec2 cols,float x){
+ uint addr=p.colors.z+uint(row)*p.meta.x;
+ precise vec4 top=vec4(unpack(source[addr+uint(cols.x)]));
+ if(x!=0.0)top=top*(1.0-x)+vec4(unpack(source[addr+uint(cols.y)]))*x;
+ return top;
+}
+
+uint bitmap(Draw p,ivec2 origin,ivec2 q){
+ if((p.meta.z&524288u)!=0u){
+  ivec2 texel=q-ivec2(p.p1.xy);
+  return source[p.colors.z+uint(texel.y)*p.meta.x+uint(texel.x)];
+ }
+ uint x=gl_LocalInvocationID.x,y=gl_LocalInvocationID.y;
+ if(y==0u){
+  precise vec2 d=vec2(origin+ivec2(int(x)))+0.5-p.p1.xy;
+  precise vec2 uv=vec2(divide(p.p0.w*d.x,p.p1.z),divide(p.p0.x*d.y,p.p1.z));
+  tileCoords[x]=uv;
+  precise vec2 f=uv-vec2(0.5);
+  ivec2 i=ivec2(floor(f)),last=ivec2(p.meta.xy)-1;
+  ivec2 lo=clamp(i,ivec2(0),last),hi=clamp(i+1,ivec2(0),last);
+  taps[x]=ivec4(lo.x,hi.x,lo.y,hi.y);weights[x]=f-vec2(i);
+ }
+ barrier();
+ if((p.meta.z&255u)!=2u){
+  ivec2 texel=clamp(ivec2(floor(vec2(tileCoords[x].x,tileCoords[y].y))),ivec2(0),ivec2(p.meta.xy)-1);
+  return source[p.colors.z+uint(texel.y)*p.meta.x+uint(texel.x)];
+ }
+ // An upscaled 16-row tile normally spans at most 17 source rows.
+ // Adjacent output rows reuse the exact same horizontal interpolation.
+ int first=taps[0].z,rows=taps[15].w-first+1;
+ precise vec4 top,bottom;
+ float fx=weights[x].x,fy=weights[y].y;
+ ivec2 cols=taps[x].xy,lines=taps[y].zw;
+ if(rows>0&&rows<=17){
+  for(int r=int(y);r<rows;r+=16)horizontal[r*16+int(x)]=horizontalSample(p,first+r,cols,fx);
+  barrier();
+  top=horizontal[(lines.x-first)*16+int(x)];
+  if(fy!=0.0)bottom=horizontal[(lines.y-first)*16+int(x)];
+ }else{
+  top=horizontalSample(p,lines.x,cols,fx);
+  if(fy!=0.0)bottom=horizontalSample(p,lines.y,cols,fx);
+ }
+ if(fy!=0.0)top=top*(1.0-fy)+bottom*fy;
+ return pack(uvec4(floor(top+0.5)));
+}
+
+void main(){
+ uint header=gl_WorkGroupID.x*4u,packedOrigin=tiles[header];
+ ivec2 origin=ivec2(packedOrigin&65535u,packedOrigin>>16),q=origin+ivec2(gl_LocalInvocationID.xy);
+ Draw p=draws[tiles[tiles[header+1u]]];
+ uint result;
+ if((p.meta.z&65536u)!=0u)result=projected(p,origin,q);
+ else result=bitmap(p,origin,q);
+ uint index=uint(q.y)*frame.meta.x+uint(q.x);
+ if((tiles[header+3u]&0x7fffffffu)==1u)destination[frame.meta.x*frame.meta.y+index]=result;
+ destination[index]=result;
+ if(frame.meta.z!=0u)imageStore(presentImage,q,uvec4(result,0u,0u,0u));
+}

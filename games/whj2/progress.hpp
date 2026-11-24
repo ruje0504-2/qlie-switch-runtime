@@ -2,6 +2,11 @@
 #pragma once
 #include "story.hpp"
 #include <array>
+#include <condition_variable>
+#include <exception>
+#include <mutex>
+#include <optional>
+#include <thread>
 namespace whj2 {
 class Progress {
  std::array<bool,4> cleared{};
@@ -17,5 +22,20 @@ public:
  bool clearedRoute(unsigned route)const{return route<cleared.size()&&cleared[route];}
  bool visited(const std::string&key)const{return labels.count(key)!=0;}
  qlie::Bytes save()const;void restore(const qlie::Bytes&);
+};
+class ProgressWriter {
+ const std::string path;
+ std::mutex mutex;
+ std::condition_variable changed;
+ std::optional<qlie::Bytes> pending;
+ std::exception_ptr failure;
+ bool writing=false,stopping=false;
+ std::thread worker;
+ void run();
+public:
+ explicit ProgressWriter(std::string);
+ ~ProgressWriter();
+ void schedule(qlie::Bytes);
+ void flush();
 };
 }

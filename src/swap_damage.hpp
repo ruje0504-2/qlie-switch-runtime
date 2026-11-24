@@ -13,7 +13,7 @@ struct SwapDamage {
 
  // Merge consecutive runs into one copy region when their extents match.
  // For highly fragmented updates a bounding rectangle limits driver work.
- static std::vector<Rect> regions(const Mask& tiles){
+ static std::vector<Rect> regions(const Mask& tiles,bool allowBoundingRect=true){
   if(tiles.none())return {};
   if(tiles.all())return {{0,0,Columns,Rows}};
   std::vector<Rect> out;
@@ -35,7 +35,7 @@ struct SwapDamage {
    }
    previous=next;
   }
-  if(out.size()>64)return {{left,top,right-left,bottom-top}};
+  if(allowBoundingRect&&out.size()>64)return {{left,top,right-left,bottom-top}};
   return out;
  }
 };

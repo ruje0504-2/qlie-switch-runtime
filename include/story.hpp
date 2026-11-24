@@ -16,14 +16,19 @@ struct StoryState {
 struct StoryProfile {
  std::string root,selection,includeDirectory,header,replayHeader,footer,saveSignature;
  std::set<std::string> sceneCommands;
+ std::string interludeImage;
+ std::map<std::string,std::set<unsigned>> visualWaitParagraphs;
 };
 class Story {
- struct Op {std::string text;unsigned line;int end=-1,otherwise=-1;};
+ enum class After {None,Interlude,VisualWait};
+ struct Op {std::string text;unsigned line;int end=-1,otherwise=-1;After after=After::None;};
  struct Script {std::vector<Op> ops;std::map<std::string,size_t> labels;std::map<size_t,std::vector<std::string>> labelsAt;};
  qlie::Assets&assets;
  const StoryProfile profile;
  std::map<std::string,Script> scripts;
+ std::map<std::string,std::vector<std::string>> includes;
  Script&script(const std::string&);
+ const std::vector<std::string>& includeCommands(const std::string&);
  std::string value(std::string)const;
  bool condition(const std::string&)const;
  void resetState();
@@ -39,6 +44,7 @@ public:
  std::vector<std::string> upcomingAssetCommands(bool opening=false);
  void choose(unsigned);
  qlie::Bytes save()const;
+ StoryState decodeSave(const qlie::Bytes&);
  void restore(const qlie::Bytes&);
 };
 }

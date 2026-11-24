@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "render_queue.hpp"
+#include "video_surface_image.hpp"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -9,6 +10,9 @@
 #include <functional>
 #include <exception>
 #include <cstdlib>
+#ifdef __aarch64__
+#include <arm_neon.h>
+#endif
 #ifdef __SWITCH__
 #include "switch_threads.hpp"
 #endif
@@ -47,6 +51,7 @@ void RenderQueue::image(const Image&i,const Affine2D&m,float pri,float alpha,uin
  Command c;c.image=&i;c.placement=m;c.priority=pri;c.state.alpha=alpha;c.state.addColor=add;c.state.mulColor=mul;c.state.flags=blend;c.state.textureFilter=filter;commands.push_back(c);if(alpha>0&&i.width&&i.height)visibleImages++;
 }
 const Image& RenderQueue::snapshotImage(const Image&i){snapshots.push_back(i);return snapshots.back();}
+const Image& RenderQueue::retainImage(std::shared_ptr<const Image>i){retainedImages.push_back(std::move(i));return *retainedImages.back();}
 void RenderQueue::maskedImage(const Image&i,const Image&mask,const AnimationSample::Mask&settings,const Affine2D&m,float pri,float alpha,uint32_t add,uint32_t mul,unsigned blend,unsigned filter){image(i,m,pri,alpha,add,mul,blend,filter);commands.back().mask=&mask;commands.back().state.mask=settings;}
 void RenderQueue::snapshot(const Image&i,const Affine2D&m,float pri,float alpha,uint32_t add,uint32_t mul,unsigned blend,unsigned filter){
  image(snapshotImage(i),m,pri,alpha,add,mul,blend,filter);
@@ -62,8 +67,8 @@ void RenderQueue::triangle(const Image&i,const std::array<TextureVertex,3>&verti
 }
 void RenderQueue::control(const AnimationSample&s,float pri){Command c;c.state=s;c.priority=pri;commands.push_back(c);}
 namespace {
-std::array<uint8_t,4> texel(const Image&im,float u,float v,unsigned filter){
- auto pixel=[&](int x,int y){x=std::clamp(x,0,int(im.width)-1);y=std::clamp(y,0,int(im.height)-1);return im.pixels.data()+(size_t(y)*im.width+unsigned(x))*4;};
+std::array<uint8_t,4> texel(const Image&im,const qlie::Bytes&pixels,float u,float v,unsigned filter){
+ auto pixel=[&](int x,int y){x=std::clamp(x,0,int(im.width)-1);y=std::clamp(y,0,int(im.height)-1);return pixels.data()+(size_t(y)*im.width+unsigned(x))*4;};
  std::array<uint8_t,4> out;
  if(filter!=2){auto*p=pixel(int(std::floor(u)),int(std::floor(v)));std::copy(p,p+4,out.begin());return out;}
  float x=u-.5f,y=v-.5f;int ix=int(std::floor(x)),iy=int(std::floor(y));float fx=x-ix,fy=y-iy;
@@ -75,6 +80,7 @@ std::array<uint8_t,4> texel(const Image&im,float u,float v,unsigned filter){
 // interpolated as u/depth, v/depth and 1/depth, then divided per pixel.
 void triangleRaster(qlie::Bytes&out,unsigned w,unsigned h,const Image&im,std::array<TextureVertex,3> v,const Affine2D&post,float alpha,uint32_t add,uint32_t mul,unsigned blend,unsigned filter,unsigned rowBegin,unsigned rowEnd){
  if(!im.width||!im.height||alpha<=0)return;
+ const auto&pixels=im.videoSurface?im.videoSurface->pixels():im.pixels;
  for(auto&p:v){if(p.depth<10)return;float ratio=1000/p.depth;float x=w*.5f+(p.x-w*.5f)*ratio,y=h*.5f+(p.y-h*.5f)*ratio;p.x=post.a*x+post.b*y+post.x;p.y=post.c*x+post.d*y+post.y;}
  auto edge=[](const TextureVertex&a,const TextureVertex&b,float x,float y){return (b.x-a.x)*(y-a.y)-(b.y-a.y)*(x-a.x);};
  float area=edge(v[0],v[1],v[2].x,v[2].y);if(std::abs(area)<1e-6f)return;
@@ -88,7 +94,7 @@ void triangleRaster(qlie::Bytes&out,unsigned w,unsigned h,const Image&im,std::ar
   for(unsigned j=0;j<3;j++)if(e[j]<0||(e[j]==0&&!include[j]))inside=false;
   if(!inside)continue;
   float inverse=0,u=0,t=0;for(unsigned j=0;j<3;j++){float q=e[j]/area/v[j].depth;inverse+=q;u+=q*v[j].u;t+=q*v[j].v;}
-  auto sampled=texel(im,u/inverse,t/inverse,filter);const auto*src=sampled.data();auto*dst=out.data()+(size_t(y)*w+unsigned(x))*4;
+  auto sampled=texel(im,pixels,u/inverse,t/inverse,filter);const auto*src=sampled.data();auto*dst=out.data()+(size_t(y)*w+unsigned(x))*4;
   unsigned a=unsigned(src[3])*unsigned(std::clamp(alpha,0.f,255.f))/255;if(!a)continue;
   for(unsigned n=0;n<3;n++){unsigned color=std::min(255u,unsigned(src[n])*((mul>>(8*n))&255)/255+((add>>(8*n))&255));dst[n]=blendChannel(blend,uint8_t(color),dst[n],uint8_t(a));}
   dst[3]=blendChannel(blend,uint8_t(a),dst[3],uint8_t(a));
@@ -96,6 +102,7 @@ void triangleRaster(qlie::Bytes&out,unsigned w,unsigned h,const Image&im,std::ar
 }
 void raster(qlie::Bytes&out,unsigned w,unsigned h,const Image&im,const Affine2D&m,float alpha,uint32_t add,uint32_t mul,unsigned blend,unsigned filter,unsigned rowBegin,unsigned rowEnd){
  if(!im.width||!im.height||alpha<=0)return;
+ const auto&pixels=im.videoSurface?im.videoSurface->pixels():im.pixels;
  (void)h;
  float det=m.a*m.d-m.b*m.c;if(std::abs(det)<1e-12f)return;
  float xmin=m.x,xmax=m.x,ymin=m.y,ymax=m.y;
@@ -107,7 +114,7 @@ void raster(qlie::Bytes&out,unsigned w,unsigned h,const Image&im,const Affine2D&
  float dx=x+.5f-m.x,dy=y+.5f-m.y;
  float u=(m.d*dx-m.b*dy)/det,v=(-m.c*dx+m.a*dy)/det;
  if(u<0||v<0||u>=im.width||v>=im.height)continue;
- auto sampled=texel(im,u,v,filter);const auto*src=sampled.data();auto*dst=out.data()+(size_t(y)*w+x)*4;
+ auto sampled=texel(im,pixels,u,v,filter);const auto*src=sampled.data();auto*dst=out.data()+(size_t(y)*w+x)*4;
  unsigned sa=unsigned(src[3])*unsigned(std::clamp(alpha,0.f,255.f))/255;if(!sa)continue;
  unsigned da=dst[3];
  for(unsigned n=0;n<3;n++){unsigned col=std::min(255u,unsigned(src[n])*((mul>>(8*n))&255)/255+((add>>(8*n))&255));
@@ -147,6 +154,7 @@ void RenderQueue::drawRows(qlie::Bytes&out,unsigned w,unsigned h,unsigned rowBeg
  if(!stack.empty()){const auto&p=stack.back();if(p.flags&0x7f)blend=p.flags&0x7f;float r=p.rotationZ*3.14159265358979323846f/180,co=std::cos(r),si=std::sin(r),sx=p.scaleX/100,sy=p.scaleY/100,cx=w/2.f,cy=h/2.f;
  Affine2D post{sx*co,sx*si,-sy*si,sy*co,cx+sx*(co*(p.x-cx)+si*(p.y-cy)),cy+sy*(-si*(p.x-cx)+co*(p.y-cy))};
  model=affine(post,model);alpha=int(alpha)*int(p.alpha)/255;add=colorAdd(add,p.addColor);mul=colorMultiply(mul,p.mulColor);}
+ if(view)model=affine(*view,model);
  if(target){if(c->mask)target->maskedImage(*c->image,*c->mask,s.mask,model,alpha,add,mul,blend,s.textureFilter);else if(c->polygon)target->triangle(*c->image,c->triangle,model,alpha,add,mul,blend,s.textureFilter);else target->image(*c->image,model,alpha,add,mul,blend,s.textureFilter);continue;}
  if(c->polygon)triangleRaster(out,w,h,*c->image,c->triangle,model,alpha,add,mul,blend,s.textureFilter,rowBegin,rowEnd);
  else raster(out,w,h,*c->image,model,alpha,add,mul,blend,s.textureFilter,rowBegin,rowEnd);
@@ -190,9 +198,48 @@ public:
  }
 };
 }
+bool RenderQueue::captureAlignedBitmap(qlie::Bytes&out,unsigned w,unsigned h,uint32_t background)const{
+ if(view||commands.size()!=1)return false;
+ const auto&c=commands.front();
+ const auto&p=c.placement;
+ const auto&s=c.state;
+ if(!c.image||c.image->videoSurface||c.mask||c.polygon||c.image->width!=w||c.image->height!=h||
+    p.a!=1||p.d!=1||p.b!=0||p.c!=0||p.x!=0||p.y!=0||
+    s.alpha!=255||s.flags>1||s.textureFilter>1||s.addColor!=0||s.mulColor!=0xffffff)return false;
+ const auto&src=c.image->pixels;
+ if(out.size()!=size_t(w)*h*4||src.size()!=out.size())throw std::runtime_error("Capture bitmap dimensions");
+ const std::array<uint8_t,4> clear{uint8_t(background),uint8_t(background>>8),uint8_t(background>>16),uint8_t(background>>24)};
+ size_t n=0;
+#ifdef __aarch64__
+ // Normal blend is d + floor((s-d)*((a+(a>>7))>>1)/128).
+ // Signed 16-bit lanes can hold the complete product, including negative deltas.
+ auto weight=[](uint8x8_t a){return vreinterpretq_s16_u16(vshrq_n_u16(vaddl_u8(a,vshr_n_u8(a,7)),1));};
+ auto compose=[](uint8x8_t src,int16x8_t dst,int16x8_t w){
+  const auto delta=vsubq_s16(vreinterpretq_s16_u16(vmovl_u8(src)),dst);
+  return vmovn_u16(vreinterpretq_u16_s16(vaddq_s16(dst,vshrq_n_s16(vmulq_s16(delta,w),7))));
+ };
+ for(;n+64<=src.size();n+=64){
+  auto channels=vld4q_u8(src.data()+n);
+  const auto lowWeight=weight(vget_low_u8(channels.val[3])),highWeight=weight(vget_high_u8(channels.val[3]));
+  for(unsigned channel=0;channel<4;++channel){
+   const auto input=channels.val[channel];
+   const auto dest=vdupq_n_s16(clear[channel]);
+   channels.val[channel]=vcombine_u8(compose(vget_low_u8(input),dest,lowWeight),compose(vget_high_u8(input),dest,highWeight));
+  }
+  vst4q_u8(out.data()+n,channels);
+ }
+#endif
+ for(;n<src.size();n+=4){
+  const auto alpha=src[n+3];
+  for(unsigned channel=0;channel<4;++channel)out[n+channel]=blendChannel(0,src[n+channel],clear[channel],alpha);
+ }
+ return true;
+}
 void RenderQueue::draw(RenderTarget&target,unsigned w,unsigned h)const{qlie::Bytes unused;target.beginBatch();drawRows(unused,w,h,0,h,&target);target.endBatch();}
 void RenderQueue::draw(qlie::Bytes&out,unsigned w,unsigned h)const{
  if(out.size()!=size_t(w)*h*4)throw std::runtime_error("Render canvas size");
+ // Materialize before workers read rows in parallel.
+ for(const auto&c:commands)if(c.image&&c.image->videoSurface&&c.state.alpha>0)c.image->videoSurface->pixels();
  static const bool serial=[] {auto*mode=std::getenv("WHJ2_RENDER_THREADS");return mode&&std::string(mode)=="1";}();
  bool large=commands.size()>8;
  if(!large)for(auto&c:commands)if(c.image&&size_t(c.image->width)*c.image->height>=131072){large=true;break;}

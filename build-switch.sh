@@ -36,12 +36,16 @@ python3 tools/build_mesa_nak.py --sdk "$mesa" --devkitpro "$dkp" --output build-
 $cc -std=c11 $flags -c src/switch_nak_cache.c -o build-switch/switch_nak_cache.o
 $cxx -std=c++17 $flags -ffp-contract=off -Wno-missing-field-initializers -Wno-misleading-indentation -I"$mesa/include" -c src/vulkan_raster.cpp -o build-switch/vulkan_raster.o
 python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --output build-switch/deko_raster.inc
+python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --motion --output build-switch/deko_motion.inc
+python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --restore --output build-switch/deko_restore.inc
+python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --base --output build-switch/deko_base.inc
+python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --video --output build-switch/deko_video.inc
 $cxx -std=c++17 $flags -ffp-contract=off -Wno-misleading-indentation -c src/gpu_raster.cpp -o build-switch/gpu_raster.o
-$cxx -std=c++17 $flags -ffp-contract=off -Ibuild-switch -c src/deko3d_raster.cpp -o build-switch/deko3d_raster.o
+$cxx -std=c++17 $flags $codec_flags -ffp-contract=off -Ibuild-switch -c src/deko3d_raster.cpp -o build-switch/deko3d_raster.o
 $cc -std=c11 $flags -c src/switch_stdio.c -o build-switch/switch_stdio.o
 flags="$flags -ffp-contract=off -DWHJ2_WITH_VULKAN -DWHJ2_WITH_DEKO3D"
 
-$cxx -std=c++17 $flags $($pc --cflags sdl2 freetype2 libpng libjpeg) -L"$dkp/libnx/lib" -specs="$dkp/libnx/switch.specs" $whj2_scene_sources games/whj2/joycon.cpp games/whj2/main.cpp build-switch/gpu_raster.o build-switch/deko3d_raster.o build-switch/vulkan_raster.o build-switch/switch_stdio.o build-switch/switch_nak_cache.o build-switch/mesa-scoped-nak.o build-switch/libqlie-runtime.a -Wl,--wrap=nak_debug_flags -L"$mesa/lib" -Wl,--start-group "$mesa/lib/libvulkan.a" "$rust"/*.rlib $($pc --libs sdl2 freetype2 libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -lexpat -lzstd -ldeko3d -lpthread -lnx -Wl,--end-group -o build-switch/qlie-switch-runtime.elf
+$cxx -std=c++17 $flags $($pc --cflags sdl2 freetype2 libpng libjpeg) -L"$dkp/libnx/lib" -specs="$dkp/libnx/switch.specs" $whj2_scene_sources games/whj2/joycon.cpp games/whj2/main.cpp build-switch/gpu_raster.o build-switch/deko3d_raster.o build-switch/vulkan_raster.o build-switch/switch_stdio.o build-switch/switch_nak_cache.o build-switch/mesa-scoped-nak.o build-switch/libqlie-runtime.a -Wl,-u,qlie_build_revision,--wrap=nak_debug_flags -L"$mesa/lib" -Wl,--start-group "$mesa/lib/libvulkan.a" "$rust"/*.rlib $($pc --libs sdl2 freetype2 libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -lexpat -lzstd -ldeko3d -lpthread -lnx -Wl,--end-group -o build-switch/qlie-switch-runtime.elf
 # Installed packages consume the ELF directly.
 if [ "${1:-}" = "--elf-only" ]; then
   exit 0

@@ -46,6 +46,14 @@ int main(int argc,char**argv){try{if(argc!=2)return 2;qlie::Assets assets(argv[1
  wait.property({"wait","skip"});wait.page();require(wait.tick(0)==wait.Next,"Skip did not continue");
  wait.native(false,1000);require(wait.confirm()==wait.None&&wait.tick(1000)==wait.Resume,"Native fixed continuation");wait.native(true,1000);require(wait.confirm()==wait.Resume,"Native click continuation");
  wait.property({"wait","voice","5000"});wait.page(true,false);require(wait.tick(249)==wait.None&&wait.tick(1)==wait.Next,"Missing voice fallback");
+ fade.command("^sentence,autowait:true,wait:clickonly:7000:1500",frame,&wait);
+ fade.command("^sentence,clear:def,fade:cut",frame,&wait);wait.page();
+ require(wait.waitingForMessage()&&wait.skip()==wait.Next,"Sentence reset kept a pending wait");
+ fade.command("^sentence,$overlap",frame,&wait);wait.page();
+ require(wait.waitingForMessage(),"Sentence reset kept automatic fade wait enabled");
+ fade.command("^sentence,clear:def,fade:cut,wait:click:50:20",frame,&wait);wait.page();
+ wait.elapseSkip(19);require(wait.skip()==wait.None,"Wait after sentence reset was lost");
+ wait.elapseSkip(1);require(wait.skip()==wait.Next,"Wait after reset did not complete");
  whj2::Story story(assets,whj2::profile::story);story.state.at={"scenario/ed_movie.s",0};bool fixed=false,click=false;for(unsigned i=0;i<20&&!(fixed&&click);++i){auto event=story.next();if(event.type=="wait"&&event.value=="2000")fixed=true;if(event.type=="click-wait"&&event.value=="1000")click=true;}require(fixed&&click,"Original wait/clk distinction");
  std::cout<<"PASS original template auto/explicit wait, click consumption, fixed timing, remaining-state restore and native wait/clk continuation, overlap skip timing, explicit zero, and legacy save\n";return 0;
 }catch(const std::exception&e){std::cerr<<"FAIL "<<e.what()<<"\n";return 1;}}

@@ -3,6 +3,7 @@
 #include "scene_transition.hpp"
 #include "scene_images.hpp"
 #include "state_io.hpp"
+#include "render_queue.hpp"
 #include <iostream>
 #include <stdexcept>
 int main(int argc,char**argv){try{if(argc!=2)return 2;qlie::Assets assets(argv[1],whj2::profile::archives);whj2::SceneImages scene(assets);whj2::SceneTransition fade(assets);
@@ -30,6 +31,69 @@ int main(int argc,char**argv){try{if(argc!=2)return 2;qlie::Assets assets(argv[1
   fade.update(250);current=light;fade.blend(current);if(current!=light)throw std::runtime_error("Rule end");
  }
  whj2::StateWriter legacy;legacy.str("WHJ2-transition-1");legacy.n(0);legacy.n(0);legacy.n(0);legacy.n(0);legacy.n(0);legacy.n(0);resumed.restore(legacy.bytes);
- std::cout<<"PASS original rule image normal/inverted direction, endpoints, save and continuation; transition1 compatibility\n";
+ whj2::StateWriter v2;v2.str("WHJ2-transition-2");v2.n(500000);v2.n(1000000);v2.n(0);v2.n(1);v2.n(0);
+ v2.str("fade/線形_縦.png");v2.n(4);v2.n(dark.size());v2.bytes.insert(v2.bytes.end(),dark.begin(),dark.end());
+ resumed.restore(v2.bytes);current=light;resumed.blend(current);if(current[lo]!=255||current[hi]!=0)throw std::runtime_error("Legacy rule rendering");
+ std::cout<<"PASS original rule image normal/inverted direction, endpoints, save and continuation; transition1/2 compatibility\n";
+ whj2::SentenceWait wait;
+ fade.command("^sentence,autowait:true,fade:mosaic:400",before,&wait);
+ wait.page();if(!wait.prewaiting()||wait.tick(399)!=whj2::SentenceWait::None||!wait.prewaiting())throw std::runtime_error("Mosaic auto-wait");
+ restored=after;fade.blend(restored);if(restored!=after)throw std::runtime_error("Mosaic activated before present");
+ fade.present();current=after;fade.blend(current);if(current!=before||!fade.needsCanvas())throw std::runtime_error("Mosaic start");
+ fade.update(200);current=after;fade.blend(current);
+ if(current==before||current==after||current[0]!=current[4]||current[0]!=current[1280*4])throw std::runtime_error("Mosaic midpoint blocks");
+ resumed.restore(fade.save());restored=after;resumed.blend(restored);if(restored!=current)throw std::runtime_error("Mosaic save midpoint");
+ resumed.update(200);restored=after;resumed.blend(restored);
+ if(restored!=after||resumed.needsCanvas()||resumed.save().size()>100)throw std::runtime_error("Mosaic end");
+ std::cout<<"PASS mosaic start/midpoint/end, block sampling, auto-wait and save/restore\n";
+ struct MosaicPhase { unsigned step, block; uint8_t opacity; };
+ const MosaicPhase phases[]={{14,1,255},{15,4,255},{96,49,255},{109,64,255},
+  {127,81,127},{128,81,119},{142,64,7},{143,64,0},{240,4,0},{241,1,0}};
+ constexpr unsigned width=1280,height=720;
+ auto oldPattern=before,newPattern=after;
+ for(unsigned y=0;y<height;y++)for(unsigned x=0;x<width;x++){
+  size_t at=(size_t(y)*width+x)*4;
+  oldPattern[at]=uint8_t(x);oldPattern[at+1]=uint8_t(y);oldPattern[at+2]=uint8_t(x+3*y);
+  newPattern[at]=uint8_t(255-x);newPattern[at+1]=uint8_t(255-y);newPattern[at+2]=uint8_t(5*x+y);
+  oldPattern[at+3]=newPattern[at+3]=255;
+ }
+ fade.command("^sentence,fade:mosaic:255",oldPattern);fade.present();
+ unsigned lastStep=0;
+ for(auto phase:phases){
+  fade.update(phase.step-lastStep);lastStep=phase.step;
+  current=newPattern;fade.blend(current);
+  for(unsigned y=0;y<height;y++)for(unsigned x=0;x<width;x++){
+   auto sampleX=std::min(width-1,x-x%phase.block+phase.block/2);
+   auto sampleY=std::min(height-1,y-y%phase.block+phase.block/2);
+   size_t sample=(size_t(sampleY)*width+sampleX)*4,at=(size_t(y)*width+x)*4;
+   for(unsigned c=0;c<4;c++)if(current[at+c]!=whj2::blendChannel(0,oldPattern[sample+c],newPattern[sample+c],phase.opacity))
+    throw std::runtime_error("Native mosaic step "+std::to_string(phase.step)+" at "+std::to_string(x)+","+std::to_string(y));
+  }
+ }
+ std::cout<<"PASS native mosaic sizes, phase opacity and fixed-center edge sampling over ten full frames\n";
+ for(const std::string asset:{"misc/fade_in.b","misc/fade_out.b"}){
+  fade.command("^sentence,fade:anime:250:"+asset,before);
+  auto staged=fade.save();resumed.restore(staged);resumed.present();
+  fade.present();bool captures=asset!="misc/fade_out.b";
+  if(fade.needsTarget()!=captures||resumed.needsTarget()!=captures)throw std::runtime_error("ABMP CaptureFadein "+asset);
+  fade.captureTarget(after);resumed.captureTarget(after);
+  whj2::SceneImages original(assets);
+  original.command("^ui_expected,file:"+asset+",x:0,y:0");
+  original.uiSlot("ui_expected",0,whj2::Image{1280,720,before});
+  if(captures)original.uiSlot("ui_expected",1,whj2::Image{1280,720,after});
+  auto authored=after;original.draw(authored);
+  current=after;fade.blend(current);restored=after;resumed.blend(restored);
+  if(current!=restored||current!=authored||current==after)throw std::runtime_error("Animation first keyframe "+asset);
+  fade.update(90);current=after;fade.blend(current);
+  original.update(360);auto middle=after;original.draw(middle);
+  if(current==authored||current==after||current!=middle)throw std::runtime_error("Animation middle keyframe "+asset);
+  resumed.restore(fade.save());restored=after;resumed.blend(restored);
+  if(restored!=current)throw std::runtime_error("Animation captured frame restore "+asset);
+  fade.update(80);resumed.update(80);current=after;restored=after;fade.blend(current);resumed.blend(restored);
+  if(current!=restored)throw std::runtime_error("Animation continued at wrong phase "+asset);
+  fade.update(80);current=after;fade.blend(current);
+  if(current!=after||fade.needsTarget()||fade.save().size()>100)throw std::runtime_error("Animation completion "+asset);
+  std::cout<<"PASS "<<asset<<" two endpoints, middle frames and staged/active save restore\n";
+ }
  std::cout<<"PASS original-scene overlap start/midpoint/end, template durations, cut, save and continuation\n";return 0;
 }catch(const std::exception&e){std::cerr<<"FAIL "<<e.what()<<"\n";return 1;}}

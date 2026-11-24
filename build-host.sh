@@ -7,6 +7,9 @@ pc=${PKG_CONFIG:-/opt/homebrew/bin/pkg-config}
 mkdir -p build
 . ./engine/sources.sh
 common="-O2 -Wall -Wextra -Werror -Iinclude -Isrc"
+if [ "${QLIE_HOST_DIAGNOSTICS:-0}" = 1 ]; then
+  common="$common -DQLIE_DIAGNOSTICS=1"
+fi
 revision=$(git rev-parse --verify HEAD 2>/dev/null || printf unversioned)
 if [ "$revision" != unversioned ] && ! git diff --quiet HEAD -- src include engine games shaders build-host.sh build-switch.sh; then revision="$revision-dirty"; fi
 common="$common -DWHJ2_BUILD_REV=\"$revision\""
@@ -65,7 +68,7 @@ $cxx -std=c++17 $common $($pc --cflags sdl2 libpng libjpeg)      games/whj2/scen
 
 $cxx -std=c++17 $common $($pc --cflags libpng libjpeg)      games/whj2/scene_images.cpp  games/whj2/scene_transition.cpp    tools/transition_probe.cpp  build/libqlie-runtime.a $($pc --libs libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -o build/transition-probe
 
-$cxx -std=c++17 $common $($pc --cflags libpng libjpeg)   games/whj2/scene_transition.cpp     tools/wait_probe.cpp build/libqlie-runtime.a $($pc --libs libpng libjpeg) -o build/wait-probe
+$cxx -std=c++17 $common $($pc --cflags libpng libjpeg)   games/whj2/scene_images.cpp games/whj2/scene_transition.cpp tools/wait_probe.cpp build/libqlie-runtime.a $($pc --libs libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -o build/wait-probe
 
 $cxx -std=c++17 $common $($pc --cflags freetype2 libpng libjpeg)      games/whj2/scene_images.cpp  games/whj2/message_text.cpp   tools/message_probe.cpp   build/libqlie-runtime.a $($pc --libs freetype2 libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -o build/message-probe
 

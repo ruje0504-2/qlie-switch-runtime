@@ -25,6 +25,9 @@ uint maskAlpha(uint sourceAlpha,uint blue,uint amount,uint mode){
 }
 uvec4 pixel(Draw p,ivec2 q){
  q=clamp(q,ivec2(0),ivec2(p.meta.xy)-1);
+#ifdef DEKO_MOTION_KERNEL
+ return unpack(loadTexel(p.colors.z+uint(q.y)*p.meta.x+uint(q.x)));
+#else
  if((p.meta.z&262144u)==0u)return unpack(loadTexel(p.colors.z+uint(q.y)*p.meta.x+uint(q.x)));
  precise vec2 uv=vec2(divide(float(q.x)+.5,float(p.meta.x)),divide(float(q.y)+.5,float(p.meta.y)));
  precise vec2 from=p.maskSource.xy+uv*p.maskSource.zw,mask=p.maskRect.xy+uv*p.maskRect.zw;
@@ -32,12 +35,16 @@ uvec4 pixel(Draw p,ivec2 q){
  uvec4 color=unpack(loadTexel(p.colors.z+uint(sq.y)*p.meta.x+uint(sq.x)));
  uint blue=loadTexel(p.maskMeta.z+uint(mq.y)*p.maskMeta.x+uint(mq.x))&255u;
  color.a=maskAlpha(color.a,blue,p.maskMeta.w&255u,p.maskMeta.w>>8);return color;
+#endif
 }
 uvec4 samplePixel(Draw p,vec2 uv){
  if((p.meta.z&255u)!=2u)return pixel(p,ivec2(floor(uv)));
  precise vec2 f=uv-vec2(.5);ivec2 i=ivec2(floor(f));f-=vec2(i);
 #ifdef DEKO_RASTER
- if((p.meta.z&262144u)==0u){
+#ifndef DEKO_MOTION_KERNEL
+ if((p.meta.z&262144u)==0u)
+#endif
+ {
   // A horizontal or vertical subpixel pan has a zero weight along the other axis.
   // Keep the original evaluation order for every nonzero weight.
   ivec2 last=ivec2(p.meta.xy)-1,lo=clamp(i,ivec2(0),last),hi=clamp(i+1,ivec2(0),last);
@@ -80,7 +87,10 @@ uvec4 composite(uint mode,uvec4 s,uvec4 d){
   return d-min(d,contribution);
  }
 #endif
- if(mode<2u){
+#ifndef DEKO_MOTION_KERNEL
+ if(mode<2u)
+#endif
+ {
   if(a==255u)return s;
   return uvec4(ivec4(d)+((ivec4(s)-ivec4(d))*int((a+(a>>7))>>1)>>7));
  }

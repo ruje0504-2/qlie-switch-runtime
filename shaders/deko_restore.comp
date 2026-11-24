@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+#version 430
+layout(local_size_x=16,local_size_y=16) in;
+layout(binding=0,std430) readonly buffer Canvas { uint pixels[]; };
+layout(binding=1,std430) readonly buffer Tiles { uint origins[]; };
+layout(r32ui,binding=0) uniform writeonly uimage2D presentImage;
+void main(){
+ uint origin=origins[gl_WorkGroupID.x];
+ uvec2 q=uvec2(origin&65535u,origin>>16)+gl_LocalInvocationID.xy;
+ uint pixel=pixels[q.y*1280u+q.x];
+ imageStore(presentImage,ivec2(q),uvec4(pixel,0u,0u,0u));
+}

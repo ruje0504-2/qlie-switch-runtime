@@ -2,22 +2,63 @@
 #include "title_screen.hpp"
 #include <algorithm>
 #include <cmath>
+#ifdef __SWITCH__
+#include <switch.h>
+#endif
 namespace whj2 {
-void TitleScreen::reset(bool alternate,bool unlocked){scene.clear();elapsed=0;shown=hover=false;selected=0;buttonMotions.fill("");extras=unlocked;extraPage=false;viewX=0;viewTarget=640;
- scene.command(std::string("^ui_back,file:script/title/title_back0")+(alternate?"2":"1")+".b,x:0,y:0,pri:0");
+namespace {
+const char* backdropPath(bool alternate){
+ return alternate?"script/title/title_back02.b":"script/title/title_back01.b";
+}
+uint32_t titleSeed(){
+#ifdef __SWITCH__
+ return uint32_t(randomGet64());
+#else
+ return std::random_device{}();
+#endif
+}
+}
+TitleScreen::TitleScreen(qlie::Assets&assets):scene(assets),random(titleSeed()){}
+bool TitleScreen::rollAlternate(){
+ return std::uniform_int_distribution<unsigned>(0,99)(random)<5;
+}
+void TitleScreen::warmBackdrop(bool alternate){scene.warmFile(backdropPath(alternate));}
+bool TitleScreen::prepareOpening(AssetReadAhead*loader){
+ scene.setReadAhead(loader);
+ const bool alternate=rollAlternate();
+ warmBackdrop(alternate);
+ scene.warmFile("script/title/frame.b");
+ scene.warmFile("script/title/button.b");
+ return alternate;
+}
+void TitleScreen::setBackdrop(bool alternate){
+ viewX=0;viewTarget=640;
+ scene.command(std::string("^ui_back,file:")+backdropPath(alternate)+",x:0,y:0,pri:0");
  scene.uiExternal("ui_back",0,0);
+}
+void TitleScreen::returnToExtras(bool alternate){
+ setBackdrop(alternate);
+ scene.seekUiLayer("ui_back",6000);
+ setExtraPage(true);
+}
+void TitleScreen::reset(bool alternate,bool unlocked){scene.clear();elapsed=0;shown=hover=false;selected=0;buttonMotions.fill("");extras=unlocked;extraPage=false;
+ setBackdrop(alternate);
  scene.command("^ui_frame,file:script/title/frame.b,x:1070,y:450,pri:90,show:false");
  const char*names[]={"start","load","album","option","quit"};for(unsigned i=0;i<5;i++){auto id="ui_button"+std::to_string(i);scene.command("^"+id+",file:script/title/button.b,x:1080,y:"+std::to_string(310+i*70)+",pri:100,show:false");scene.uiSlot(id,0,std::string("script/title/")+names[i]+"01.png");scene.uiSlot(id,1,std::string("script/title/")+names[i]+"02.png");}
 }
 void TitleScreen::setExtraPage(bool extra){if(extra&&!extras)return;extraPage=extra;selected=0;buttonMotions.fill("");shown=true;hover=false;elapsed=5000;
  const char*mainNames[]={"start","load","album","option","quit"};const char*extraNames[]={"CG","Memory","Sound","Back"};
  for(int i=0;i<5;i++){auto id="ui_button"+std::to_string(i);if(extra&&i==4){scene.command("^"+id+",show:false");continue;}
-  scene.command("^"+id+",x:1080,y:"+std::to_string(extra?330+i*80:310+i*70)+",show:true,motion:*Enable");
+  scene.command("^"+id+",x:1080,y:"+std::to_string(extra?330+i*80:310+i*70)+",show:true,motion:"+entryMotion(i));
   auto file=std::string("script/title/")+(extra?extraNames[i]:mainNames[i]);scene.uiSlot(id,0,file+"01.png");scene.uiSlot(id,1,file+"02.png");
  }
  scene.command("^ui_frame,motion:*Enable");
 }
-void TitleScreen::enable(){buttonMotions.fill("");shown=true;scene.command("^ui_frame,show:true,motion:*Enable");for(int i=0;i<5;i++)scene.command("^ui_button"+std::to_string(i)+",show:true,motion:*Enable");}
+const char*TitleScreen::entryMotion(int i){
+ if(!extraPage&&i==2&&!extras){buttonMotions[i]="*OnLock";return "*OnLock";}
+ return "*Enable";
+}
+void TitleScreen::enable(){buttonMotions.fill("");shown=true;scene.command("^ui_frame,show:true,motion:*Enable");for(int i=0;i<5;i++)scene.command("^ui_button"+std::to_string(i)+",show:true,motion:"+entryMotion(i));}
 void TitleScreen::highlight(){hover=true;for(int i=0;i<(extraPage?4:5);i++){
  const char*motion=!extraPage&&i==2&&!extras?"*OnLock":i==selected?"*OnMouse":"*OffMouse";
  if(buttonMotions[i]==motion)continue;

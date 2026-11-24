@@ -4,7 +4,6 @@
 #include <stdexcept>
 #ifdef __SWITCH__
 #include <switch.h>
-#include <sys/stat.h>
 #endif
 namespace whj2 {
 // Installed titles read their bundled data from RomFS. Homebrew keeps its SD paths.
@@ -38,13 +37,6 @@ public:
 #endif
  }
 };
-inline void prepareSwitchLogDirectory(const char*root){
-#ifdef __SWITCH__
- fsdevMountSdmc();mkdir("sdmc:/switch",0755);mkdir(root,0755);
-#else
- (void)root;
-#endif
-}
 inline void commitSavePath(const std::string&path){
 #ifdef __SWITCH__
  if(path.rfind("save:/",0)==0&&R_FAILED(fsdevCommitDevice("save")))

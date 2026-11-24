@@ -1,6 +1,7 @@
 #pragma once
 #include "qlie.hpp"
 #include <atomic>
+#include <memory>
 #include <utility>
 namespace whj2 {
 // A producer publishes a version after completing all writes. An editable
@@ -16,8 +17,14 @@ public:
  uint64_t get()const{return serial;}
  void publish(){static std::atomic<uint64_t>next{1};serial=next.fetch_add(1,std::memory_order_relaxed);}
 };
-struct Image {unsigned width=0,height=0;qlie::Bytes pixels;PixelVersion version{};}; // BGRA8 straight alpha
-struct Member {std::string type,name;qlie::Bytes data;};
+struct VideoSurfaceImage;
+struct Image {
+ unsigned width=0,height=0;
+ qlie::Bytes pixels; // BGRA8 straight alpha
+ PixelVersion version{};
+ std::shared_ptr<const VideoSurfaceImage> videoSurface{};
+};
+struct Member {std::string type,name;qlie::Bytes data;size_t dataOffset=0,storedSize=0;};
 std::vector<Member> abmp(const qlie::Bytes&);
 Image image(const qlie::Bytes&);
 Image filterImage(const Image&,const std::string&);

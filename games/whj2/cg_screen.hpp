@@ -2,19 +2,28 @@
 #pragma once
 #include "cg_catalog.hpp"
 #include "scene_images.hpp"
+#include "scene_transition.hpp"
 namespace whj2 {
 class CgScreen {
  const Progress&progress;CgCatalog catalog;SceneImages menuScene,viewScene;qlie::Assets&assets;KFont*font;
- bool opened=false,viewing=false;unsigned page=0,group=0,variant=0,zoom=1;int selected=0;double elapsed=0;float pointerX=640,pointerY=360;
- void setup();void highlight();void loadView();void positionView();bool exists(int)const;
+ SceneTransition viewFade;
+ AssetReadAhead*readAhead=nullptr;
+ std::string pendingView;
+ std::unique_ptr<MessageText> countText;
+ std::string displayedCount;
+ bool prepared=false,opened=false,viewing=false,viewReady=false;unsigned page=0,group=0,variant=0,zoom=1;int selected=0;double elapsed=0;float pointerX=640,pointerY=360;
+ unsigned requestedVariant=0;
+ void prepareLayout();void setup();void highlight();void requestView(unsigned);void cancelViewRequest();void closeView();void loadView();void positionView();bool exists(int)const;
 public:
- void setFont(KFont*value){font=value;}
+ void setReadAhead(AssetReadAhead*loader){readAhead=loader;viewScene.setReadAhead(loader);}
  enum Action {None=0,Back=1,Replay=2,Music=3};
- CgScreen(qlie::Assets&a,const Progress&p,KFont*f):progress(p),catalog(a),menuScene(a),viewScene(a),assets(a),font(f){}
+ CgScreen(qlie::Assets&a,const Progress&p,KFont*f):progress(p),catalog(a),menuScene(a),viewScene(a),assets(a),font(f),viewFade(a){}
+ void prepare();
  void open();void close();bool visible()const{return opened;}bool inView()const{return viewing;}
- void update(double);void draw(qlie::Bytes&)const;void move(int,int);Action confirm();Action tap(float,float);Action back();void toggleZoom();void pan(float,float);void panDelta(float,float);
- void draw(RenderTarget&)const;
+ void update(double);void draw(qlie::Bytes&,const Affine2D* view=nullptr)const;void move(int,int);Action confirm();Action tap(float,float);Action back();void toggleZoom();void pan(float,float);void panDelta(float,float);
+ void draw(RenderTarget&,const Affine2D* view=nullptr)const;
  std::set<std::string> takeShownFiles(){return viewScene.takeShownFiles();}
+ bool viewLoaded()const{return viewing&&viewReady&&pendingView.empty();}
  unsigned pageIndex()const{return page;}unsigned variantIndex()const{return variant;}unsigned zoomLevel()const{return zoom;}int selection()const{return selected;}
 };
 }

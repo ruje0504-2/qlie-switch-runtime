@@ -44,5 +44,6 @@ public:
 };
 std::pair<Bytes,Bytes> game_keys(const std::string&,const ArchiveLayout&);
 Bytes file(const std::string&);
+void write_uncommitted_file(const std::string&,const Bytes&);
 void write_file(const std::string&,const Bytes&);
 }

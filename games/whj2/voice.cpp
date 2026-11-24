@@ -22,6 +22,10 @@ std::vector<std::string> VoiceResolver::candidates(std::string id)const{
  if(id.empty()||id=="none")return {};
  auto base=prefix+qlie::canonical(id);return {base,base+".ogg"};
 }
+std::string VoiceResolver::packedHint(const std::string&id)const{
+ for(auto&candidate:candidates(id))if(assets.inPack(candidate))return std::move(candidate);
+ return {};
+}
 std::optional<VoiceMatch> VoiceResolver::resolve(const std::string&id)const{
  for(auto&candidate:candidates(id))if(auto source=assets.locate(candidate))return VoiceMatch{candidate,*source};
  return {};

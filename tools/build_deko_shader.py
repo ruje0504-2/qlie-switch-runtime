@@ -18,12 +18,22 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--uam", required=True)
     parser.add_argument("--output", required=True, type=Path)
+    variant = parser.add_mutually_exclusive_group()
+    variant.add_argument("--motion", action="store_true", help="build the unmasked motion kernel")
+    variant.add_argument("--restore", action="store_true", help="build the sparse display tile copy kernel")
+    variant.add_argument("--base", action="store_true", help="build the fully covered opaque tile kernel")
+    variant.add_argument("--video", action="store_true", help="build the native NV12 movie conversion kernel")
     args = parser.parse_args()
-    source = Path(__file__).resolve().parents[1] / "shaders/deko_raster.comp"
+    symbol = next((name for name in ("restore", "base", "video", "motion") if getattr(args, name)), "raster")
+    source_name = "deko_raster.comp" if symbol == "motion" else f"deko_{symbol}.comp"
+    source = Path(__file__).resolve().parents[1] / "shaders" / source_name
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=args.output.parent) as temp:
         stage = Path(temp) / "raster.comp"
-        stage.write_text(expand(source))
+        glsl = expand(source)
+        if args.motion:
+            glsl = re.sub(r"(?m)^(#version [^\n]+)$", r"\1\n#define DEKO_MOTION_KERNEL", glsl, count=1)
+        stage.write_text(glsl)
         module = Path(temp) / "raster.dksh"
         subprocess.run([args.uam, "-s", "comp", "-o", str(module), str(stage)], check=True)
         data = module.read_bytes()
@@ -37,8 +47,8 @@ def main():
             raise ValueError("unexpected DKSH compute workgroup")
         # Store the control header and code as one module. ShaderMaker accepts both together.
         rows = [",".join(str(b) for b in data[i:i + 24]) for i in range(0, len(data), 24)]
-        text = "alignas(4) static constexpr unsigned char rasterDksh[] = {\n" + ",\n".join(rows) + "\n};\n"
-        text += f"static constexpr unsigned rasterScratchPerWarp = {scratch};\n"
+        text = f"alignas(4) static constexpr unsigned char {symbol}Dksh[] = {{\n" + ",\n".join(rows) + "\n};\n"
+        text += f"static constexpr unsigned {symbol}ScratchPerWarp = {scratch};\n"
         if not args.output.exists() or args.output.read_text() != text:
             header = Path(temp) / "raster.inc"
             header.write_text(text)

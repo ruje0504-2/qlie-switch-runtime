@@ -3,6 +3,7 @@
 #include "render_queue.hpp"
 #include <memory>
 #include <optional>
+struct KVideoSurface;
 namespace whj2 {
 namespace gpu { struct Scene; }
 class GpuRaster:public RenderTarget {
@@ -16,6 +17,8 @@ public:
  void begin(const qlie::Bytes&);void end(qlie::Bytes&);
  void begin(uint32_t clearColor);
  void beginVideo(const Image&);
+ bool supportsVideoSurfaces()const override;
+ bool beginVideoSurface(const KVideoSurface&);
  void finishPresentation();
  std::optional<uint64_t> present(bool refreshUnchanged=true);std::optional<uint64_t> presentPixels(const qlie::Bytes&);
  void beginBatch()override;void endBatch()override;

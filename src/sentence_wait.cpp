@@ -18,6 +18,11 @@ bool SentenceWait::property(const std::vector<std::string>&f){if(f.empty())retur
  if(mode!="message"&&mode!="click"&&mode!="wait"&&mode!="clickonly"&&mode!="waitonly"&&mode!="skip"&&mode!="voice")throw std::runtime_error("Unsupported sentence wait mode "+mode);
  return true;
 }
+void SentenceWait::resetProperties(){
+ mode="message";
+ duration=skipDuration=0;
+ automatic=false;
+}
 void SentenceWait::fromFade(double ms){if(automatic){mode="click";duration=std::max(0.,ms);skipDuration=duration;}}
 void SentenceWait::cancel(){stage=Stage::Idle;remaining=skipRemaining=0;message=continuation=voiceBound=false;}
 void SentenceWait::page(bool hasText,bool voicePlaying){cancel();

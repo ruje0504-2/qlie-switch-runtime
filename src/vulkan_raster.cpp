@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #ifdef __SWITCH__
+#include "diagnostics.h"
 #include <switch.h>
 #include "switch_threads.hpp"
 #include <thread>
@@ -170,7 +171,7 @@ struct VulkanRaster::Impl final : Scene {
   }
   maxViewElements=properties.limits.maxTexelBufferElements;
   di.enabledExtensionCount=canOrderPixels?2:1;di.ppEnabledExtensionNames=deviceExtensions;
-  VkPhysicalDeviceDriverProperties driver{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};VkPhysicalDeviceProperties2 props{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};props.pNext=&driver;GetPhysicalDeviceProperties2(physical,&props);std::cerr<<"VULKAN driver="<<driver.driverName<<" info="<<driver.driverInfo<<" id="<<driver.driverID<<"\n";if(driver.driverID!=VK_DRIVER_ID_MESA_NVK)throw std::runtime_error("Switch requires Mesa NVK");
+  VkPhysicalDeviceDriverProperties driver{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};VkPhysicalDeviceProperties2 props{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};props.pNext=&driver;GetPhysicalDeviceProperties2(physical,&props);QLIE_LOG_LINE(<<"VULKAN driver="<<driver.driverName<<" info="<<driver.driverInfo<<" id="<<driver.driverID<<"\n");if(driver.driverID!=VK_DRIVER_ID_MESA_NVK)throw std::runtime_error("Switch requires Mesa NVK");
 #endif
   checked(CreateDevice(physical,&di,nullptr,&device),"create device");
 #define LOAD_DEVICE(N) N=reinterpret_cast<PFN_vk##N>(GetDeviceProcAddr(device,"vk" #N));if(!N)throw std::runtime_error("Missing vk" #N);
@@ -179,7 +180,7 @@ struct VulkanRaster::Impl final : Scene {
   PRESENT_DEVICE(LOAD_DEVICE)
 #endif
 #undef LOAD_DEVICE
-  GetDeviceQueue(device,family,0,&queue);std::cerr<<"VULKAN device="<<properties.deviceName<<" api="<<VK_VERSION_MAJOR(properties.apiVersion)<<'.'<<VK_VERSION_MINOR(properties.apiVersion)<<" compute-family="<<family<<"\n";
+  GetDeviceQueue(device,family,0,&queue);QLIE_LOG_LINE(<<"VULKAN device="<<properties.deviceName<<" api="<<VK_VERSION_MAJOR(properties.apiVersion)<<'.'<<VK_VERSION_MINOR(properties.apiVersion)<<" compute-family="<<family<<"\n");
   VkDescriptorSetLayoutBinding bindings[5]{};
   unsigned bindingCount=4,poolTypes=1;
   for(unsigned i=0;i<4;++i){bindings[i].binding=i;bindings[i].descriptorCount=1;bindings[i].descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;bindings[i].stageFlags=VK_SHADER_STAGE_COMPUTE_BIT|(i==1?VK_SHADER_STAGE_FRAGMENT_BIT:0);}
@@ -208,16 +209,18 @@ struct VulkanRaster::Impl final : Scene {
 #ifdef __SWITCH__
   createPresentation(physical);
   if(canOrderPixels){
-   try{createScenePipeline();}catch(const std::exception&e){destroyScenePipeline();std::fprintf(stderr,"VULKAN ordered geometry unavailable: %s\n",e.what());}
+   try{createScenePipeline();}catch(const std::exception&e){destroyScenePipeline();QLIE_LOGF("VULKAN ordered geometry unavailable: %s\n",e.what());}
   }
-  std::fprintf(stderr,"VULKAN scene_backend=%s pixel_interlock=%d\n",scenePipeline?"ordered-geometry":"tiled-compute",int(canOrderPixels));
-  timestampBits=queues[family].timestampValidBits;
-  timestampNs=properties.limits.timestampPeriod;
-  if(timestampBits&&properties.limits.timestampComputeAndGraphics&&timestampNs>0){
-   VkQueryPoolCreateInfo queries{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
-   queries.queryType=VK_QUERY_TYPE_TIMESTAMP;queries.queryCount=4;
-   auto status=CreateQueryPool(device,&queries,nullptr,&timeQueries);
-   if(status!=VK_SUCCESS){timeQueries=VK_NULL_HANDLE;std::cerr<<"VULKAN timestamps unavailable result="<<status<<"\n";}
+  QLIE_LOGF("VULKAN scene_backend=%s pixel_interlock=%d\n",scenePipeline?"ordered-geometry":"tiled-compute",int(canOrderPixels));
+  if constexpr (qlie::diagnostics){
+   timestampBits=queues[family].timestampValidBits;
+   timestampNs=properties.limits.timestampPeriod;
+   if(timestampBits&&properties.limits.timestampComputeAndGraphics&&timestampNs>0){
+    VkQueryPoolCreateInfo queries{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+    queries.queryType=VK_QUERY_TYPE_TIMESTAMP;queries.queryCount=4;
+    auto status=CreateQueryPool(device,&queries,nullptr,&timeQueries);
+    if(status!=VK_SUCCESS){timeQueries=VK_NULL_HANDLE;QLIE_LOG_LINE(<<"VULKAN timestamps unavailable result="<<status<<"\n");}
+   }
   }
   presenter=std::thread([this]{presentationLoop();});
 #endif
@@ -235,7 +238,7 @@ struct VulkanRaster::Impl final : Scene {
   if(!(caps.supportedUsageFlags&VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)||!(caps.supportedCompositeAlpha&VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR))throw std::runtime_error("Unsupported display surface");
   count=std::max(3u,caps.minImageCount);if(caps.maxImageCount)count=std::min(count,caps.maxImageCount);VkSwapchainCreateInfoKHR ci{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};ci.surface=surface;ci.minImageCount=count;ci.imageFormat=format;ci.imageColorSpace=chosen->colorSpace;ci.imageExtent=extent;ci.imageArrayLayers=1;copyPresent=format==VK_FORMAT_B8G8R8A8_UNORM&&extent.width==Width&&extent.height==Height&&(caps.supportedUsageFlags&VK_IMAGE_USAGE_TRANSFER_DST_BIT);ci.imageUsage=VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|(copyPresent?VK_IMAGE_USAGE_TRANSFER_DST_BIT:0);ci.imageSharingMode=VK_SHARING_MODE_EXCLUSIVE;ci.preTransform=caps.currentTransform;ci.compositeAlpha=VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;ci.presentMode=VK_PRESENT_MODE_FIFO_KHR;ci.clipped=copyPresent?VK_FALSE:VK_TRUE;auto created=CreateSwapchainKHR(device,&ci,nullptr,&swapchain);
   if(copyPresent&&(created==VK_ERROR_FORMAT_NOT_SUPPORTED||created==VK_ERROR_INITIALIZATION_FAILED)){
-   std::fprintf(stderr,"VULKAN transfer swapchain result=%d, retrying color-only\n",int(created));copyPresent=false;ci.imageUsage=VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;ci.clipped=VK_TRUE;
+   QLIE_LOGF("VULKAN transfer swapchain result=%d, retrying color-only\n",int(created));copyPresent=false;ci.imageUsage=VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;ci.clipped=VK_TRUE;
    created=CreateSwapchainKHR(device,&ci,nullptr,&swapchain);
   }
   checked(created,"swapchain");checked(GetSwapchainImagesKHR(device,swapchain,&count,nullptr),"swapchain images");swapImages.resize(count);checked(GetSwapchainImagesKHR(device,swapchain,&count,swapImages.data()),"swapchain images");swapViews.resize(count);swapFrames.resize(count);finished.resize(count);
@@ -244,7 +247,7 @@ struct VulkanRaster::Impl final : Scene {
   VkRenderPassCreateInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};rp.attachmentCount=1;rp.pAttachments=&attachment;rp.subpassCount=1;rp.pSubpasses=&sub;rp.dependencyCount=1;rp.pDependencies=&dependency;checked(CreateRenderPass(device,&rp,nullptr,&renderPass),"display pass");VkSemaphoreCreateInfo semaphore{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};checked(CreateSemaphore(device,&semaphore,nullptr,&acquired),"acquire semaphore");
   for(unsigned i=0;i<count;i++){VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};vi.image=swapImages[i];vi.viewType=VK_IMAGE_VIEW_TYPE_2D;vi.format=format;vi.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};checked(CreateImageView(device,&vi,nullptr,&swapViews[i]),"display view");VkFramebufferCreateInfo fb{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};fb.renderPass=renderPass;fb.attachmentCount=1;fb.pAttachments=&swapViews[i];fb.width=extent.width;fb.height=extent.height;fb.layers=1;checked(CreateFramebuffer(device,&fb,nullptr,&swapFrames[i]),"display frame");checked(CreateSemaphore(device,&semaphore,nullptr,&finished[i]),"present semaphore");}
   graphicsPipeline(renderPass,extent,1,presentVertexSpv,sizeof(presentVertexSpv),presentFragmentSpv,sizeof(presentFragmentSpv),displayPipeline);
-  VkDescriptorSetAllocateInfo allocation{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};allocation.descriptorPool=descriptorPool;allocation.descriptorSetCount=1;allocation.pSetLayouts=&setLayout;checked(AllocateDescriptorSets(device,&allocation,&displaySet),"display descriptor");VkDescriptorBufferInfo bi{output.buffer,0,CanvasBytes};VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};write.dstSet=displaySet;write.dstBinding=1;write.descriptorCount=1;write.descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;write.pBufferInfo=&bi;UpdateDescriptorSets(device,1,&write,0,nullptr);std::cerr<<"VULKAN native display="<<extent.width<<'x'<<extent.height<<" images="<<count<<" copy_present="<<copyPresent<<"\n";
+  VkDescriptorSetAllocateInfo allocation{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};allocation.descriptorPool=descriptorPool;allocation.descriptorSetCount=1;allocation.pSetLayouts=&setLayout;checked(AllocateDescriptorSets(device,&allocation,&displaySet),"display descriptor");VkDescriptorBufferInfo bi{output.buffer,0,CanvasBytes};VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};write.dstSet=displaySet;write.dstBinding=1;write.descriptorCount=1;write.descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;write.pBufferInfo=&bi;UpdateDescriptorSets(device,1,&write,0,nullptr);QLIE_LOG_LINE(<<"VULKAN native display="<<extent.width<<'x'<<extent.height<<" images="<<count<<" copy_present="<<copyPresent<<"\n");
  }
  VkShaderModule module(const uint32_t*code,size_t bytes){
   VkShaderModuleCreateInfo info{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};info.codeSize=bytes;info.pCode=code;
@@ -286,12 +289,12 @@ struct VulkanRaster::Impl final : Scene {
   scenePipeline=sceneInit=VK_NULL_HANDLE;scenePass=VK_NULL_HANDLE;sceneFrame=VK_NULL_HANDLE;
  }
  uint64_t presentRecorded(){
-  const auto start=Clock::now();
+  const auto start=qlie::diagnostics?Clock::now():Clock::time_point{};
   uint32_t index=0;
   auto result=AcquireNextImageKHR(device,swapchain,5000000000ull,acquired,VK_NULL_HANDLE,&index);
   if(result!=VK_SUBOPTIMAL_KHR)checked(result,"acquire image");
-  const auto imageReady=Clock::now();
-  if(timingFrame&&timeQueries){
+  const auto imageReady=qlie::diagnostics?Clock::now():Clock::time_point{};
+  if(qlie::diagnostics&&timingFrame&&timeQueries){
    CmdResetQueryPool(command,timeQueries,2,2);
    // The previous scene work must finish before measuring display conversion.
    CmdWriteTimestamp(command,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,timeQueries,2);
@@ -335,7 +338,7 @@ struct VulkanRaster::Impl final : Scene {
   CmdPushConstants(command,layout,VK_SHADER_STAGE_COMPUTE_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(push),&push);
   CmdDraw(command,3,1,0,0);CmdEndRenderPass(command);
   }
-  if(timingFrame&&timeQueries)CmdWriteTimestamp(command,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,timeQueries,3);
+  if(qlie::diagnostics&&timingFrame&&timeQueries)CmdWriteTimestamp(command,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,timeQueries,3);
   checked(EndCommandBuffer(command),"end display");
   checked(ResetFences(device,1,&fence),"reset display fence");
   VkPipelineStageFlags wait=copyPresent?(copyRegions?VK_PIPELINE_STAGE_TRANSFER_BIT:VK_PIPELINE_STAGE_ALL_COMMANDS_BIT):VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -350,14 +353,14 @@ struct VulkanRaster::Impl final : Scene {
   if(copyPresent)swapDamage[index].reset();
   const auto presented=Clock::now();
   checked(WaitForFences(device,1,&fence,VK_TRUE,5000000000ull),"display completion");
-  if(timingFrame){
+  if(qlie::diagnostics&&timingFrame){
    auto gpuMs=[&](unsigned first){
     uint64_t ticks[2];
     if(!timeQueries||GetQueryPoolResults(device,timeQueries,first,2,sizeof(ticks),ticks,sizeof(uint64_t),VK_QUERY_RESULT_64_BIT)!=VK_SUCCESS)return -1.0;
     uint64_t mask=timestampBits==64?UINT64_MAX:(uint64_t(1)<<timestampBits)-1;
     return double((ticks[1]-ticks[0])&mask)*timestampNs/1e6;
    };
-   std::fprintf(stderr,"VULKAN TIMING frame=%llu raster_gpu_ms=%.3f present_gpu_ms=%.3f acquire_ms=%.3f submission_to_fence_ms=%.3f copy_regions=%u copy_tiles=%u\n",
+   QLIE_LOGF("VULKAN TIMING frame=%llu raster_gpu_ms=%.3f present_gpu_ms=%.3f acquire_ms=%.3f submission_to_fence_ms=%.3f copy_regions=%u copy_tiles=%u\n",
                 (unsigned long long)timingFrame,timingHadRaster?gpuMs(0):0.0,gpuMs(2),milliseconds(imageReady-start),milliseconds(Clock::now()-imageReady),copyRegions,copiedTiles);
   }
   return uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(presented.time_since_epoch()).count());
@@ -398,11 +401,11 @@ struct VulkanRaster::Impl final : Scene {
   if(!interlaced&&!refreshUnchanged&&nativeDisplayCurrent&&current->cleared&&workTiles.empty()){
    // The compositor still displays the last presented surface. Throttle input
    // and animation sampling when FIFO acquisition no longer paces the loop.
-   cpuBuildMs=milliseconds(Clock::now()-cpuFrameStart)-priorWaitMs;
+   if constexpr (qlie::diagnostics) cpuBuildMs=milliseconds(Clock::now()-cpuFrameStart)-priorWaitMs;
    const auto next=lastRefresh+std::chrono::nanoseconds(16666667);
    auto remaining=std::chrono::duration_cast<std::chrono::nanoseconds>(next-Clock::now()).count();
    if(remaining>0)svcSleepThread(remaining);
-   reusedDisplay=true;
+   if constexpr (qlie::diagnostics) reusedDisplay=true;
   }else{
    beginGpuCommands();
    {
@@ -415,16 +418,16 @@ struct VulkanRaster::Impl final : Scene {
   recording=false;completeFrame();
   return confirmed;
  }
- void destroyPresentation(){destroyScenePipeline();if(texelView)DestroyBufferView(device,texelView,nullptr);if(timeQueries)DestroyQueryPool(device,timeQueries,nullptr);if(displayPipeline)DestroyPipeline(device,displayPipeline,nullptr);for(auto fb:swapFrames)if(fb)DestroyFramebuffer(device,fb,nullptr);for(auto view:swapViews)if(view)DestroyImageView(device,view,nullptr);for(auto sem:finished)if(sem)DestroySemaphore(device,sem,nullptr);if(acquired)DestroySemaphore(device,acquired,nullptr);if(renderPass)DestroyRenderPass(device,renderPass,nullptr);if(swapchain)DestroySwapchainKHR(device,swapchain,nullptr);}
+ void destroyPresentation(){destroyScenePipeline();if(texelView)DestroyBufferView(device,texelView,nullptr);if(qlie::diagnostics&&timeQueries)DestroyQueryPool(device,timeQueries,nullptr);if(displayPipeline)DestroyPipeline(device,displayPipeline,nullptr);for(auto fb:swapFrames)if(fb)DestroyFramebuffer(device,fb,nullptr);for(auto view:swapViews)if(view)DestroyImageView(device,view,nullptr);for(auto sem:finished)if(sem)DestroySemaphore(device,sem,nullptr);if(acquired)DestroySemaphore(device,acquired,nullptr);if(renderPass)DestroyRenderPass(device,renderPass,nullptr);if(swapchain)DestroySwapchainKHR(device,swapchain,nullptr);}
 #endif
  void waitGpu() override {
 #ifdef __SWITCH__
   if(inFlight){
-   auto start=Clock::now();
+   const auto start=qlie::diagnostics?Clock::now():Clock::time_point{};
    std::unique_lock<std::mutex> lock(presentMutex);
    presentSignal.wait(lock,[this]{return !presentQueued;});
    inFlight=false;
-   priorWaitMs+=milliseconds(Clock::now()-start);
+   if constexpr (qlie::diagnostics) priorWaitMs+=milliseconds(Clock::now()-start);
    if(presentError)std::rethrow_exception(presentError);
   }
 #endif
@@ -434,7 +437,7 @@ struct VulkanRaster::Impl final : Scene {
   if(presenter.joinable()){
    {std::lock_guard<std::mutex> lock(presentMutex);stopPresenter=true;}
    presentSignal.notify_one();presenter.join();
-   if(presentError){try{std::rethrow_exception(presentError);}catch(const std::exception&e){std::fprintf(stderr,"Vulkan presenter stopped: %s\n",e.what());}}
+   if(presentError){try{std::rethrow_exception(presentError);}catch(const std::exception&e){QLIE_LOGF("Vulkan presenter stopped: %s\n",e.what());}}
   }
 #endif
   if(device&&DeviceWaitIdle){DeviceWaitIdle(device);
@@ -514,8 +517,10 @@ struct VulkanRaster::Impl final : Scene {
   checked(BeginCommandBuffer(command,&bi),"begin commands");
   if(interlaced&&!scanlineValid&&canvasValid)copyScanlines(true);
 #ifdef __SWITCH__
-  timingFrame=(frames==0||(frames+1)%120==0)?frames+1:0;
-  timingHadRaster=!workTiles.empty();
+  if constexpr (qlie::diagnostics){
+   timingFrame=(frames==0||(frames+1)%120==0)?frames+1:0;
+   timingHadRaster=!workTiles.empty();
+  }
 #endif
   if(uploadBase){
    VkBufferCopy copy{0,0,CanvasBytes};CmdCopyBuffer(command,staging.buffer,output.buffer,1,&copy);
@@ -524,7 +529,7 @@ struct VulkanRaster::Impl final : Scene {
   if(!workTiles.empty())recordTiles();
   if(interlaced)copyScanlines(!scanlineValid);
   canvasValid=true;
-  cpuBuildMs=milliseconds(Clock::now()-cpuFrameStart)-priorWaitMs;
+  if constexpr (qlie::diagnostics) cpuBuildMs=milliseconds(Clock::now()-cpuFrameStart)-priorWaitMs;
  }
 #ifdef __SWITCH__
  // A raw decoded frame or a neutral, unscaled opaque bitmap can seed the
@@ -574,7 +579,7 @@ struct VulkanRaster::Impl final : Scene {
   }else if(!initTiles.empty()){
    CmdBindPipeline(command,VK_PIPELINE_BIND_POINT_COMPUTE,sceneInit);
    CmdBindDescriptorSets(command,VK_PIPELINE_BIND_POINT_COMPUTE,layout,0,1,&rasterSet,0,nullptr);
-   CmdDispatch(command,uint32_t(initTiles.size()),1,1);++dispatches;
+   CmdDispatch(command,uint32_t(initTiles.size()),1,1);if constexpr (qlie::diagnostics) ++dispatches;
    barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,VK_ACCESS_SHADER_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT|VK_ACCESS_SHADER_WRITE_BIT);
   }
   if(instances.empty())return;
@@ -638,16 +643,16 @@ struct VulkanRaster::Impl final : Scene {
   barrier(VK_PIPELINE_STAGE_HOST_BIT|VK_PIPELINE_STAGE_TRANSFER_BIT|shaders,shaders,VK_ACCESS_HOST_WRITE_BIT|VK_ACCESS_TRANSFER_WRITE_BIT|VK_ACCESS_SHADER_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT|VK_ACCESS_SHADER_WRITE_BIT);
   CmdPushConstants(command,layout,VK_SHADER_STAGE_COMPUTE_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(push),&push);
 #ifdef __SWITCH__
-  if(timingFrame&&timeQueries){CmdResetQueryPool(command,timeQueries,0,2);CmdWriteTimestamp(command,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,timeQueries,0);}
+  if(qlie::diagnostics&&timingFrame&&timeQueries){CmdResetQueryPool(command,timeQueries,0,2);CmdWriteTimestamp(command,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,timeQueries,0);}
   if(current->geometry)recordScene();else
 #endif
   {
    CmdBindPipeline(command,VK_PIPELINE_BIND_POINT_COMPUTE,pipeline);
    CmdBindDescriptorSets(command,VK_PIPELINE_BIND_POINT_COMPUTE,layout,0,1,&rasterSet,0,nullptr);
-   CmdDispatch(command,uint32_t(workTiles.size()),1,1);++dispatches;
+   CmdDispatch(command,uint32_t(workTiles.size()),1,1);if constexpr (qlie::diagnostics) ++dispatches;
   }
 #ifdef __SWITCH__
-  if(timingFrame&&timeQueries)CmdWriteTimestamp(command,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,timeQueries,1);
+  if(qlie::diagnostics&&timingFrame&&timeQueries)CmdWriteTimestamp(command,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,timeQueries,1);
 #endif
  }
 
@@ -661,6 +666,7 @@ struct VulkanRaster::Impl final : Scene {
  }
  void readCanvas(qlie::Bytes&pixels) override {
  auto&s=*this;
+ if(!s.interlaced&&s.readCoveredSolid(pixels))return;
 #ifdef __SWITCH__
  s.current->geometry=s.scenePipeline&&s.current->cleared;
 #endif

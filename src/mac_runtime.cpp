@@ -6,6 +6,7 @@
 #include "state_io.hpp"
 #include "movie.hpp"
 #include "joycon.hpp"
+#include "voice.hpp"
 #include <sstream>
 #include <algorithm>
 extern "C" {
@@ -40,6 +41,7 @@ struct Frontend {
  std::unique_ptr<whj2::Audio>audio;
  std::unique_ptr<whj2::SceneImages>images;
  std::unique_ptr<whj2::Movie>movie;
+ std::unique_ptr<whj2::VoiceResolver>voices;
  bool movieOnly=false,movieCaptured=false,touchOnlyTest=false;
  qlie::Bytes touchSavedStory;std::string touchSavedText;
  std::map<std::string,std::map<std::string,std::string>>audioTemplates;
@@ -74,6 +76,7 @@ struct Frontend {
  audio=std::make_unique<whj2::Audio>();
  images=std::make_unique<whj2::SceneImages>(assets);
  movie=std::make_unique<whj2::Movie>(assets,*audio);
+ voices=std::make_unique<whj2::VoiceResolver>(assets);
  for(auto type:{"music","sound"}){std::istringstream in(qlie::cp932(assets.read(std::string("avg/imoscripter_template_")+type+".txt")));
  std::string l;
  while(std::getline(in,l)){auto p=l.find(61);
@@ -136,8 +139,15 @@ struct Frontend {
  }else audio->volume(ch,volumes[ch],ms);
  return true;
  }
+ void playVoice(const std::string&id){
+ if(id.empty())return;
+ auto match=voices->resolve(id);
+ if(!match){std::cerr<<"VOICE unresolved id="<<id;for(auto&candidate:voices->candidates(id))std::cerr<<" candidate="<<candidate;std::cerr<<"\n";if(voices->fileErrors)throw std::runtime_error("Voice file not found: "+id);return;}
+ auto bytes=assets.read(match->request);audio->play(3,bytes,false,voices->gain,0,match->request);
+ std::cerr<<"VOICE playing id="<<id<<" source="<<match->source.path<<" offset="<<match->source.offset<<" bytes="<<bytes.size()<<" loose="<<match->source.loose<<"\n";
+ }
  void next(){if(menu||story.state.finished)return;
- std::string body,speaker;
+ std::string body,speaker,voiceId;
  for(unsigned guard=0;guard<10000;guard++){auto e=story.next();
  if(e.type=="choice"){focus=0;
  text=body.empty()?"選択してください":body;
@@ -146,6 +156,7 @@ struct Frontend {
  }if(e.type=="page"){if(body.empty())continue;
  text=body;
  name=speaker;
+ playVoice(voiceId);
  advances++;
  std::cerr<<"PAGE "<<e.file<<":"<<e.line<<"\n";
  return;
@@ -157,7 +168,7 @@ struct Frontend {
   if(e.value.rfind("【",0)==0){speaker=e.value;
  continue;
  }
-  if(e.value.rfind("％",0)==0){std::cerr<<"VOICE-ID unresolved: "<<e.file<<":"<<e.line<<"\n";
+  if(e.value.rfind("％",0)==0){voiceId=e.value;
  continue;
  }
   if(!body.empty())body+="\n";

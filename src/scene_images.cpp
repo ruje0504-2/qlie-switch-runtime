@@ -15,22 +15,26 @@ namespace whj2 {
 namespace {
 float numeric(const std::string&s){return !s.empty()&&s[0]=='$'?float(std::stoul(s.substr(1),nullptr,16)):std::stof(s);
  }
-void blit(qlie::Bytes&out,unsigned width,unsigned height,const Image&im,float x,float y,float sx,float sy,float rotation,float anchorX,float anchorY,float alpha,uint32_t add,uint32_t mul){
+void blit(qlie::Bytes&out,unsigned width,unsigned height,const Image&im,float x,float y,float sx,float sy,float rotation,float anchorX,float anchorY,float alpha,uint32_t add,uint32_t mul,const Affine2D&post={}){
  if(!im.width||!im.height||!sx||!sy||alpha<=0)return;
  constexpr float pi=3.14159265358979323846f;
  float c=std::cos(rotation*pi/180),s=std::sin(rotation*pi/180);
  float ax=im.width*anchorX,ay=im.height*anchorY;
- float xmin=x,xmax=x,ymin=y,ymax=y;
+ float a=post.a*c*sx+post.b*s*sx,b=-post.a*s*sy+post.b*c*sy;
+ float cc=post.c*c*sx+post.d*s*sx,d=-post.c*s*sy+post.d*c*sy;
+ float px=post.a*x+post.b*y+post.x,py=post.c*x+post.d*y+post.y;
+ float det=a*d-b*cc;if(std::abs(det)<1e-12f)return;
+ float xmin=px,xmax=px,ymin=py,ymax=py;
  for(int i=0;i<4;i++){float u=((i&1)?im.width:0)-ax,v=((i&2)?im.height:0)-ay;
- float xx=x+c*u*sx-s*v*sy,yy=y+s*u*sx+c*v*sy;
+ float xx=px+a*u+b*v,yy=py+cc*u+d*v;
  xmin=std::min(xmin,xx);
  xmax=std::max(xmax,xx);
  ymin=std::min(ymin,yy);
  ymax=std::max(ymax,yy);
  }
  for(int yy=std::max(0,int(std::floor(ymin)));yy<std::min(int(height),int(std::ceil(ymax)));yy++)for(int xx=std::max(0,int(std::floor(xmin)));xx<std::min(int(width),int(std::ceil(xmax)));xx++){
-  float dx=xx+0.5f-x,dy=yy+0.5f-y;
- int u=int(std::floor((c*dx+s*dy)/sx+ax)),v=int(std::floor((-s*dx+c*dy)/sy+ay));
+  float dx=xx+0.5f-px,dy=yy+0.5f-py;
+ int u=int(std::floor((d*dx-b*dy)/det+ax)),v=int(std::floor((-cc*dx+a*dy)/det+ay));
  if(u<0||v<0||u>=int(im.width)||v>=int(im.height))continue;
   const auto*src=im.pixels.data()+(size_t(v)*im.width+u)*4;
  auto*dst=out.data()+(size_t(yy)*width+xx)*4;
@@ -102,8 +106,8 @@ struct Composite {
    else if(m.type.rfind("absnd",0)==0&&!m.data.empty())warn("embedded-audio="+m.name);
   }
   if(!metadata)throw std::runtime_error("Composite lacks animation metadata "+name);
-  for(auto&motion:definition.motions)for(auto&layer:motion.layers){if(layer.mode)warn("layer-mode="+std::to_string(layer.mode));
- for(auto&k:layer.keys)if(k[4]!=0&&k[4]!=4)warn("primitive="+std::to_string(k[4]));
+  for(auto&motion:definition.motions)for(auto&layer:motion.layers){if(layer.mode>2)warn("layer-mode="+std::to_string(layer.mode));
+ for(auto&k:layer.keys)if(k[4]!=0&&k[4]!=4&&k[4]!=15&&k[4]!=16)warn("primitive="+std::to_string(k[4]));
  }
  }
  void warn(const std::string&s)const{if(warnings.insert(s).second)std::cerr<<"PENDING-ANIMATION "<<path<<" "<<s<<"\n";
@@ -115,11 +119,11 @@ struct Composite {
  if(!motion&&(motionName.empty()||motionName=="def"||motionName=="0")&&!definition.motions.empty())motion=&definition.motions.front();
  if(!motion)throw std::runtime_error("Missing motion "+motionName+" in "+path);
   Image frame{unsigned(definition.bounds[0]),unsigned(definition.bounds[1]),qlie::Bytes(size_t(definition.bounds[0])*definition.bounds[1]*4)};
-  size_t layerIndex=0;
-  for(auto&layer:motion->layers){size_t index=layerIndex++;
- auto k=sampleAnimation(layer,ms);
+  auto samples=sampleMotion(*motion,ms,frame.width,frame.height);
+  for(size_t index=0;index<samples.size();index++){
+ auto&k=samples[index];
  for(auto&w:k.unsupported)warn(w);
- if(k.kind!=4)continue;
+ if(!motion->layers[index].flags||k.kind!=4)continue;
  if(k.resource>=members.size())throw std::runtime_error("Composite image index "+path);
    auto&e=members[k.resource];
  Image nested;
@@ -136,7 +140,7 @@ struct Composite {
     warn("video-member origin alignment unverified");
  source=&clip->at(ms);
    }
-   if(source)blit(frame.pixels,frame.width,frame.height,*source,k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,k.alpha,k.addColor,k.mulColor);
+   if(source)blit(frame.pixels,frame.width,frame.height,*source,k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,k.alpha,k.addColor,k.mulColor,k.screen);
   }
   return frame;
  }

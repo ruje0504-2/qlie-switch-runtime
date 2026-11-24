@@ -1,0 +1,49 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+#include "animation.hpp"
+#include <iostream>
+#include <stdexcept>
+#include <cmath>
+using namespace whj2;
+void check(bool ok,const char*message){if(!ok)throw std::runtime_error(message);}
+AnimationLayer layer(unsigned mode,int x,int sx,unsigned kind=4){
+ AnimationLayer l{"test",18,1,uint8_t(mode),{qlie::Bytes(162)}};
+ auto&k=l.keys[0];k[4]=kind;
+ auto put=[&](size_t o,int v){k[o]=v&255;k[o+1]=(v>>8)&255;};
+ put(0x18,x);put(0x1c,sx);put(0x1e,100);put(0x35,255);
+ k[0x28]=k[0x29]=k[0x2a]=255;return l;
+}
+int main(){try{
+ Motion m{"nested",{layer(1,10,200),layer(1,3,50),layer(0,7,100),layer(2,2,100),layer(0,7,100),layer(2,0,100),layer(0,7,100)}};
+ auto s=sampleMotion(m,0);
+ check(s.size()==7,"sample count");
+ check(s[0].x==20&&s[0].scaleX==400,"push then apply self");
+ check(s[1].x==16&&s[1].scaleX==50,"nested push");
+ check(s[2].x==20&&s[2].scaleX==100,"nested child");
+ check(s[3].x==15,"pop applies current group first");
+ check(s[4].x==17&&s[4].scaleX==200,"parent group after pop");
+ check(s[6].x==7&&s[6].scaleX==100,"stack empty after second pop");
+ auto hidden=layer(1,100,200,0);m.layers={hidden,layer(2,3,100),layer(0,4,100)};
+ s=sampleMotion(m,0);check(s[1].x==3&&s[2].x==4,"inactive group and empty pop");
+ m.layers={layer(1,0,100),layer(0,0,100)};
+ for(auto&l:m.layers){l.keys[0][0x24]=200;l.keys[0][0x28]=128;l.keys[0][0x35]=128;}
+ s=sampleMotion(m,0);check((s[1].addColor&255)==255,"saturating add");
+ check((s[1].mulColor&255)==64&&s[1].alpha==64,"integer tint and opacity");
+ m.layers={layer(1,0,200),layer(0,0,50,3)};
+ s=sampleMotion(m,0);check(s[1].scaleX==50,"primitive3 scale exception");
+ auto near=[](float a,float b){return std::abs(a-b)<0.002f;};
+ auto z=layer(0,0,100);z.keys[0][0x22]=90;z.keys[0][0x4a]=12;
+ auto single=sampleAnimation(z,0);check(single.rotationZ==90,"Z comes from0x22, not Y0x4a");
+ check(!single.unsupported.empty(),"3D rotation stays explicit");
+ m.layers={layer(0,10,200,16),layer(0,0,100),layer(0,3,50,16),layer(0,0,100),layer(0,0,100,15),layer(0,0,100),layer(0,0,100,15),layer(0,0,100)};
+ s=sampleMotion(m,0,100,80);
+ check(near(s[1].screen.a,2)&&near(s[1].screen.x,-30),"render translate then center-scale");
+ check(near(s[3].screen.a,1)&&near(s[3].screen.x,13),"render nested composition");
+ check(near(s[5].screen.a,2)&&near(s[5].screen.x,-30),"render pop restores parent");
+ check(near(s[7].screen.a,1)&&near(s[7].screen.x,0),"render second pop restores identity");
+ m.layers={layer(0,0,100,16),layer(0,0,100)};
+ m.layers[0].keys[0][0x22]=90;s=sampleMotion(m,0,100,80);
+ check(near(s[1].screen.a,0)&&near(s[1].screen.b,1)&&near(s[1].screen.c,-1),"render rotation orientation");
+ check(near(s[1].screen.x,10)&&near(s[1].screen.y,90),"render rotation screen center");
+ m.layers[0].flags=0;s=sampleMotion(m,0);check(s[1].screen.a==1&&s[1].screen.x==0,"disabled render-control layer");
+ std::cout<<"PASS nested push/apply/pop, inactive keys, empty pop, tint, alpha, primitive3\n";
+ return 0;}catch(const std::exception&e){std::cerr<<e.what()<<"\n";return 1;}}

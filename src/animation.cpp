@@ -95,7 +95,7 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms){
  out.y=val(0x1a,a.at(0x30),a.at(0x31)/100.f);
  out.scaleX=val(0x1c,a.at(0x30),a.at(0x31)/100.f);
  out.scaleY=val(0x1e,a.at(0x30),a.at(0x31)/100.f);
- out.rotationZ=val(0x4a,a.at(0x30),a.at(0x31)/100.f);
+ out.rotationZ=val(0x22,a.at(0x30),a.at(0x31)/100.f);
  out.alpha=val(0x35,a.at(0x33),a.at(0x3b)/100.f);
  out.anchorX=float(keyI16(a,0x85));
  out.anchorY=float(keyI16(a,0x87));
@@ -107,9 +107,74 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms){
  };
  out.addColor=color(0x24);
  out.mulColor=color(0x28);
- if(out.kind!=0&&out.kind!=4)out.unsupported.push_back("primitive="+std::to_string(out.kind));
- if(layer.mode)out.unsupported.push_back("layer-mode="+std::to_string(layer.mode));
+ if(keyI16(a,0x48)||keyI16(a,0x4a))out.unsupported.push_back("3d-rotation");
+ if(out.kind!=0&&out.kind!=4&&out.kind!=15&&out.kind!=16)out.unsupported.push_back("primitive="+std::to_string(out.kind));
+ if(layer.mode>2)out.unsupported.push_back("layer-mode="+std::to_string(layer.mode));
  return out;
+}
+
+// Original PE ea267/ea29c: push before applying the top state, pop after.
+// f6cfc/f6e5c add translation/rotation, multiply scale, saturate additive
+// color and multiply tint/alpha. The stack is reset for each motion draw.
+std::vector<AnimationSample> sampleMotion(const Motion&motion,double ms,unsigned width,unsigned height){
+ std::vector<AnimationSample> result,stack;
+ auto compose=[](AnimationSample value,const AnimationSample&parent){
+  value.x+=parent.x;value.y+=parent.y;
+  if(value.kind!=3){value.scaleX*=parent.scaleX/100;value.scaleY*=parent.scaleY/100;}
+  value.rotationZ+=parent.rotationZ;
+  value.alpha=float(int(value.alpha)*int(parent.alpha)/255);
+  uint32_t add=0,mul=0;
+  for(unsigned n=0;n<3;n++){
+   auto a=(value.addColor>>(8*n))&255,b=(parent.addColor>>(8*n))&255;
+   add|=std::min(255u,a+b)<<(8*n);
+   a=(value.mulColor>>(8*n))&255;b=(parent.mulColor>>(8*n))&255;
+   mul|=(a*b/255)<<(8*n);
+  }
+  value.addColor=add;value.mulColor=mul;return value;
+ };
+ for(const auto&layer:motion.layers){
+  auto value=sampleAnimation(layer,ms);
+  if(value.kind){
+   if(layer.mode==1&&stack.size()<31){
+    auto parent=value;
+    // The push operation always multiplies scale, including primitive 3.
+    if(!stack.empty()){
+     parent=compose(value,stack.back());
+     parent.scaleX=value.scaleX*stack.back().scaleX/100;
+     parent.scaleY=value.scaleY*stack.back().scaleY/100;
+    }
+    stack.push_back(parent);
+   }
+   if(!stack.empty())value=compose(value,stack.back());
+   if(layer.mode==2&&!stack.empty())stack.pop_back();
+  }
+  result.push_back(std::move(value));
+ }
+ // PE ec148 -> da90c -> dafc4 is a separate render-state stack.
+ // dad00 translates, rotates clockwise-negative about the screen center,
+ // then scales about that center. These operations can produce shear.
+ std::vector<AnimationSample> renderStack;
+ for(size_t i=0;i<result.size();i++){
+  auto&value=result[i];
+  if(!motion.layers[i].flags)continue;
+  if(value.kind==15){if(!renderStack.empty())renderStack.pop_back();continue;}
+  if(value.kind==16){
+   auto state=value;
+   if(!renderStack.empty())state=compose(state,renderStack.back());
+   renderStack.push_back(state);continue;
+  }
+  if(!value.kind||renderStack.empty())continue;
+  const auto&state=renderStack.back();
+  constexpr float pi=3.14159265358979323846f;
+  float r=state.rotationZ*pi/180,c=std::cos(r),s=std::sin(r);
+  float sx=state.scaleX/100,sy=state.scaleY/100,cx=width/2.f,cy=height/2.f;
+  value.screen={sx*c,sx*s,-sy*s,sy*c,
+   cx+sx*(c*(state.x-cx)+s*(state.y-cy)),
+   cy+sy*(-s*(state.x-cx)+c*(state.y-cy))};
+  auto colored=compose(value,state);
+  value.alpha=colored.alpha;value.addColor=colored.addColor;value.mulColor=colored.mulColor;
+ }
+ return result;
 }
 
 }

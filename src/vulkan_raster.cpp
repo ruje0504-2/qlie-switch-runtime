@@ -10,6 +10,7 @@
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
 #include "vulkan_raster.hpp"
+#include "swap_damage.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -38,17 +39,45 @@ struct Push {float p[4][4]{};int32_t rect[4]{};uint32_t meta[4]{},colors[4]{};};
 static_assert(sizeof(Push)==112,"Shader push layout");
 struct DrawData {Push image;float maskSource[4]{},maskRect[4]{};uint32_t maskMeta[4]{};};
 static_assert(sizeof(DrawData)==160,"Shader draw layout");
-constexpr unsigned Tile=16, Width=1280, Height=720, Columns=Width/Tile, Rows=Height/Tile;
+constexpr unsigned Tile=SwapDamage::Tile, Width=SwapDamage::Width, Height=SwapDamage::Height, Columns=Width/Tile, Rows=Height/Tile;
 constexpr unsigned TileCount=Columns*Rows;
 constexpr size_t CanvasBytes=size_t(Width)*Height*sizeof(uint32_t);
 using Clock=std::chrono::steady_clock;
 double milliseconds(Clock::duration elapsed){return std::chrono::duration<double,std::milli>(elapsed).count();}
 
-struct DrawSources {uint64_t primary=0,secondary=0;};
+struct DrawSources {
+ uint64_t primary=0,secondary=0;
+ bool opaque=false;
+ uint32_t singlePixel=0;
+};
+struct AxisBounds {
+ float left,top,right,bottom;
+ bool covers(unsigned x,unsigned y,unsigned w,unsigned h)const{
+  return left<=float(x)&&top<=float(y)&&right>=float(x+w)&&bottom>=float(y+h);
+ }
+};
+AxisBounds axisBounds(const Push&p){
+ // A rotated or projected draw cannot use its bounding box as opaque coverage.
+ if(p.meta[2]&(1u<<16)||p.p[0][1]!=0||p.p[0][2]!=0)return {};
+ float x=p.p[1][0],y=p.p[1][1],right=x+p.p[0][0]*p.meta[0],bottom=y+p.p[0][3]*p.meta[1];
+ return {std::min(x,right),std::min(y,bottom),std::max(x,right),std::max(y,bottom)};
+}
+uint32_t overClear(const Push&p,uint32_t texel,uint32_t background){
+ unsigned a=(texel>>24)*p.meta[3]/255,mode=(p.meta[2]>>8)&255;
+ if(!a)return background;
+ uint32_t color=0;
+ for(unsigned c=0;c<4;++c){
+  unsigned shift=8*c,src=a;
+  if(c<3)src=std::min(255u,((texel>>shift)&255)*((p.colors[1]>>shift)&255)/255+((p.colors[0]>>shift)&255));
+  color|=uint32_t(blendChannel(mode,uint8_t(src),uint8_t(background>>shift),uint8_t(a)))<<shift;
+ }
+ return color;
+}
 struct RasterFrame {
  std::vector<DrawData> commands;
  std::vector<DrawSources> sources;
  std::array<std::vector<uint32_t>,TileCount> tiles;
+ SwapDamage::Mask covered;
  bool geometry=false,cleared=false;
  uint32_t color=0;
 
@@ -56,6 +85,7 @@ struct RasterFrame {
   commands.clear();
   sources.clear();
   for(auto&tile:tiles)tile.clear();
+  covered.reset();
   geometry=false;cleared=clear;
   color=background;
  }
@@ -90,6 +120,7 @@ struct VulkanRaster::Impl {
   Span storage;unsigned width=0,height=0;
   uint64_t lastUsed=0,checkedBatch=0,pixelVersion=0,uploadId=0;
   qlie::Bytes unversionedCopy;
+  std::optional<bool> opaque;
  };
  Buffer output,staging,texels,parameters,tileBuffer;bool uploadBase=false;VkDescriptorSet rasterSet=VK_NULL_HANDLE;
  bool descriptorsChanged=true;
@@ -104,17 +135,20 @@ struct VulkanRaster::Impl {
  uint64_t nextUploadId=1;
  Clock::time_point cpuFrameStart;
  double priorWaitMs=0,cpuBuildMs=0;
- unsigned cachedReferences=0;bool reusedDisplay=false,nativeDisplayCurrent=false;
+ uint32_t baseCopy=UINT32_MAX;
+ unsigned cachedReferences=0,occludedReferences=0,foldedSolids=0;bool reusedDisplay=false,nativeDisplayCurrent=false;
  Image transitionLut;double lutAmount=-1;
  uint64_t frames=0,batch=0;unsigned draws=0,dispatches=0,textureChecks=0;size_t uploadBytes=0;bool recording=false,inBatch=false,texelsDirty=false;
 #ifdef __SWITCH__
  bool canOrderPixels=false,copyPresent=false;
+ std::vector<SwapDamage::Mask> swapDamage;
  VkRenderPass scenePass=VK_NULL_HANDLE;VkFramebuffer sceneFrame=VK_NULL_HANDLE;
  VkPipeline scenePipeline=VK_NULL_HANDLE,sceneInit=VK_NULL_HANDLE;
  VkBufferView texelView=VK_NULL_HANDLE;uint32_t maxViewElements=0,viewElements=0;
  std::array<std::array<uint32_t,2>,TileCount> ranges{};
  std::vector<std::array<uint32_t,3>> instances;
  std::vector<std::array<unsigned,4>> neededBounds;
+ std::vector<std::array<uint32_t,4>> initTiles;
  Clock::time_point lastRefresh{};
  std::thread presenter;
  std::mutex presentMutex;
@@ -275,12 +309,13 @@ struct VulkanRaster::Impl {
   format=chosen->format;
   extent=caps.currentExtent;if(extent.width==UINT32_MAX)extent={std::clamp(1280u,caps.minImageExtent.width,caps.maxImageExtent.width),std::clamp(720u,caps.minImageExtent.height,caps.maxImageExtent.height)};
   if(!(caps.supportedUsageFlags&VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)||!(caps.supportedCompositeAlpha&VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR))throw std::runtime_error("Unsupported display surface");
-  count=std::max(3u,caps.minImageCount);if(caps.maxImageCount)count=std::min(count,caps.maxImageCount);VkSwapchainCreateInfoKHR ci{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};ci.surface=surface;ci.minImageCount=count;ci.imageFormat=format;ci.imageColorSpace=chosen->colorSpace;ci.imageExtent=extent;ci.imageArrayLayers=1;copyPresent=format==VK_FORMAT_B8G8R8A8_UNORM&&extent.width==Width&&extent.height==Height&&(caps.supportedUsageFlags&VK_IMAGE_USAGE_TRANSFER_DST_BIT);ci.imageUsage=VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|(copyPresent?VK_IMAGE_USAGE_TRANSFER_DST_BIT:0);ci.imageSharingMode=VK_SHARING_MODE_EXCLUSIVE;ci.preTransform=caps.currentTransform;ci.compositeAlpha=VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;ci.presentMode=VK_PRESENT_MODE_FIFO_KHR;ci.clipped=VK_TRUE;auto created=CreateSwapchainKHR(device,&ci,nullptr,&swapchain);
+  count=std::max(3u,caps.minImageCount);if(caps.maxImageCount)count=std::min(count,caps.maxImageCount);VkSwapchainCreateInfoKHR ci{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};ci.surface=surface;ci.minImageCount=count;ci.imageFormat=format;ci.imageColorSpace=chosen->colorSpace;ci.imageExtent=extent;ci.imageArrayLayers=1;copyPresent=format==VK_FORMAT_B8G8R8A8_UNORM&&extent.width==Width&&extent.height==Height&&(caps.supportedUsageFlags&VK_IMAGE_USAGE_TRANSFER_DST_BIT);ci.imageUsage=VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|(copyPresent?VK_IMAGE_USAGE_TRANSFER_DST_BIT:0);ci.imageSharingMode=VK_SHARING_MODE_EXCLUSIVE;ci.preTransform=caps.currentTransform;ci.compositeAlpha=VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;ci.presentMode=VK_PRESENT_MODE_FIFO_KHR;ci.clipped=copyPresent?VK_FALSE:VK_TRUE;auto created=CreateSwapchainKHR(device,&ci,nullptr,&swapchain);
   if(copyPresent&&(created==VK_ERROR_FORMAT_NOT_SUPPORTED||created==VK_ERROR_INITIALIZATION_FAILED)){
-   std::fprintf(stderr,"VULKAN transfer swapchain result=%d, retrying color-only\n",int(created));copyPresent=false;ci.imageUsage=VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+   std::fprintf(stderr,"VULKAN transfer swapchain result=%d, retrying color-only\n",int(created));copyPresent=false;ci.imageUsage=VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;ci.clipped=VK_TRUE;
    created=CreateSwapchainKHR(device,&ci,nullptr,&swapchain);
   }
   checked(created,"swapchain");checked(GetSwapchainImagesKHR(device,swapchain,&count,nullptr),"swapchain images");swapImages.resize(count);checked(GetSwapchainImagesKHR(device,swapchain,&count,swapImages.data()),"swapchain images");swapViews.resize(count);swapFrames.resize(count);finished.resize(count);
+  if(copyPresent){swapDamage.resize(count);for(auto&pending:swapDamage)pending.set();}
   VkAttachmentDescription attachment{};attachment.format=format;attachment.samples=VK_SAMPLE_COUNT_1_BIT;attachment.loadOp=VK_ATTACHMENT_LOAD_OP_DONT_CARE;attachment.storeOp=VK_ATTACHMENT_STORE_OP_STORE;attachment.initialLayout=VK_IMAGE_LAYOUT_UNDEFINED;attachment.finalLayout=VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;VkAttachmentReference ref{0,VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};VkSubpassDescription sub{};sub.pipelineBindPoint=VK_PIPELINE_BIND_POINT_GRAPHICS;sub.colorAttachmentCount=1;sub.pColorAttachments=&ref;VkSubpassDependency dependency{};dependency.srcSubpass=VK_SUBPASS_EXTERNAL;dependency.dstSubpass=0;dependency.srcStageMask=VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;dependency.dstStageMask=VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;dependency.dstAccessMask=VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
   VkRenderPassCreateInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};rp.attachmentCount=1;rp.pAttachments=&attachment;rp.subpassCount=1;rp.pSubpasses=&sub;rp.dependencyCount=1;rp.pDependencies=&dependency;checked(CreateRenderPass(device,&rp,nullptr,&renderPass),"display pass");VkSemaphoreCreateInfo semaphore{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};checked(CreateSemaphore(device,&semaphore,nullptr,&acquired),"acquire semaphore");
   for(unsigned i=0;i<count;i++){VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};vi.image=swapImages[i];vi.viewType=VK_IMAGE_VIEW_TYPE_2D;vi.format=format;vi.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};checked(CreateImageView(device,&vi,nullptr,&swapViews[i]),"display view");VkFramebufferCreateInfo fb{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};fb.renderPass=renderPass;fb.attachmentCount=1;fb.pAttachments=&swapViews[i];fb.width=extent.width;fb.height=extent.height;fb.layers=1;checked(CreateFramebuffer(device,&fb,nullptr,&swapFrames[i]),"display frame");checked(CreateSemaphore(device,&semaphore,nullptr,&finished[i]),"present semaphore");}
@@ -337,16 +372,33 @@ struct VulkanRaster::Impl {
    // The previous scene work must finish before measuring display conversion.
    CmdWriteTimestamp(command,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,timeQueries,2);
   }
+  unsigned copiedTiles=0,copyRegions=0;
   if(copyPresent){
-   barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT|VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT|VK_PIPELINE_STAGE_TRANSFER_BIT|VK_PIPELINE_STAGE_HOST_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,
-           VK_ACCESS_SHADER_WRITE_BIT|VK_ACCESS_TRANSFER_WRITE_BIT|VK_ACCESS_HOST_WRITE_BIT,VK_ACCESS_TRANSFER_READ_BIT);
-   VkImageMemoryBarrier swap{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};swap.image=swapImages[index];swap.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
-   swap.srcQueueFamilyIndex=swap.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;swap.oldLayout=VK_IMAGE_LAYOUT_UNDEFINED;swap.newLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;swap.dstAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;
-   CmdPipelineBarrier(command,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,0,0,nullptr,0,nullptr,1,&swap);
-   VkBufferImageCopy copy{};copy.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};copy.imageExtent={Width,Height,1};
-   CmdCopyBufferToImage(command,output.buffer,swap.image,swap.newLayout,1,&copy);
-   swap.oldLayout=swap.newLayout;swap.newLayout=VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;swap.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;swap.dstAccessMask=0;
-   CmdPipelineBarrier(command,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,0,0,nullptr,0,nullptr,1,&swap);
+   auto regions=SwapDamage::regions(swapDamage[index]);
+   copyRegions=unsigned(regions.size());
+   if(!regions.empty()){
+    std::vector<VkBufferImageCopy> copies;
+    copies.reserve(regions.size());
+    for(auto r:regions){
+     VkBufferImageCopy copy{};
+     copy.bufferOffset=VkDeviceSize(r.y*Tile*Width+r.x*Tile)*4;
+     copy.bufferRowLength=Width;copy.bufferImageHeight=Height;
+     copy.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};
+     copy.imageOffset={int32_t(r.x*Tile),int32_t(r.y*Tile),0};
+     copy.imageExtent={r.width*Tile,r.height*Tile,1};
+     copies.push_back(copy);copiedTiles+=r.width*r.height;
+    }
+    barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT|VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT|VK_PIPELINE_STAGE_TRANSFER_BIT|VK_PIPELINE_STAGE_HOST_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_ACCESS_SHADER_WRITE_BIT|VK_ACCESS_TRANSFER_WRITE_BIT|VK_ACCESS_HOST_WRITE_BIT,VK_ACCESS_TRANSFER_READ_BIT);
+    VkImageMemoryBarrier swap{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};swap.image=swapImages[index];swap.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
+    swap.srcQueueFamilyIndex=swap.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
+    swap.oldLayout=copiedTiles==TileCount?VK_IMAGE_LAYOUT_UNDEFINED:VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    swap.newLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;swap.dstAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;
+    CmdPipelineBarrier(command,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,0,0,nullptr,0,nullptr,1,&swap);
+    CmdCopyBufferToImage(command,output.buffer,swap.image,swap.newLayout,uint32_t(copies.size()),copies.data());
+    swap.oldLayout=swap.newLayout;swap.newLayout=VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;swap.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;swap.dstAccessMask=0;
+    CmdPipelineBarrier(command,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,0,0,nullptr,0,nullptr,1,&swap);
+   }
   }else{
   barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT|VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT|VK_PIPELINE_STAGE_TRANSFER_BIT|VK_PIPELINE_STAGE_HOST_BIT,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
           VK_ACCESS_SHADER_WRITE_BIT|VK_ACCESS_TRANSFER_WRITE_BIT|VK_ACCESS_HOST_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT);
@@ -362,7 +414,7 @@ struct VulkanRaster::Impl {
   if(timingFrame&&timeQueries)CmdWriteTimestamp(command,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,timeQueries,3);
   checked(EndCommandBuffer(command),"end display");
   checked(ResetFences(device,1,&fence),"reset display fence");
-  VkPipelineStageFlags wait=copyPresent?VK_PIPELINE_STAGE_TRANSFER_BIT:VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+  VkPipelineStageFlags wait=copyPresent?(copyRegions?VK_PIPELINE_STAGE_TRANSFER_BIT:VK_PIPELINE_STAGE_ALL_COMMANDS_BIT):VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
   VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submit.waitSemaphoreCount=1;submit.pWaitSemaphores=&acquired;submit.pWaitDstStageMask=&wait;
   submit.commandBufferCount=1;submit.pCommandBuffers=&command;submit.signalSemaphoreCount=1;submit.pSignalSemaphores=&finished[index];
@@ -371,6 +423,7 @@ struct VulkanRaster::Impl {
   info.waitSemaphoreCount=1;info.pWaitSemaphores=&finished[index];info.swapchainCount=1;info.pSwapchains=&swapchain;info.pImageIndices=&index;
   result=QueuePresentKHR(queue,&info);
   if(result!=VK_SUBOPTIMAL_KHR)checked(result,"present");
+  if(copyPresent)swapDamage[index].reset();
   const auto presented=Clock::now();
   checked(WaitForFences(device,1,&fence,VK_TRUE,5000000000ull),"display completion");
   if(timingFrame){
@@ -380,8 +433,8 @@ struct VulkanRaster::Impl {
     uint64_t mask=timestampBits==64?UINT64_MAX:(uint64_t(1)<<timestampBits)-1;
     return double((ticks[1]-ticks[0])&mask)*timestampNs/1e6;
    };
-   std::fprintf(stderr,"VULKAN TIMING frame=%llu raster_gpu_ms=%.3f present_gpu_ms=%.3f acquire_ms=%.3f submission_to_fence_ms=%.3f\n",
-                (unsigned long long)timingFrame,timingHadRaster?gpuMs(0):0.0,gpuMs(2),milliseconds(imageReady-start),milliseconds(Clock::now()-imageReady));
+   std::fprintf(stderr,"VULKAN TIMING frame=%llu raster_gpu_ms=%.3f present_gpu_ms=%.3f acquire_ms=%.3f submission_to_fence_ms=%.3f copy_regions=%u copy_tiles=%u\n",
+                (unsigned long long)timingFrame,timingHadRaster?gpuMs(0):0.0,gpuMs(2),milliseconds(imageReady-start),milliseconds(Clock::now()-imageReady),copyRegions,copiedTiles);
   }
   return uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(presented.time_since_epoch()).count());
  }
@@ -400,11 +453,23 @@ struct VulkanRaster::Impl {
    presentSignal.notify_all();
   }
  }
+ // Called by the producer only after the preceding presenter has finished.
+ // Readbacks also change the retained canvas, even though no image is presented.
+ void markSwapDamage(){
+  if(!copyPresent)return;
+  SwapDamage::Mask changed;
+  if(!current->cleared||workTiles.size()==TileCount)changed.set();
+  else for(const auto&h:workTiles){
+   unsigned x=h[0]&65535u,y=h[0]>>16;changed.set((y/Tile)*Columns+x/Tile);
+  }
+  for(auto&pending:swapDamage)pending|=changed;
+ }
  std::optional<uint64_t> presentNative(bool refreshUnchanged){
   current->geometry=scenePipeline&&current->cleared;
   if(!recording)throw std::runtime_error("Vulkan frame not begun");
   planTiles();
   waitForPrevious();
+  markSwapDamage();
   std::optional<uint64_t> confirmed;
   {
    std::lock_guard<std::mutex> lock(presentMutex);
@@ -464,8 +529,8 @@ struct VulkanRaster::Impl {
   pendingReclaim.swap(retired);
   std::swap(previous,current);
   if(frames==1||frames%120==0){
-   std::fprintf(stderr,"VULKAN FRAME %llu draws=%u dispatches=%u dirty_tiles=%zu/%u cached_prefix_refs=%u textures=%zu texture_checks=%u upload_bytes=%zu cpu_build_ms=%.3f prior_wait_ms=%.3f reused_display=%d ordered_geometry=%d\n",
-                (unsigned long long)frames,draws,dispatches,workTiles.size(),TileCount,cachedReferences,textures.size(),textureChecks,uploadBytes,cpuBuildMs,priorWaitMs,int(reusedDisplay),int(previous->geometry));
+   std::fprintf(stderr,"VULKAN FRAME %llu draws=%u dispatches=%u dirty_tiles=%zu/%u cached_prefix_refs=%u textures=%zu texture_checks=%u upload_bytes=%zu cpu_build_ms=%.3f prior_wait_ms=%.3f reused_display=%d ordered_geometry=%d folded_solids=%u occluded_tile_refs=%u direct_base=%d\n",
+                (unsigned long long)frames,draws,dispatches,workTiles.size(),TileCount,cachedReferences,textures.size(),textureChecks,uploadBytes,cpuBuildMs,priorWaitMs,int(reusedDisplay),int(previous->geometry),foldedSolids,occludedReferences,int(baseCopy!=UINT32_MAX));
   }
  }
  ~Impl(){
@@ -495,7 +560,7 @@ struct VulkanRaster::Impl {
   size_t capacity=std::max(minimum,size_t(b.size));while(capacity<required)capacity=std::min(maxBufferBytes,capacity*2);
   capacity=std::min(capacity,maxBufferBytes);VkBufferUsageFlags extra=0;
 #ifdef __SWITCH__
-  if(&b==&texels&&canOrderPixels)extra=VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT;
+  if(&b==&texels&&canOrderPixels)extra=VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT|VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 #endif
   Buffer next=buffer(capacity,extra);
 #ifdef __SWITCH__
@@ -508,7 +573,7 @@ struct VulkanRaster::Impl {
   for(auto it=freeSpans.begin();it!=freeSpans.end();++it)if(it->second>=size){Span span{it->first,size};size_t rest=it->second-size;freeSpans.erase(it);if(rest)freeSpans.emplace(span.offset+size,rest);return span;}
   ensure(texels,textureEnd+size,16*1024*1024,true);Span span{textureEnd,size};textureEnd+=size;return span;
  }
- uint32_t texture(const Image&i,uint64_t&uploadId){
+ uint32_t texture(const Image&i,uint64_t&uploadId,bool*opaque=nullptr){
   const size_t bytes=i.pixels.size();
   if(bytes!=size_t(i.width)*i.height*4||!bytes)throw std::runtime_error("Vulkan texture dimensions");
   const uint64_t version=i.version.get();
@@ -540,6 +605,14 @@ struct VulkanRaster::Impl {
    at=textures.emplace(&i,std::move(t)).first;
   }
   auto&t=at->second;t.lastUsed=frames+1;t.checkedBatch=batch;uploadId=t.uploadId;
+  if(opaque){
+   if(!t.opaque.has_value()){
+    bool solid=true;
+    for(size_t n=3;n<bytes;n+=4)if(i.pixels[n]!=255){solid=false;break;}
+    t.opaque=solid;
+   }
+   *opaque=*t.opaque;
+  }
   return uint32_t(t.storage.offset/sizeof(uint32_t));
  }
  void barrier(VkPipelineStageFlags source,VkPipelineStageFlags dest,VkAccessFlags from,VkAccessFlags to){VkMemoryBarrier b{VK_STRUCTURE_TYPE_MEMORY_BARRIER};b.srcAccessMask=from;b.dstAccessMask=to;CmdPipelineBarrier(command,source,dest,0,1,&b,0,nullptr,0,nullptr);}
@@ -548,8 +621,15 @@ struct VulkanRaster::Impl {
   p.rect[0]=std::max(0,p.rect[0]);p.rect[1]=std::max(0,p.rect[1]);
   p.rect[2]=std::min(int(Width),p.rect[2]);p.rect[3]=std::min(int(Height),p.rect[3]);
   if(p.rect[2]<=p.rect[0]||p.rect[3]<=p.rect[1])return;
-  uint32_t index=uint32_t(current->commands.size());
   current->commands.push_back({p,{},{},{}});current->sources.push_back(sources);
+  ++draws;
+ }
+ // Masks are attached after the image is queued. Bin only the final commands.
+ void binDraw(uint32_t index){
+  const auto&p=current->commands[index].image;
+  unsigned op=p.meta[2]>>20;
+  bool opaque=op==0&&current->sources[index].opaque&&p.meta[3]==255&&((p.meta[2]>>8)&255)<2&&!(p.meta[2]&262144u);
+  auto axis=opaque?axisBounds(p):AxisBounds{};
   unsigned x0=unsigned(p.rect[0])/Tile,x1=unsigned(p.rect[2]-1)/Tile;
   unsigned y0=unsigned(p.rect[1])/Tile,y1=unsigned(p.rect[3]-1)/Tile;
   bool manyTiles=(x1-x0+1)*(y1-y0+1)>4;
@@ -565,6 +645,7 @@ struct VulkanRaster::Impl {
    }
   }
   for(unsigned y=y0;y<=y1;++y)for(unsigned x=x0;x<=x1;++x){
+   bool insideTriangle=cull&&opaque;
    if(cull){
     // Maximum of each linear edge over this tile's pixel centers. A strict
     // negative maximum excludes the entire tile, including top-left ties.
@@ -572,7 +653,15 @@ struct VulkanRaster::Impl {
     for(auto&e:edges){
      float px=float(x*Tile)+.5f+(e.dy<0?float(Tile-1):0.f);
      float py=float(y*Tile)+.5f+(e.dx>0?float(Tile-1):0.f);
-     if(e.dx*(py-e.y)-e.dy*(px-e.x)<-(std::abs(e.dx)+std::abs(e.dy))){outside=true;break;}
+     float margin=std::abs(e.dx)+std::abs(e.dy);
+     if(e.dx*(py-e.y)-e.dy*(px-e.x)<-margin){outside=true;break;}
+     if(insideTriangle){
+      // The opposite corner minimizes this edge. Keep a pixel of margin for
+      // the fixed-point rasterizer before suppressing an earlier layer.
+      px=float(x*Tile)+.5f+(e.dy>0?float(Tile-1):0.f);
+      py=float(y*Tile)+.5f+(e.dx<0?float(Tile-1):0.f);
+      if(e.dx*(py-e.y)-e.dy*(px-e.x)<=margin)insideTriangle=false;
+     }
     }
     if(outside)continue;
    }
@@ -587,24 +676,42 @@ struct VulkanRaster::Impl {
     }
     if(umax<-1||vmax<-1||umin>float(p.meta[0])+1||vmin>float(p.meta[1])+1)continue;
    }
-   current->tiles[y*Columns+x].push_back(index);
+   auto tile=y*Columns+x;auto&list=current->tiles[tile];
+   if(op==4||insideTriangle||(opaque&&axis.covers(x*Tile,y*Tile,Tile,Tile))){
+    occludedReferences+=unsigned(list.size());list.clear();current->covered.set(tile);
+   }
+   list.push_back(index);
   }
-  ++draws;
  }
  void dispatch(const Image&i,Push&p,float alpha,uint32_t add,uint32_t mul,unsigned blend,unsigned filter){
   if(!recording)throw std::runtime_error("Vulkan frame not begun");if(!i.width||!i.height||alpha<=0)return;if(blend>8)throw std::runtime_error("Vulkan unsupported blend");
   if(p.rect[2]<=0||p.rect[3]<=0||p.rect[0]>=int(Width)||p.rect[1]>=int(Height))return;
-  p.meta[0]=i.width;p.meta[1]=i.height;p.meta[2]|=(blend<<8)|filter;p.meta[3]=unsigned(std::clamp(alpha,0.f,255.f));p.colors[0]=add;p.colors[1]=mul;DrawSources sources;p.colors[2]=texture(i,sources.primary);append(p,sources);
+  p.meta[0]=i.width;p.meta[1]=i.height;p.meta[2]|=(blend<<8)|filter;p.meta[3]=unsigned(std::clamp(alpha,0.f,255.f));p.colors[0]=add;p.colors[1]=mul;DrawSources sources;
+  bool mayOcclude=blend<2&&p.meta[3]==255;
+  p.colors[2]=texture(i,sources.primary,mayOcclude?&sources.opaque:nullptr);
+  if(i.width==1&&i.height==1)std::memcpy(&sources.singlePixel,i.pixels.data(),4);
+  append(p,sources);
  }
  void beginFrame(bool clear,uint32_t color){
   if(recording)throw std::runtime_error("Vulkan frame already begun");
   cpuFrameStart=Clock::now();priorWaitMs=0;
   current->reset(clear,color);
-  draws=dispatches=textureChecks=cachedReferences=0;uploadBytes=0;
+  draws=dispatches=textureChecks=cachedReferences=occludedReferences=foldedSolids=0;baseCopy=UINT32_MAX;uploadBytes=0;
   recording=true;inBatch=false;reusedDisplay=false;uploadBase=false;
  }
  void planTiles(){
   workTiles.clear();workIndices.clear();
+  uint32_t first=0;
+  if(current->cleared){
+   for(uint32_t id=0;id<current->commands.size();++id){
+    const auto&p=current->commands[id].image;
+    if((p.meta[2]>>20)!=0||(p.meta[2]&262144u)||p.meta[0]!=1||p.meta[1]!=1||!axisBounds(p).covers(0,0,Width,Height))continue;
+    uint32_t texel=current->sources[id].singlePixel;
+    bool replaces=(texel>>24)==255&&p.meta[3]==255&&((p.meta[2]>>8)&255)<2;
+    if(id==first||replaces){current->color=overClear(p,texel,current->color);first=id+1;++foldedSolids;}
+   }
+  }
+  for(uint32_t id=first;id<current->commands.size();++id)binDraw(id);
   bool sameBase=frames&&current->cleared&&previous->cleared&&current->color==previous->color&&current->geometry==previous->geometry;
   if(sameBase){
    unchangedDraw.resize(std::min(current->commands.size(),previous->commands.size()));
@@ -638,6 +745,9 @@ struct VulkanRaster::Impl {
   // frame presents. Reuse command/GPU upload memory only after its fence.
   planTiles();
   waitForPrevious();
+#ifdef __SWITCH__
+  markSwapDamage();
+#endif
   beginGpuCommands();
  }
  void beginGpuCommands(){
@@ -657,11 +767,27 @@ struct VulkanRaster::Impl {
   cpuBuildMs=milliseconds(Clock::now()-cpuFrameStart)-priorWaitMs;
  }
 #ifdef __SWITCH__
+ // A raw decoded frame or a neutral, unscaled opaque bitmap can seed the
+ // retained canvas in one transfer. Every tile must agree on this first draw.
+ uint32_t directBase()const{
+  if(workTiles.size()!=TileCount||!workTiles.front()[2])return UINT32_MAX;
+  uint32_t id=workIndices[workTiles.front()[1]];
+  const auto&p=current->commands[id].image;
+  bool bitmap=(p.meta[2]>>20)==0&&(p.meta[2]&524288u)&&!(p.meta[2]&262144u)&&
+              ((p.meta[2]>>8)&255)<2&&p.meta[3]==255&&current->sources[id].opaque&&
+              p.meta[0]==Width&&p.meta[1]==Height&&p.p[1][0]==0&&p.p[1][1]==0&&p.colors[0]==0&&p.colors[1]==0xffffff;
+  if((p.meta[2]>>20)!=4&&!bitmap)return UINT32_MAX;
+  for(auto&h:workTiles)if(h[3]||!h[2]||workIndices[h[1]]!=id)return UINT32_MAX;
+  return id;
+ }
  void prepareInstances(){
-  ranges.fill({UINT32_MAX,0});instances.clear();
+  baseCopy=directBase();
+  ranges.fill({UINT32_MAX,0});instances.clear();initTiles.clear();
   neededBounds.assign(current->commands.size(),{Width,Height,0,0});
   for(const auto&h:workTiles){
    unsigned x=h[0]&65535u,y=h[0]>>16;
+   unsigned tile=(y/Tile)*Columns+x/Tile;
+   if((h[3]&0x80000000u)||!current->covered[tile])initTiles.push_back(h);
    if(!h[2])continue;
    unsigned saveAfter=h[3]&0x7fffffffu;
    ranges[(y/Tile)*Columns+x/Tile]={workIndices[h[1]],saveAfter?workIndices[h[1]+saveAfter-1]+1:0};
@@ -671,18 +797,24 @@ struct VulkanRaster::Impl {
    }
   }
   for(unsigned i=0;i<neededBounds.size();++i){
-   const auto&r=neededBounds[i];if(r[2])instances.push_back({i,r[0]|(r[1]<<16),r[2]|(r[3]<<16)});
+   const auto&r=neededBounds[i];if(r[2]&&i!=baseCopy)instances.push_back({i,r[0]|(r[1]<<16),r[2]|(r[3]<<16)});
   }
  }
  void recordScene(){
-  bool fullClear=workTiles.size()==TileCount&&std::all_of(workTiles.begin(),workTiles.end(),[](const auto&h){return h[3]==0;});
-  if(fullClear){
+  bool fullClear=initTiles.size()==TileCount&&std::all_of(initTiles.begin(),initTiles.end(),[](const auto&h){return h[3]==0;});
+  if(baseCopy!=UINT32_MAX){
+   barrier(VK_PIPELINE_STAGE_HOST_BIT|VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT|VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT|VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,
+           VK_ACCESS_HOST_WRITE_BIT|VK_ACCESS_SHADER_WRITE_BIT|VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_TRANSFER_READ_BIT|VK_ACCESS_TRANSFER_WRITE_BIT);
+   VkBufferCopy copy{VkDeviceSize(current->commands[baseCopy].image.colors[2])*4,0,CanvasBytes};
+   CmdCopyBuffer(command,texels.buffer,output.buffer,1,&copy);
+   barrier(VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT|VK_ACCESS_SHADER_WRITE_BIT);
+  }else if(fullClear){
    CmdFillBuffer(command,output.buffer,0,CanvasBytes,current->color);
    barrier(VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT|VK_ACCESS_SHADER_WRITE_BIT);
-  }else{
+  }else if(!initTiles.empty()){
    CmdBindPipeline(command,VK_PIPELINE_BIND_POINT_COMPUTE,sceneInit);
    CmdBindDescriptorSets(command,VK_PIPELINE_BIND_POINT_COMPUTE,layout,0,1,&rasterSet,0,nullptr);
-   CmdDispatch(command,uint32_t(workTiles.size()),1,1);++dispatches;
+   CmdDispatch(command,uint32_t(initTiles.size()),1,1);++dispatches;
    barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,VK_ACCESS_SHADER_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT|VK_ACCESS_SHADER_WRITE_BIT);
   }
   if(instances.empty())return;
@@ -701,7 +833,7 @@ struct VulkanRaster::Impl {
 #ifdef __SWITCH__
   if(current->geometry){
    prepareInstances();push.meta[2]=uint32_t(instances.size()*3);push.colors[1]=push.meta[2]+uint32_t(TileCount*2);
-   words=push.colors[1]+headerWords;
+   words=push.colors[1]+initTiles.size()*4;
   }
 #endif
   ensure(parameters,std::max(sizeof(DrawData),commandBytes));ensure(tileBuffer,words*sizeof(uint32_t));ensure(texels,4);
@@ -711,7 +843,7 @@ struct VulkanRaster::Impl {
   if(current->geometry){
    if(!instances.empty())std::memcpy(mapped,instances.data(),instances.size()*sizeof(instances.front()));
    std::memcpy(mapped+push.meta[2],ranges.data(),sizeof(ranges));
-   std::memcpy(mapped+push.colors[1],workTiles.data(),headerWords*sizeof(uint32_t));
+   if(!initTiles.empty())std::memcpy(mapped+push.colors[1],initTiles.data(),initTiles.size()*sizeof(initTiles.front()));
   }else
 #endif
   {
@@ -821,12 +953,15 @@ void VulkanRaster::dim(unsigned numerator,unsigned denominator){
 }
 void VulkanRaster::transition(const Image&previous,const Image*rule,double amount,unsigned mode){
  auto&s=*impl;if(previous.width!=1280||previous.height!=720)throw std::runtime_error("Vulkan transition dimensions");
- Push p;p.rect[2]=1280;p.rect[3]=720;p.meta[2]=3u<<20;DrawSources sources;p.colors[2]=s.texture(previous,sources.primary);
+ if(amount==1)return;
+ Push p;p.rect[2]=Width;p.rect[3]=Height;DrawSources sources;p.colors[2]=s.texture(previous,sources.primary);
+ if(amount==0){p.meta[2]=4u<<20;s.append(p,sources);return;}
+ p.meta[2]=3u<<20;
  if(rule){p.meta[0]=rule->width;p.meta[1]=rule->height;p.meta[2]|=131072;p.meta[3]=uint8_t(255*(1-amount));p.colors[1]=mode;p.colors[3]=s.texture(*rule,sources.secondary);}
  else{
   // CPU's double expression is quantized once for the 256x256 possible byte
-  // pairs. The GPU reuses this exact table for all four channels and pixels.
-  if(s.lutAmount!=amount){s.transitionLut={256,256,qlie::Bytes(256*256*4)};for(unsigned old=0;old<256;old++)for(unsigned current=0;current<256;current++)s.transitionLut.pixels[(old*256+current)*4]=uint8_t(old*(1-amount)+current*amount);s.transitionLut.version.publish();s.lutAmount=amount;}
+  // pairs. Four entries share each GPU word in the texture arena.
+  if(s.lutAmount!=amount){s.transitionLut={256,64,qlie::Bytes(256*256)};for(unsigned old=0;old<256;old++)for(unsigned current=0;current<256;current++)s.transitionLut.pixels[old*256+current]=uint8_t(old*(1-amount)+current*amount);s.transitionLut.version.publish();s.lutAmount=amount;}
   p.colors[3]=s.texture(s.transitionLut,sources.secondary);
  }
  s.append(p,sources);

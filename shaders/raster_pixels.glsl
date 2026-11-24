@@ -66,10 +66,14 @@ uint ruleAlpha(Draw p,uvec2 q){
  uint at=p.colors.w+(q.y*p.meta.y/720u)*p.meta.x+q.x*p.meta.x/1280u;
  return maskAlpha(255u,loadTexel(at)&255u,p.meta.w,p.colors.y);
 }
+uint fadeByte(uint base,uint pair){
+ uint word=loadTexel(base+(pair>>2));
+ return (word>>(8u*(pair&3u)))&255u;
+}
 uvec4 fadePixel(Draw p,uvec4 old,uvec4 d,uint alpha){
  if((p.meta.z&131072u)==0u){
   uvec4 pair=old*256u+d;
-  return uvec4(loadTexel(p.colors.w+pair.r),loadTexel(p.colors.w+pair.g),loadTexel(p.colors.w+pair.b),loadTexel(p.colors.w+pair.a));
+  return uvec4(fadeByte(p.colors.w,pair.r),fadeByte(p.colors.w,pair.g),fadeByte(p.colors.w,pair.b),fadeByte(p.colors.w,pair.a));
  }
  return uvec4(ivec4(d)+((ivec4(old)-ivec4(d))*int((alpha+(alpha>>7))>>1)>>7));
 }

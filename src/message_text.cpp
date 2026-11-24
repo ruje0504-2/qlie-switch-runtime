@@ -34,7 +34,7 @@ MessageText::MessageText(qlie::Assets&assets,bool useStoryLineBreaking):storyLin
   uint32_t cp=characters[0];unsigned index=0x24f+cp-0xff10,tile=word(0x40+index*2),bank=tile>>8,slot=tile&255;
   unsigned sx=(slot&15)*cellWidth,sy=(slot>>4)*cellHeight;
   if(!tile||bank>=banks||sx+cellWidth>atlasWidth||sy+cellHeight>atlasHeight)throw std::runtime_error("Invalid OF glyph tile");
-  BitmapGlyph glyph{cp,cellWidth,cellHeight,qlie::Bytes(size_t(cellWidth)*cellHeight)};
+  BitmapGlyph glyph{cp,cellWidth,cellHeight,qlie::Bytes(size_t(cellWidth)*cellHeight),0,0,{}};
   for(unsigned y=0;y<cellHeight;y++)for(unsigned x=0;x<cellWidth;x++){
    auto paletteIndex=bitmap[0x1044a+size_t(bank)*atlasWidth*atlasHeight+size_t(sy+y)*atlasWidth+sx+x];
    glyph.alpha[size_t(y)*cellWidth+x]=bitmap[0x10040+size_t(paletteIndex)*4+3];

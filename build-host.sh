@@ -8,13 +8,14 @@ mkdir -p build
 common="-O2 -Wall -Wextra -Werror -Iinclude -Isrc"
 $cxx -std=c++17 $common src/qlie.cpp tools/probe.cpp -o build/qlie-probe
 $cxx -std=c++17 $common src/qlie.cpp src/story.cpp tools/story_probe.cpp -o build/story-probe
+$cxx -std=c++17 $common src/qlie.cpp src/story.cpp src/progress.cpp tools/progress_probe.cpp -o build/progress-probe
 $cc -std=c11 $common $($pc --cflags freetype2) -c src/font.c -o build/font.o
 $cc -std=c11 $common $($pc --cflags libavformat libavcodec libswscale libswresample libavutil) -c src/video.c -o build/video.o
 $cxx -std=c++17 $common $($pc --cflags libpng libjpeg) src/qlie.cpp src/image.cpp src/model.cpp tools/media_probe.cpp build/video.o $($pc --libs libavformat libavcodec libswscale libswresample libavutil libpng libjpeg) -o build/media-probe
 
 $cxx -std=c++17 $common $($pc --cflags libpng libjpeg) src/qlie.cpp src/image.cpp src/animation.cpp src/particles.cpp tools/animation_probe.cpp $($pc --libs libpng libjpeg) -o build/animation-probe
 
-$cxx -std=c++17 $common $($pc --cflags sdl2 freetype2 libpng libjpeg) src/qlie.cpp src/story.cpp src/audio.cpp src/image.cpp src/animation.cpp src/particles.cpp src/scene_images.cpp src/model.cpp src/gradient_mask.cpp src/render_queue.cpp src/voice.cpp src/movie.cpp src/message_text.cpp src/scene_transition.cpp src/sentence_wait.cpp src/upper_menu.cpp src/game_menu.cpp src/settings.cpp src/auto_play.cpp src/fps_overlay.cpp src/title_screen.cpp src/choice_screen.cpp src/mac_runtime.cpp build/font.o build/video.o $($pc --libs sdl2 freetype2 libavformat libavcodec libswscale libswresample libavutil libpng libjpeg) -o build/whj2-runtime
+$cxx -std=c++17 $common $($pc --cflags sdl2 freetype2 libpng libjpeg) src/qlie.cpp src/story.cpp src/audio.cpp src/image.cpp src/animation.cpp src/particles.cpp src/scene_images.cpp src/model.cpp src/gradient_mask.cpp src/render_queue.cpp src/voice.cpp src/movie.cpp src/message_text.cpp src/scene_transition.cpp src/sentence_wait.cpp src/upper_menu.cpp src/game_menu.cpp src/settings.cpp src/auto_play.cpp src/fps_overlay.cpp src/title_screen.cpp src/choice_screen.cpp src/progress.cpp src/mac_runtime.cpp build/font.o build/video.o $($pc --libs sdl2 freetype2 libavformat libavcodec libswscale libswresample libavutil libpng libjpeg) -o build/whj2-runtime
 
 $cxx -std=c++17 $common $($pc --cflags libpng libjpeg) src/qlie.cpp src/story.cpp src/image.cpp src/animation.cpp src/particles.cpp src/scene_images.cpp src/model.cpp src/gradient_mask.cpp src/render_queue.cpp tools/presentation_probe.cpp build/video.o $($pc --libs libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -o build/presentation-probe
 

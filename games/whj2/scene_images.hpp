@@ -10,6 +10,7 @@
 namespace whj2 {
 struct Affine2D;
 struct Composite;
+struct EyecatchFilm;
 class RenderTarget;
 class RenderQueue;
 class AssetReadAhead;
@@ -25,7 +26,9 @@ class SceneImages {
  mutable std::set<std::string> shownFiles;
  std::map<std::string,std::string> faceRepId,faceRepFile;
  unsigned faceType=0;std::string faceDefaultFile;
- qlie::Assets&assets;std::map<std::string,Layer>layers;std::map<std::string,std::map<std::string,std::string>>templates;std::map<std::string,std::shared_ptr<const Image>>cache;
+ qlie::Assets&assets;
+ std::shared_ptr<EyecatchFilm> eyecatchFilm;
+ std::map<std::string,Layer>layers;std::map<std::string,std::map<std::string,std::string>>templates;std::map<std::string,std::shared_ptr<const Image>>cache;
  std::map<std::string,std::shared_ptr<Composite>>composites;
  AssetReadAhead*readAhead=nullptr;
  bool prefetchNativeVideo=false;

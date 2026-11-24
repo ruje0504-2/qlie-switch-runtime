@@ -20,6 +20,7 @@ extern "C" {
 #include <iostream>
 #include <cmath>
 #include <cstring>
+#include <mutex>
 namespace whj2 {
 namespace {
 float numeric(const std::string&s){return !s.empty()&&s[0]=='$'?float(std::stoul(s.substr(1),nullptr,16)):std::stof(s);
@@ -172,7 +173,22 @@ struct PreparedEmbeddedOpening {
 };
 namespace {
 constexpr auto eyecatchPath="image/cut/eyecatch01.b";
+constexpr auto eyecatchFilmPath="image/cut/eyecatch01.b#film#film";
 }
+struct EyecatchFilm {
+ std::mutex mutex;
+ qlie::Bytes source;
+ std::shared_ptr<const Image> bitmap;
+
+ std::shared_ptr<const Image> decode(qlie::Bytes data){
+  std::lock_guard<std::mutex> lock(mutex);
+  if(!bitmap||source!=data){
+   bitmap=sceneBitmap(image(data));
+   source=std::move(data);
+  }
+  return bitmap;
+ }
+};
 struct Composite {
  struct Element {std::shared_ptr<const Image>image;std::shared_ptr<Model>mesh;std::string name;
  std::shared_ptr<Composite>nested;
@@ -188,7 +204,8 @@ struct Composite {
  mutable std::set<std::string>warnings;
  mutable std::map<size_t,std::unique_ptr<EmbeddedVideo>>clips;
  mutable std::map<size_t,Image>maskedImages;
- explicit Composite(const qlie::Bytes&bytes,const std::string&name,uint32_t&randomState,bool deferred=false):path(name){
+ explicit Composite(const qlie::Bytes&bytes,const std::string&name,uint32_t&randomState,
+                    bool deferred=false,EyecatchFilm* film=nullptr):path(name){
   auto nextId=[&]{return deferred?randomState++:particleRandomNext(randomState);};
   identity=nextId();
   bool metadata=false;
@@ -199,13 +216,14 @@ struct Composite {
  }
    else if(m.type.rfind("abimg",0)==0){Element e;e.name=m.name;
  if(!m.data.empty()){
-    if(m.data.size()>=5&&std::equal(m.data.begin(),m.data.begin()+5,"abmp1"))e.nested=std::make_shared<Composite>(m.data,name+"#"+m.name,randomState,deferred);
+    if(m.data.size()>=5&&std::equal(m.data.begin(),m.data.begin()+5,"abmp1"))e.nested=std::make_shared<Composite>(m.data,name+"#"+m.name,randomState,deferred,film);
     else if(kvideo_is_container(m.data.data(),m.data.size())){e.video=std::make_shared<const qlie::Bytes>(std::move(m.data));
  }
     else if(m.data.size()>=12&&std::equal(m.data.begin(),m.data.begin()+12,"ARGBModel1.0"))e.mesh=std::make_shared<Model>(model(m.data));
     // The story cards supply a portrait for slot zero. Keep the embedded
     // bitmap compressed until a caller draws the card without a replacement.
     else if(path==eyecatchPath&&members.empty())eyecatchFallback=std::move(m.data);
+    else if(film&&path==eyecatchFilmPath&&m.name=="film")e.image=film->decode(std::move(m.data));
     else e.image=sceneBitmap(image(m.data));
    }
    hasVideo=hasVideo||bool(e.video)||(e.nested&&e.nested->hasVideo);
@@ -423,7 +441,8 @@ std::shared_ptr<Composite> SceneImages::sceneComposite(const std::string&path){
   object=std::move(ready->composite);
   object->resolveIdentities(ids);
  }
- if(!object)object=std::make_shared<Composite>(assets.read(path),path,particleState);
+ if(!object)object=std::make_shared<Composite>(assets.read(path),path,particleState,false,
+                                               path==eyecatchPath?eyecatchFilm.get():nullptr);
  composites.emplace(path,object);
  return object;
 }
@@ -449,10 +468,11 @@ bool SceneImages::warmFile(const std::string&path,bool required,bool prepareVide
   },required);
   return true;
  }
- readAhead->request(qlie::canonical(path),[&a=assets,path,prepareVideo,nativeVideo=prefetchNativeVideo]{
+ auto film=path==eyecatchPath?eyecatchFilm:nullptr;
+ readAhead->request(qlie::canonical(path),[&a=assets,path,prepareVideo,nativeVideo=prefetchNativeVideo,film=std::move(film)]{
   WarmAsset ready;auto bytes=a.read(path);
   if(path.size()>2&&path.substr(path.size()-2)==".b"){
-   ready.composite=std::make_shared<Composite>(bytes,path,ready.identities,true);
+   ready.composite=std::make_shared<Composite>(bytes,path,ready.identities,true,film.get());
    if(prepareVideo&&ready.composite->hasVideo)ready.composite->prepareOpeningVideo(nativeVideo);
    ready.bytes=ready.composite->bytesHeld();
   }else{ready.bitmap=sceneBitmap(image(bytes));ready.bytes=ready.bitmap->pixels.size();}
@@ -538,7 +558,7 @@ std::vector<std::string> SceneImages::warmPaths(const std::string&line,Character
  if(chara&&future)future->insert_or_assign(cmd,std::move(stem));
  return result;
 }
-SceneImages::SceneImages(qlie::Assets&a):assets(a){for(auto type:{"image","chara","face","message"}){std::istringstream in(qlie::cp932(a.read(std::string("avg/imoscripter_template_")+type+".txt")));
+SceneImages::SceneImages(qlie::Assets&a):assets(a),eyecatchFilm(std::make_shared<EyecatchFilm>()){for(auto type:{"image","chara","face","message"}){std::istringstream in(qlie::cp932(a.read(std::string("avg/imoscripter_template_")+type+".txt")));
  std::string s;
  while(std::getline(in,s)){auto p=s.find(61);
  if(p!=s.npos)templates[type][trim(s.substr(0,p))]=trim(s.substr(p+1));
@@ -961,7 +981,8 @@ qlie::Bytes SceneImages::save()const{StateWriter w;
 SceneImages::SceneImages(const SceneImages&live,RestoreTarget)
  :windowAlpha(live.windowAlpha),particleState(live.particleState),
   faceRepId(live.faceRepId),faceRepFile(live.faceRepFile),faceType(live.faceType),faceDefaultFile(live.faceDefaultFile),
-  assets(live.assets),templates(live.templates),cache(live.cache),prefetchNativeVideo(live.prefetchNativeVideo){}
+  assets(live.assets),eyecatchFilm(live.eyecatchFilm),templates(live.templates),cache(live.cache),
+  prefetchNativeVideo(live.prefetchNativeVideo){}
 std::unique_ptr<SceneImages> SceneImages::makeRestoreTarget()const{
  // Bitmap pixels are immutable. Live layers, decoders and speculative
  // requests never become part of the worker's restore target.

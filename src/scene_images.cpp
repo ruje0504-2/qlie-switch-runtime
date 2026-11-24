@@ -78,7 +78,7 @@ struct Composite {
   }
   if(!metadata)throw std::runtime_error("Composite lacks animation metadata "+name);
   for(auto&motion:definition.motions)for(auto&layer:motion.layers){if(layer.mode>2)warn("layer-mode="+std::to_string(layer.mode));
- for(auto&k:layer.keys)if(k[4]!=0&&k[4]!=4&&k[4]!=15&&k[4]!=16)warn("primitive="+std::to_string(k[4]));
+ for(auto&k:layer.keys)if(k[4]!=0&&k[4]!=1&&k[4]!=4&&k[4]!=15&&k[4]!=16)warn("primitive="+std::to_string(k[4]));
  }
  }
  void warn(const std::string&s)const{if(warnings.insert(s).second)std::cerr<<"PENDING-ANIMATION "<<path<<" "<<s<<"\n";
@@ -96,6 +96,15 @@ struct Composite {
  if(!motion->layers[index].flags||!k.kind)continue;
  k.alpha=int(k.alpha)*int(opacity)/255;k.addColor=colorAdd(k.addColor,parentAdd);k.mulColor=colorMultiply(k.mulColor,parentMul);
  if(k.kind==15||k.kind==16){queue.control(k,depth+k.priority);continue;}
+ if(k.kind==1){
+  if(k.flags){warn("rectangle-blend="+std::to_string(k.flags));continue;}
+  if(std::abs(k.scaleX)>=32700||std::abs(k.scaleY)>=32700){warn("rectangle-symbolic-size");continue;}
+  // PE eaff0/ea798: rectangle dimensions are pixels, not image scale percentages.
+  static const Image white{1,1,{255,255,255,255}};
+  auto shape=imagePlacement(k.x,k.y,k.scaleX,k.scaleY,k.rotationZ,k.anchorX/100,k.anchorY/100,1,1);
+  queue.image(white,affine(parent,shape),depth+k.priority,k.alpha,k.addColor,k.mulColor);
+  continue;
+ }
  if(k.kind!=4)continue;
  if(k.resource>=members.size())throw std::runtime_error("Composite image index "+path);
    auto&e=members[k.resource];

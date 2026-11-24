@@ -691,7 +691,6 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  SDL_UpdateTexture(texture,nullptr,pixels.data(),1280*4);SDL_RenderClear(renderer);SDL_RenderCopy(renderer,texture,nullptr,nullptr);framePacer.wait();SDL_RenderPresent(renderer);fpsDisplay.presented(SDL_GetTicks64());}
 #ifdef WHJ2_WITH_VULKAN
  void drawNative(){
- framePacer.wait();
  if(uiGlyphs.size()>1024)uiGlyphs.clear();
  frameTarget=vulkan.get();
  if(cgScreen->visible()){vulkan->begin(0u);cgScreen->draw(*frameTarget);}
@@ -714,7 +713,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   if(gameMenu.visible())drawPanel();
  }
  recordShown();if(fpsVisible)fpsDisplay.draw(*frameTarget);frameTarget=nullptr;
- // FramePacer limits scene rendering to30 FPS; the display retains FIFO sync.
+ // FIFO presentation supplies the native 60 Hz limit. A second software sleep
+ // before acquisition can miss the next vblank and halve the frame rate.
  if(auto stamp=vulkan->present(fpsVisible))fpsDisplay.presented(*stamp);
  }
 #endif

@@ -1,10 +1,12 @@
 #pragma once
-#include "qlie.hpp"
+#include "image.hpp"
 #include "sentence_wait.hpp"
 #include <map>
 namespace whj2 {
 class SceneTransition {
+ qlie::Assets&assets;
  std::map<std::string,std::string> templates;
+ Image rule;std::string rulePath;unsigned ruleMode=4;
  qlie::Bytes previous;
  double elapsed=0,duration=0;
  bool staged=false,active=false,caught=false;

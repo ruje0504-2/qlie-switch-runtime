@@ -51,5 +51,11 @@ void main(){
   applyDraw(draws[tiles[first+item]],q,index,color);
   if(item+1u==saveAfter)destination[prefixIndex]=pack(color);
  }
+#ifdef DEKO_RASTER
+ uint result=pack(color);
+ destination[index]=result;
+ if(frame.meta.z!=0u)imageStore(presentImage,q,uvec4(result,0u,0u,0u));
+#else
  destination[index]=pack(color);
+#endif
 }

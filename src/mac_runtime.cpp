@@ -164,14 +164,14 @@ struct Frontend {
  if(SDL_Init(subsystems))throw std::runtime_error(SDL_GetError());
  if(!nativeRequested){window=SDL_CreateWindow("美少女万華鏡２",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,1280,720,SDL_WINDOW_RESIZABLE);if(!window)throw std::runtime_error(SDL_GetError());}
 #ifdef WHJ2_WITH_DEKO3D
- if(gpuMode=="deko3d")gpu=std::make_unique<whj2::Deko3dRaster>();
+ if(nativeRequested&&gpuMode!="vulkan"){
+  if(gpuMode!="deko3d")std::fprintf(stderr,"Unknown renderer '%s', selecting deko3d\n",gpuMode.c_str());
+  gpu=std::make_unique<whj2::Deko3dRaster>();
+ }
 #endif
 #ifdef WHJ2_WITH_VULKAN
 #ifdef __SWITCH__
- if(nativeRequested&&!gpu){
-  if(gpuMode!="vulkan")std::fprintf(stderr,"Unknown renderer '%s', selecting vulkan\n",gpuMode.c_str());
-  gpu=std::make_unique<whj2::VulkanRaster>();
- }
+ if(nativeRequested&&!gpu)gpu=std::make_unique<whj2::VulkanRaster>();
 #else
  if(gpuMode=="vulkan")gpu=std::make_unique<whj2::VulkanRaster>();
 #endif

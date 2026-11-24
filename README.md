@@ -195,8 +195,10 @@ environment variable takes precedence when set. The startup line
 The deko3d backend uses the devkitPro deko3d library and the uam shader compiler.
 The normal Switch build embeds its DKSH in the same NRO. A compute workgroup
 composites each changed 16×16 tile in draw order, including perspective layers,
-masks, particles and transitions. Presentation copies the changed regions to the
-acquired BGRA swapchain image. These commands run on the GPU.
+masks, particles and transitions. When the updated tiles cover all damage in the
+acquired BGRA image, the compute shader writes the final pixels directly to that
+image and the retained canvas. Older regions and interlaced frames use the
+region-copy path. The sampled runtime log reports direct and copied tile counts.
 
 The host build remains available without Vulkan. A Vulkan-enabled host build
 can be built with `WHJ2_HOST_VULKAN=1 sh build-host.sh --runtime-only` and

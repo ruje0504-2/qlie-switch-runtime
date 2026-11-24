@@ -18,7 +18,7 @@ class DekoScene final : public Scene {
  dk::UniqueDevice device;
  dk::UniqueQueue queue;
  dk::UniqueMemBlock imageMemory, code, commandMemory, uniform, output, staging, history;
- dk::UniqueMemBlock texels, drawBuffer, tileBuffer;
+ dk::UniqueMemBlock texels, drawBuffer, tileBuffer, imageDescriptors;
  dk::UniqueCmdBuf cmd;
  dk::Shader shader;
  std::array<dk::Image,ImageCount> images;
@@ -61,13 +61,20 @@ class DekoScene final : public Scene {
 
   dk::ImageLayout layout;
   dk::ImageLayoutMaker{device}.setType(DkImageType_2D).setFormat(DkImageFormat_BGRA8_Unorm)
-       .setDimensions(Width,Height).setFlags(DkImageFlags_UsagePresent).initialize(layout);
+       .setDimensions(Width,Height).setFlags(DkImageFlags_UsagePresent|DkImageFlags_UsageLoadStore).initialize(layout);
   size_t alignment=layout.getAlignment();
   size_t stride=(layout.getSize()+alignment-1)&~(alignment-1);
   imageMemory=allocate(stride*ImageCount,DkMemBlockFlags_Image|DkMemBlockFlags_GpuCached);
+  imageDescriptors=allocate(ImageCount*sizeof(DkImageDescriptor),Mapped);
+  auto* descriptors=static_cast<uint8_t*>(imageDescriptors.getCpuAddr());
   std::array<const DkImage*,ImageCount> handles{};
   for(unsigned i=0;i<ImageCount;++i){
    images[i].initialize(layout,imageMemory,uint32_t(stride*i));
+   // The packed QLIE texel already has the native BGRA byte order. An R32
+   // storage view writes those same four bytes without normalized conversion.
+   dk::ImageDescriptor descriptor;
+   descriptor.initialize(dk::ImageView{images[i]}.setFormat(DkImageFormat_R32_Uint),true);
+   std::memcpy(descriptors+i*sizeof(descriptor),&descriptor,sizeof(descriptor));
    handles[i]=&images[i];
    damage[i].set();
   }
@@ -102,14 +109,15 @@ class DekoScene final : public Scene {
   nativeDisplayCurrent=false;
   for(auto& pending:damage)pending.set();
  }
- void planFrame(){
+ SwapDamage::Mask planFrame(){
   if(!recording)throw std::runtime_error("deko3d frame not begun");
   planTiles();
   waitForPrevious();
   auto changed=changedTiles(interlaced);
   for(auto& pending:damage)pending|=changed;
+  return changed;
  }
- void recordTiles(){
+ void recordTiles(int presentSlot){
   const size_t drawBytes=current->commands.size()*sizeof(DrawData);
   const size_t headerWords=workTiles.size()*4;
   grow(drawBuffer,std::max(sizeof(DrawData),drawBytes));
@@ -120,6 +128,7 @@ class DekoScene final : public Scene {
   Push parameters;
   parameters.meta[0]=Width;
   parameters.meta[1]=Height;
+  parameters.meta[2]=presentSlot>=0;
   parameters.meta[3]=current->cleared;
   parameters.colors[0]=current->color;
   std::memcpy(uniform.getCpuAddr(),&parameters,sizeof(parameters));
@@ -131,11 +140,14 @@ class DekoScene final : public Scene {
   cmd.bindShaders(DkStageFlag_Compute,program);
   cmd.bindUniformBuffer(DkStage_Compute,0,uniform.getGpuAddr(),DK_UNIFORM_BUF_ALIGNMENT);
   cmd.bindStorageBuffers(DkStage_Compute,0,buffers);
+  cmd.bindImageDescriptorSet(imageDescriptors.getGpuAddr(),ImageCount);
+  const auto handle=dkMakeImageHandle(presentSlot>=0?unsigned(presentSlot):0u);
+  cmd.bindImages(DkStage_Compute,0,handle);
   cmd.dispatchCompute(uint32_t(workTiles.size()),1,1);
   ++dispatches;
   cmd.barrier(DkBarrier_Primitives,0);
  }
- void recordCanvas(){
+ void recordCanvas(int presentSlot){
   cmd.clear();
   cmd.addMemory(commandMemory,0,commandMemory.getSize());
   if(interlaced&&!historyValid&&canvasValid){
@@ -147,7 +159,7 @@ class DekoScene final : public Scene {
    cmd.copyBuffer(staging.getGpuAddr(),output.getGpuAddr(),CanvasBytes);
    cmd.barrier(DkBarrier_Full,DkInvalidateFlags_Shader);
   }
-  if(!workTiles.empty())recordTiles();
+  if(!workTiles.empty())recordTiles(presentSlot);
   if(interlaced){
    if(!historyValid)cmd.copyBuffer(output.getGpuAddr(),history.getGpuAddr(),CanvasBytes);
    else for(unsigned y=(frames+1)&1;y<Height;y+=2){
@@ -170,7 +182,7 @@ class DekoScene final : public Scene {
   completeFrame();
  }
  std::optional<uint64_t> presentNative(bool refreshUnchanged) override {
-  planFrame();
+  const auto changed=planFrame();
   if(!interlaced&&!refreshUnchanged&&nativeDisplayCurrent&&current->cleared&&workTiles.empty()){
    std::this_thread::sleep_until(lastRefresh+std::chrono::nanoseconds(16666667));
    lastRefresh=Clock::now();
@@ -180,15 +192,25 @@ class DekoScene final : public Scene {
   }
   const int slot=queue.acquireImage(swapchain);
   if(slot<0||unsigned(slot)>=ImageCount)throw std::runtime_error("deko3d swapchain acquisition");
-  recordCanvas();
-  for(const auto& rect:SwapDamage::regions(damage[slot])){
-   DkImageRect dst{rect.x*Tile,rect.y*Tile,0,rect.width*Tile,rect.height*Tile,1};
-   size_t offset=(size_t(dst.y)*Width+dst.x)*4;
-   // DkCopyBuf rowLength is a pitch in bytes, including for partial rectangles.
-   cmd.copyBufferToImage({displayAddress()+offset,Width*sizeof(uint32_t),0},dk::ImageView{images[slot]},dst);
+  // Only write an acquired image if this dispatch paints every tile that
+  // image has missed. Its other tiles already hold the correct final pixels.
+  const bool direct=!interlaced&&current->cleared&&changed.any()&&(damage[slot]&~changed).none();
+  recordCanvas(direct?slot:-1);
+  unsigned copiedTiles=0;
+  if(!direct){
+   for(const auto& rect:SwapDamage::regions(damage[slot])){
+    DkImageRect dst{rect.x*Tile,rect.y*Tile,0,rect.width*Tile,rect.height*Tile,1};
+    size_t offset=(size_t(dst.y)*Width+dst.x)*4;
+    // DkCopyBuf rowLength is a byte pitch, including for partial rectangles.
+    cmd.copyBufferToImage({displayAddress()+offset,Width*sizeof(uint32_t),0},dk::ImageView{images[slot]},dst);
+    copiedTiles+=rect.width*rect.height;
+   }
   }
   submit(false);
   queue.presentImage(swapchain,slot);
+  if(frames==0||(frames+1)%120==0)
+   std::fprintf(stderr,"DEKO3D PRESENT frame=%llu direct_tiles=%zu copy_tiles=%u\n",
+                (unsigned long long)(frames+1),direct?workTiles.size():size_t(0),copiedTiles);
   damage[slot].reset();
   nativeDisplayCurrent=true;
   lastRefresh=Clock::now();
@@ -198,7 +220,7 @@ class DekoScene final : public Scene {
  void readCanvas(qlie::Bytes& pixels) override {
   planFrame();
   grow(staging,CanvasBytes);
-  recordCanvas();
+  recordCanvas(-1);
   cmd.copyBuffer(displayAddress(),staging.getGpuAddr(),CanvasBytes);
   submit(true);
   queue.flush();

@@ -3,6 +3,8 @@
 layout(local_size_x=16,local_size_y=16) in;
 layout(binding=0,std430) readonly buffer Source { uint source[]; };
 layout(binding=1,std430) buffer Destination { uint destination[]; };
+layout(r32ui,binding=0) uniform writeonly uimage2D presentImage;
+#define DEKO_RASTER
 #include "raster_types.glsl"
 layout(binding=2,std430) readonly buffer Commands { Draw draws[]; };
 layout(binding=3,std430) readonly buffer Tiles { uint tiles[]; };

@@ -13,7 +13,11 @@ uint pack(uvec4 c){return c.x|(c.y<<8)|(c.z<<16)|(c.w<<24);}
 float divide(float a,float b);
 uint maskAlpha(uint sourceAlpha,uint blue,uint amount,uint mode){
  if(amount==255u)return sourceAlpha;
+#ifdef DEKO_RASTER
+ uint shift=min(mode&15u,7u),power=1u<<shift,span=256u>>shift;
+#else
  uint power=1u<<min(mode&15u,7u),span=RASTER_DIV(256u,power);
+#endif
  int threshold=(255-int(amount))*int(span+255u)/255-int(span);
  int value=(mode&128u)!=0u?255-int(blue):int(blue);
  int wrapped=((value-threshold)*int(power))&65535;if(wrapped>=32768)wrapped-=65536;
@@ -32,6 +36,22 @@ uvec4 pixel(Draw p,ivec2 q){
 uvec4 samplePixel(Draw p,vec2 uv){
  if((p.meta.z&255u)!=2u)return pixel(p,ivec2(floor(uv)));
  precise vec2 f=uv-vec2(.5);ivec2 i=ivec2(floor(f));f-=vec2(i);
+#ifdef DEKO_RASTER
+ if((p.meta.z&262144u)==0u){
+  // A horizontal or vertical subpixel pan has a zero weight along the other axis.
+  // Keep the original evaluation order for every nonzero weight.
+  ivec2 last=ivec2(p.meta.xy)-1,lo=clamp(i,ivec2(0),last),hi=clamp(i+1,ivec2(0),last);
+  uint row0=p.colors.z+uint(lo.y)*p.meta.x;
+  precise vec4 top=vec4(unpack(source[row0+uint(lo.x)]));
+  if(f.x!=0.0)top=top*(1.0-f.x)+vec4(unpack(source[row0+uint(hi.x)]))*f.x;
+  if(f.y==0.0)return uvec4(floor(top+0.5));
+  uint row1=p.colors.z+uint(hi.y)*p.meta.x;
+  precise vec4 bottom=vec4(unpack(source[row1+uint(lo.x)]));
+  if(f.x!=0.0)bottom=bottom*(1.0-f.x)+vec4(unpack(source[row1+uint(hi.x)]))*f.x;
+  precise vec4 filtered=top*(1.0-f.y)+bottom*f.y;
+  return uvec4(floor(filtered+0.5));
+ }
+#endif
  precise vec4 a=vec4(pixel(p,i)),b=vec4(pixel(p,i+ivec2(1,0))),c=vec4(pixel(p,i+ivec2(0,1))),d=vec4(pixel(p,i+ivec2(1,1)));
  precise vec4 value=(a*(1-f.x)+b*f.x)*(1-f.y)+(c*(1-f.x)+d*f.x)*f.y;
  return uvec4(floor(value+.5));
@@ -54,6 +74,12 @@ uvec4 tint(Draw p,uvec4 s){
 }
 uvec4 composite(uint mode,uvec4 s,uvec4 d){
  uint a=s.a;
+#ifdef DEKO_RASTER
+ if(mode==8u){
+  uvec4 contribution=(s*(a+(a>>7u)))>>8u;
+  return d-min(d,contribution);
+ }
+#endif
  if(mode<2u){
   if(a==255u)return s;
   return uvec4(ivec4(d)+((ivec4(s)-ivec4(d))*int((a+(a>>7))>>1)>>7));

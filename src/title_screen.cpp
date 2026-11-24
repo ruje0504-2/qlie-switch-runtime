@@ -3,13 +3,13 @@
 #include <algorithm>
 #include <cmath>
 namespace whj2 {
-void TitleScreen::reset(bool alternate,bool unlocked){scene.clear();elapsed=0;shown=hover=false;selected=0;extras=unlocked;extraPage=false;viewX=0;viewTarget=640;
+void TitleScreen::reset(bool alternate,bool unlocked){scene.clear();elapsed=0;shown=hover=false;selected=0;buttonMotions.fill("");extras=unlocked;extraPage=false;viewX=0;viewTarget=640;
  scene.command(std::string("^ui_back,file:script/title/title_back0")+(alternate?"2":"1")+".b,x:0,y:0,pri:0");
  scene.uiExternal("ui_back",0,0);
  scene.command("^ui_frame,file:script/title/frame.b,x:1070,y:450,pri:90,show:false");
  const char*names[]={"start","load","album","option","quit"};for(unsigned i=0;i<5;i++){auto id="ui_button"+std::to_string(i);scene.command("^"+id+",file:script/title/button.b,x:1080,y:"+std::to_string(310+i*70)+",pri:100,show:false");scene.uiSlot(id,0,std::string("script/title/")+names[i]+"01.png");scene.uiSlot(id,1,std::string("script/title/")+names[i]+"02.png");}
 }
-void TitleScreen::setExtraPage(bool extra){if(extra&&!extras)return;extraPage=extra;selected=0;shown=true;hover=false;elapsed=5000;
+void TitleScreen::setExtraPage(bool extra){if(extra&&!extras)return;extraPage=extra;selected=0;buttonMotions.fill("");shown=true;hover=false;elapsed=5000;
  const char*mainNames[]={"start","load","album","option","quit"};const char*extraNames[]={"CG","Memory","Sound","Back"};
  for(int i=0;i<5;i++){auto id="ui_button"+std::to_string(i);if(extra&&i==4){scene.command("^"+id+",show:false");continue;}
   scene.command("^"+id+",x:1080,y:"+std::to_string(extra?330+i*80:310+i*70)+",show:true,motion:*Enable");
@@ -17,8 +17,12 @@ void TitleScreen::setExtraPage(bool extra){if(extra&&!extras)return;extraPage=ex
  }
  scene.command("^ui_frame,motion:*Enable");
 }
-void TitleScreen::enable(){shown=true;scene.command("^ui_frame,show:true,motion:*Enable");for(int i=0;i<5;i++)scene.command("^ui_button"+std::to_string(i)+",show:true,motion:*Enable");}
-void TitleScreen::highlight(){hover=true;for(int i=0;i<(extraPage?4:5);i++)scene.command("^ui_button"+std::to_string(i)+",motion:"+(!extraPage&&i==2&&!extras?"*OnLock":i==selected?"*OnMouse":"*OffMouse"));}
+void TitleScreen::enable(){buttonMotions.fill("");shown=true;scene.command("^ui_frame,show:true,motion:*Enable");for(int i=0;i<5;i++)scene.command("^ui_button"+std::to_string(i)+",show:true,motion:*Enable");}
+void TitleScreen::highlight(){hover=true;for(int i=0;i<(extraPage?4:5);i++){
+ const char*motion=!extraPage&&i==2&&!extras?"*OnLock":i==selected?"*OnMouse":"*OffMouse";
+ if(buttonMotions[i]==motion)continue;
+ scene.command("^ui_button"+std::to_string(i)+",motion:"+motion);buttonMotions[i]=motion;
+}}
 void TitleScreen::view(float x){viewTarget=std::clamp(x,0.f,1280.f);}
 void TitleScreen::update(double ms){ms=std::max(0.,ms);viewX=(viewX*7+viewTarget)/8;scene.uiExternal("ui_back",0,viewX*1000/1280);if(!shown){double part=std::min(ms,5000-elapsed);scene.update(part);elapsed+=part;ms-=part;if(elapsed>=5000)enable();}scene.update(ms);elapsed+=ms;if(ready()&&!hover)highlight();}
 void TitleScreen::skipIntro(){if(!ready())update(5500-elapsed);}

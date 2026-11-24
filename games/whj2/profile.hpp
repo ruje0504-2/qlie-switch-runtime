@@ -19,7 +19,7 @@ inline const StoryProfile story{
   {"scenario/本編/w01_01.s",{203,218,326,717,756,1115,1125,1127,1179,1261,1510,1529,1764,1847,2105}},
   {"scenario/本編/w01_02.s",{41,502,630,634,703,851,905}},
   {"scenario/本編/w02_01.s",{231,366,975,1136,1499,1657}},
-  {"scenario/本編/w03_01.s",{145,476,503,708,710,939}},
+  {"scenario/本編/w03_01.s",{145,503,708,710,939}},
   {"scenario/本編/w03_03.s",{207,299,379,388,493}},
   {"scenario/本編/w04_01.s",{13,16,299}},
   {"scenario/本編/w04_03.s",{193}},
@@ -75,17 +75,13 @@ inline const StoryProfile story{
   {"scenario/本編/w@15_03b.s",{130,750,772,865}},
   {"scenario/本編/w@16_03.s",{913,915}}}
 };
-// Give the three standalone fades a full visible interval. The first
-// white overlap uses the existing following wait.
+// Keep the ending overlaps visible through their matching waits.
 inline void applySentenceTiming(Event& event){
- if(event.line==476&&event.file=="scenario/本編/w03_01.s"&&
-    event.value=="^sentence,$overlap,wait:click")
-  event.value="^sentence,fade:overlap:1000,wait:click:1000";
  if(event.file!="scenario/本編/w@16_03.s")return;
  if(event.line==913&&event.value=="^sentence,wait:click:1000")
   event.value="^sentence,wait:click:1500";
  if(event.line==915&&event.value=="^sentence,$overlap_long")
-  event.value="^sentence,fade:overlap:2000,wait:click:2000";
+  event.value="^sentence,$overlap_long,wait:click:1500";
 }
 inline constexpr char gameName[] = "美少女万華鏡２";
 inline constexpr char sdRoot[] = "sdmc:/switch/whj2";

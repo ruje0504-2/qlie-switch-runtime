@@ -15,8 +15,19 @@ if [ "${WHJ2_HOST_VULKAN:-0}" = 1 ]; then
   common="$common -ffp-contract=off -Wno-missing-field-initializers -DWHJ2_WITH_VULKAN -I$mesa/include"
   vulkan_source=src/vulkan_raster.cpp
 fi
+runtime_flags=
+mac_object=
+mac_frameworks=
+if [ "$(uname -s)" = Darwin ]; then
+  mac_object=build/mac_game_access.o
+  runtime_flags=-DWHJ2_MAC_GAME_PICKER
+  mac_frameworks="-framework AppKit"
+  if [ ! -f "$mac_object" ] || [ src/mac_game_access.mm -nt "$mac_object" ] || [ src/mac_game_access.h -nt "$mac_object" ]; then
+    $cxx -std=c++17 -O2 -Wall -Wextra -Werror -fobjc-arc -c src/mac_game_access.mm -o "$mac_object"
+  fi
+fi
 build_runtime() {
-$cxx -std=c++17 $common $($pc --cflags sdl2 freetype2 libpng libjpeg) src/qlie.cpp src/story.cpp src/audio.cpp src/image.cpp src/animation.cpp src/particles.cpp src/scene_images.cpp src/model.cpp src/gradient_mask.cpp src/render_queue.cpp src/voice.cpp src/movie.cpp src/message_text.cpp src/scene_transition.cpp src/sentence_wait.cpp src/upper_menu.cpp src/game_menu.cpp src/settings.cpp src/auto_play.cpp src/fps_overlay.cpp src/title_screen.cpp src/choice_screen.cpp src/progress.cpp src/music_screen.cpp src/replay_catalog.cpp src/replay_screen.cpp src/cg_catalog.cpp src/cg_screen.cpp src/mac_runtime.cpp $vulkan_source build/font.o build/video.o $($pc --libs sdl2 freetype2 libavformat libavcodec libswscale libswresample libavutil libpng libjpeg) -o build/whj2-runtime
+$cxx -std=c++17 $common $runtime_flags $($pc --cflags sdl2 freetype2 libpng libjpeg) src/qlie.cpp src/story.cpp src/audio.cpp src/image.cpp src/animation.cpp src/particles.cpp src/scene_images.cpp src/model.cpp src/gradient_mask.cpp src/render_queue.cpp src/voice.cpp src/movie.cpp src/message_text.cpp src/scene_transition.cpp src/sentence_wait.cpp src/upper_menu.cpp src/game_menu.cpp src/settings.cpp src/auto_play.cpp src/fps_overlay.cpp src/title_screen.cpp src/choice_screen.cpp src/progress.cpp src/music_screen.cpp src/replay_catalog.cpp src/replay_screen.cpp src/cg_catalog.cpp src/cg_screen.cpp src/mac_runtime.cpp $vulkan_source build/font.o build/video.o $mac_object $mac_frameworks $($pc --libs sdl2 freetype2 libavformat libavcodec libswscale libswresample libavutil libpng libjpeg) -o build/whj2-runtime
 }
 if [ "${1:-}" = --runtime-only ]; then
   if [ ! -f build/font.o ] || [ src/font.c -nt build/font.o ] || [ src/font.h -nt build/font.o ]; then

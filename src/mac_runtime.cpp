@@ -4,6 +4,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Incremental native frontend: graphics/audio integration remains in progress.
 #include "story.hpp"
+#ifdef WHJ2_MAC_GAME_PICKER
+#include "mac_game_access.h"
+#endif
 #include "audio.hpp"
 #include "switch_threads.hpp"
 #include "scene_images.hpp"
@@ -1097,6 +1100,9 @@ if(game.empty()){std::cerr<<"usage: whj2-runtime GAME [SAVE_DIR] [--smoke-frames
  if(argc>4&&std::string(argv[3])=="--smoke-frames")smoke=unsigned(std::stoul(argv[4]));
 #ifdef __SWITCH__
 if(argc<3)saves="sdmc:/switch/whj2/saves";
+#endif
+#ifdef WHJ2_MAC_GAME_PICKER
+if(!whj2_mac_can_read_game(game.c_str())){char *chosen=whj2_mac_choose_game(game.c_str());if(!chosen)return 0;game=chosen;std::free(chosen);}
 #endif
 std::cerr<<"BUILD revision="<<WHJ2_BUILD_REV<<"\n";
 std::cerr<<"INIT game="<<game<<" saves="<<saves<<"\n";

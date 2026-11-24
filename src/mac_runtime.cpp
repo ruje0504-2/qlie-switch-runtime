@@ -365,6 +365,11 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(c==t.npos)throw std::runtime_error("Unknown audio template "+t);
  attrs[t.substr(0,c)]=t.substr(c+1);
  }for(auto&v:attrs)if(v.first!="file"&&v.first!="loop"&&v.first!="vol"&&v.first!="voltype"&&v.first!="time"&&v.first!="clear")throw std::runtime_error("Unsupported audio property "+v.first);
+ // Imo_Sound_Refresh_Main resets per-file playback properties before overrides.
+ if(ch!=0&&(attrs.count("file")||(attrs.count("clear")&&attrs["clear"]=="def"))){
+  loops[ch]=false;volumes[ch]=1;audioTimes[ch]=0;
+  if(attrs.count("clear"))audioTypes[ch]=2;
+ }
  if(attrs.count("clear")){audio->volume(ch,0,0,true);if(ch==0)audio->volume(whj2::Audio::MusicPreviousChannel,0,0,true);
  return true;
  }if(attrs.count("loop"))loops[ch]=attrs["loop"]=="true";
@@ -375,7 +380,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(attrs.count("file")){auto f=attrs["file"];
  if(f=="none"){audio->volume(ch,0,ms,true);if(ch==0)audio->volume(whj2::Audio::MusicPreviousChannel,0,ms,true);
  return true;
- }std::string path=(ch==0?"music/":"se/")+f;
+ }if(ch!=0&&normalSkip&&!loops[ch]){audio->stop(ch);return true;}
+ std::string path=(ch==0?"music/":"se/")+f;
  if(!assets.exists(path))path+=".ogg";
  if(ch==0)audio->playMusicFile(assets,path,loops[ch],volumes[ch],ms,audioTypes[ch],attrs.count("time")!=0);
  else audio->playFile(assets,ch,path,loops[ch],volumes[ch],ms,audioTypes[ch]);

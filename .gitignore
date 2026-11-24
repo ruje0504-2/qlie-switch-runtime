@@ -1,0 +1,12 @@
+local/
+build/
+build-switch/
+delivery/
+__pycache__/
+*.pyc
+reports/
+HANDOFF.md
+OPERATIONS.md
+DELIVERY.md
+tools/record_op.py
+.DS_Store

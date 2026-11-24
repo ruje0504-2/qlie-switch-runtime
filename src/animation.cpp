@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// WHJ2 PE file offsets f41f8 (abdata13), f409c (abdata12),
+// f39c8 (abmotion10), f3684 (ablayer18). Key record width is 0xa2.
+#include "animation.hpp"
+#include <stdexcept>
+namespace whj2 {
+struct AnimReader {const qlie::Bytes&b;size_t p=0;uint32_t n(unsigned size=4){if(size>b.size()-p)throw std::runtime_error("Truncated animation");uint32_t v=0;for(unsigned i=0;i<size;i++)v|=uint32_t(b[p++])<<(8*i);return v;}qlie::Bytes data(size_t size){if(size>b.size()-p)throw std::runtime_error("Truncated animation payload");qlie::Bytes d(b.begin()+p,b.begin()+p+size);p+=size;return d;}std::string str(){return qlie::cp932(data(n(2)));}std::string tag(){auto b0=data(16);size_t n0=0;while(n0<16&&b0[n0])n0++;return std::string(b0.begin(),b0.begin()+n0);}};
+Animation animation(const std::string&type,const qlie::Bytes&b){AnimReader r{b};Animation a;a.name=r.str();uint32_t version=0;if(type=="abdata13")version=r.n();else if(type!="abdata12")throw std::runtime_error("Unsupported animation metadata "+type);for(auto&v:a.bounds)v=int32_t(r.n());if(type=="abdata13"&&version>=1)a.flags=r.n();a.comment=r.str();unsigned motions=r.n(1);while(motions--){if(r.tag()!="abmotion10")throw std::runtime_error("Unknown animation motion header");Motion m;m.name=r.str();unsigned layers=r.n(1);while(layers--){AnimationLayer l;auto tag=r.tag();if(tag!="ablayer18"&&tag!="ablayer17"&&tag!="ablayer16"&&tag!="ablayer15")throw std::runtime_error("Unsupported animation layer "+tag);l.version=unsigned(std::stoi(tag.substr(7)));l.name=r.str();l.flags=uint8_t(r.n(1));unsigned count=r.n(1);l.mode=uint8_t(r.n(1));for(unsigned i=0;i<count;i++){l.keys.push_back(r.data(l.version==15?92:l.version==16?145:162));}m.layers.push_back(std::move(l));}a.motions.push_back(std::move(m));}if(r.p!=b.size())throw std::runtime_error("Trailing animation bytes");return a;}
+}

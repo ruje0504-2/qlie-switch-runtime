@@ -1,10 +1,27 @@
 #include "story.hpp"
 #include "scene_images.hpp"
 #include "animation.hpp"
+#include "render_queue.hpp"
 #include <fstream>
 #include <iostream>
 #include <algorithm>
 int main(int argc,char**argv){try{if(argc<2)return 2;qlie::Assets a(argv[1]);
+if(argc==3&&std::string(argv[2])=="--face-render"){
+ whj2::SceneImages scene(a);const std::string file="めぐみ/めぐみ_小_制服_1_05通常05";
+ scene.command("^face,$base,file:"+file);qlie::Bytes actual(1280*720*4),expected(actual.size()),background(actual.size());scene.draw(actual);scene.drawScene(background);
+ if(std::any_of(background.begin(),background.end(),[](uint8_t v){return v!=0;}))throw std::runtime_error("Face leaked into background capture");
+ auto portrait=whj2::image(a.read("face/"+file+".png"));whj2::RenderQueue queue;queue.image(portrait,whj2::imagePlacement(100,720,1,1,0,.5,1,portrait.width,portrait.height),1110,255,0,0xffffff);queue.draw(expected,1280,720);
+ if(actual!=expected||std::none_of(actual.begin(),actual.end(),[](uint8_t v){return v!=0;}))throw std::runtime_error("Original face template placement");
+ auto state=scene.save();whj2::SceneImages loaded(a);loaded.restore(state);qlie::Bytes restored(actual.size());loaded.drawFaces(restored);if(restored!=actual)throw std::runtime_error("Face restore");
+ scene.beginPage();actual.assign(actual.size(),0);scene.drawFaces(actual);if(actual!=background)throw std::runtime_error("Once face remained on next page");
+ scene.command("^face,file:"+file+",disp:keep");scene.beginPage();scene.drawFaces(actual);if(actual!=expected)throw std::runtime_error("Keep face lost on next page");
+ scene.command("^face,show:false");actual.assign(actual.size(),0);scene.drawFaces(actual);if(actual!=background)throw std::runtime_error("Hidden face visible");
+ scene.command("^face,clear:def");scene.drawFaces(actual);if(actual!=background)throw std::runtime_error("Face clear default");
+ scene.command("^chara01,file:"+file);scene.command("^face,$base");scene.beginPage();scene.selectFace("【めぐみ＠別名】","");actual.assign(actual.size(),0);scene.drawFaces(actual);if(actual!=expected)throw std::runtime_error("Automatic speaker-to-portrait mapping");
+ scene.command("^chara01,id:別名");scene.beginPage();scene.selectFace("【別名】","");actual.assign(actual.size(),0);scene.drawFaces(actual);if(actual!=expected)throw std::runtime_error("Character explicit ID mapping");
+ scene.beginPage();scene.selectFace("","");actual.assign(actual.size(),0);scene.drawFaces(actual);if(actual!=background)throw std::runtime_error("Narration kept automatic once portrait");
+ std::cout<<"PASS original face placement, overlay isolation, once/keep/show/clear and saved state\n";return 0;
+}
 if(argc==3&&std::string(argv[2])=="--dynamic-instances"){
  unsigned failures=0;
  for(const std::string resource:{"cut/eyecatch01","cut/c_万華鏡"}){

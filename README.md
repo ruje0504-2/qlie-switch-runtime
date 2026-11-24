@@ -66,6 +66,8 @@ Image commands support timed position/scale/rotation/priority and per-channel co
 
 Character base animations use a per-layer portrait in image slot 0 without modifying shared animation resources. Named and numeric motions are supported. Direct backward key jumps preserve their elapsed remainder; conditional key jumps remain incomplete. Empty portrait slots stay empty, and portrait replacements survive saves.
 
-Sentence transitions support captured-scene overlaps, cuts and template durations. Captures and transition progress survive saves; interrupted overlaps start from the currently displayed scene. Rule masks, mosaic and animation transition modes, sentence wait policies and automatic face portraits remain incomplete and reported.
+Sentence transitions support captured-scene overlaps, cuts and template durations. Captures and transition progress survive saves; interrupted overlaps start from the currently displayed scene. Rule masks, mosaic and animation transition modes, sentence wait policies and some face/UI behaviors remain incomplete and reported.
 
 Queued gradient masks and decoded video frames retain an immutable per-queue snapshot until drawing completes, so repeated animated assets cannot overwrite another instance’s pending frame. Static textures continue to use shared references.
+
+Face portraits support explicit files, per-page or persistent display, show/clear controls, and foreground rendering above the text panel. Automatic selection follows project FaceType, name aliases, character IDs and the original replacement tables, with configured fallback filenames. Missing candidates remain reported.

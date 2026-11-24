@@ -150,16 +150,19 @@ struct Frontend {
  std::cerr<<"VOICE playing id="<<id<<" source="<<match->source.path<<" offset="<<match->source.offset<<" bytes="<<bytes.size()<<" loose="<<match->source.loose<<"\n";
  }
  void next(){if(menu||story.state.finished)return;
+ images->beginPage();
  std::string body,speaker,voiceId;
  for(unsigned guard=0;guard<10000;guard++){auto e=story.next();
  if(e.type=="choice"){transition->present();focus=0;
  text=body.empty()?"選択してください":body;
  name=speaker;
+ images->selectFace(speaker,voiceId);
  return;
  }if(e.type=="page"){if(body.empty())continue;
  transition->present();
  text=body;
  name=speaker;
+ images->selectFace(speaker,voiceId);
  playVoice(voiceId);
  advances++;
  std::cerr<<"PAGE "<<e.file<<":"<<e.line<<"\n";
@@ -184,7 +187,7 @@ struct Frontend {
  text="";
  name="";
  return;
- }if(e.type=="command"&&e.value.rfind("^sentence",0)==0){qlie::Bytes scene(1280*720*4);for(size_t i=0;i<scene.size();i+=4){scene[i]=35;scene[i+1]=25;scene[i+2]=20;scene[i+3]=255;}images->draw(scene);transition->blend(scene);transition->command(e.value,scene);continue;
+ }if(e.type=="command"&&e.value.rfind("^sentence",0)==0){qlie::Bytes scene(1280*720*4);for(size_t i=0;i<scene.size();i+=4){scene[i]=35;scene[i+1]=25;scene[i+2]=20;scene[i+3]=255;}images->drawScene(scene);transition->blend(scene);transition->command(e.value,scene);continue;
  }if(e.type=="command"&&(audioCommand(e.value)||images->command(e.value)))continue;
  if(e.type=="create"||e.type=="free"){audio->stopAll();
  images->clear();
@@ -260,7 +263,7 @@ struct Frontend {
  pixels[i+1]=25;
  pixels[i+2]=20;
  pixels[i+3]=255;
- }if(!menu){images->draw(pixels);transition->blend(pixels);}
+ }if(!menu){images->drawScene(pixels);transition->blend(pixels);}
  if(menu){line("美少女万華鏡２　日本語版 開発版",45,30,32);
  line(status,45,90,20,0xffd58b);
  }else {for(int hy=0;hy<64;hy++){for(int hx=920;hx<1280;hx++){auto*pixel=pixels.data()+(size_t(hy)*1280+hx)*4;for(int c=0;c<3;c++){pixel[c]=uint8_t(unsigned(pixel[c])*60/255);}}}
@@ -276,7 +279,8 @@ struct Frontend {
  line(name,55,490,26,0xffddbb);
  line(text,55,535,26);
  if(story.state.awaiting)for(size_t i=0;i<story.state.choices.size();i++)line((focus==int(i)?"▶ ":"　 ")+story.state.choices[i],80,220+int(i)*50,26,focus==int(i)?0xffd58b:0xffffff);
- }line("A: 次へ　B / ＋: メニュー　上下: 選択　X: 保存　Y: 読込　タッチ操作対応",45,675,19,0xb0becf);
+ }if(!menu&&!hidden)images->drawFaces(pixels);
+ line("A: 次へ　B / ＋: メニュー　上下: 選択　X: 保存　Y: 読込　タッチ操作対応",45,675,19,0xb0becf);
  SDL_UpdateTexture(texture,nullptr,pixels.data(),1280*4);
  SDL_RenderClear(renderer);
  SDL_RenderCopy(renderer,texture,nullptr,nullptr);

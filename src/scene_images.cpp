@@ -188,11 +188,16 @@ struct Composite {
   }
  }
 };
-SceneImages::SceneImages(qlie::Assets&a):assets(a){for(auto type:{"image","chara"}){std::istringstream in(qlie::cp932(a.read(std::string("avg/imoscripter_template_")+type+".txt")));
+SceneImages::SceneImages(qlie::Assets&a):assets(a){for(auto type:{"image","chara","face"}){std::istringstream in(qlie::cp932(a.read(std::string("avg/imoscripter_template_")+type+".txt")));
  std::string s;
  while(std::getline(in,s)){auto p=s.find(61);
  if(p!=s.npos)templates[type][trim(s.substr(0,p))]=trim(s.substr(p+1));
- }}}
+ }}
+ auto table=[&](const std::string&path){std::map<std::string,std::string> out;std::istringstream in(qlie::cp932(a.read(path)));std::string line;while(std::getline(in,line)){auto pos=line.find('=');if(pos!=line.npos)out[trim(line.substr(0,pos))]=trim(line.substr(pos+1));}return out;};
+ faceRepId=table("avg/imoscripter_face_repid.txt");faceRepFile=table("avg/imoscripter_face_repfile.txt");auto project=table("avg/projectsetting.txt");
+ if(project.count("FaceType"))faceType=unsigned(std::stoul(project.at("FaceType")));
+ if(project.count("FaceDefaultFile"))faceDefaultFile=project.at("FaceDefaultFile");
+}
 std::string SceneImages::expand(std::string s,const std::string&type){auto&map=templates[type];
  std::vector<std::pair<std::string,std::string>>values(map.begin(),map.end());
  std::sort(values.begin(),values.end(),[](auto&a,auto&b){return a.first.size()>b.first.size();});
@@ -259,34 +264,37 @@ void SceneImages::update(double ms){for(auto&entry:layers){auto&layer=entry.seco
  }}
 bool SceneImages::command(const std::string&line){auto p=line.find(44);
  auto cmd=line.substr(1,p-1);
- bool chara=cmd.rfind("chara",0)==0;
- if(!chara&&cmd.rfind("bg",0)!=0&&cmd!="effect"&&cmd!="env")return false;
+ bool chara=cmd.rfind("chara",0)==0,face=cmd=="face";
+ if(!chara&&!face&&cmd.rfind("bg",0)!=0&&cmd!="effect"&&cmd!="env")return false;
  auto&l=layers[cmd];
+ const std::map<std::string,std::string> faceDefaults{{"mode","auto"},{"disp","once"},{"show","false"},{"x","0"},{"y","0"},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri","0"},{"align","left:top"},{"@face-active","false"}};
+ if(face&&l.params.empty())l.params=faceDefaults;
  if(l.params.empty())l.params={{"x","640"},{"y",chara?"720":"360"},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri",chara?"500":"0"},{"show","true"},{"align",chara?"center:bottom":cmd=="effect"?"left:top":"center:center"}};
  if(chara){auto motion=l.params.find("motion");if(motion!=l.params.end()&&motion->second!="def"&&motion->second!="0"&&motion->second.find('+')==std::string::npos){motion->second="def";l.milliseconds=0;l.audioMilliseconds=-1;}}
- auto args=split(expand(p==line.npos?"":line.substr(p+1),chara?"chara":"image"),44);
+ auto args=split(expand(p==line.npos?"":line.substr(p+1),chara?"chara":face?"face":"image"),44);
  Layer before=l;bool file=false,baseChanged=false,position=false,color=false;
  for(auto&s:args){if(s.empty())continue;
  auto c=s.find(58);
  if(c==s.npos)throw std::runtime_error("Unknown image template "+s);
  auto key=s.substr(0,c),v=s.substr(c+1);
+ if(face&&key=="clear"&&v=="def"){l=Layer{};l.params=faceDefaults;continue;}
  if(key=="clear"){l.params.erase("@portrait");l.path.clear();
  l.pixels.reset();
  l.composite.reset();
  l.params["show"]="false";
  continue;
  }l.params[key]=v;
- if(key=="file")file=true;
- if(chara&&key=="base")baseChanged=true;
+ if(key=="file"){file=true;if(face)l.params["@face-active"]="true";}
+ if((chara||face)&&key=="base")baseChanged=true;
  if(key=="x"||key=="y"||key=="ax"||key=="ay"||key=="scalex"||key=="scaley"||key=="rotz"||key=="pri")position=true;
  if(key=="alpha"||key=="mulcolor"||key=="addcolor")color=true;
  if(key=="vol"&&std::stof(v)==0)l.audioStopPending=true;
  if(key=="motion"){l.milliseconds=0;l.audioMilliseconds=-1;}
- if(key!="base"&&key!="time"&&key!="speed"&&key!="move"&&key!="movepow"&&key!="ax"&&key!="ay"&&key!="vol"&&key!="dchannel"&&key!="motion"&&key!="file"&&key!="x"&&key!="y"&&key!="scalex"&&key!="scaley"&&key!="alpha"&&key!="show"&&key!="pri"&&key!="align"&&key!="texfilter"&&key!="rotz"&&key!="mulcolor"&&key!="addcolor")std::cerr<<"PENDING-IMAGE-PROPERTY "<<cmd<<" "<<key<<"="<<v<<"\n";
+ if(key!="id"&&key!="mode"&&key!="disp"&&key!="base"&&key!="time"&&key!="speed"&&key!="move"&&key!="movepow"&&key!="ax"&&key!="ay"&&key!="vol"&&key!="dchannel"&&key!="motion"&&key!="file"&&key!="x"&&key!="y"&&key!="scalex"&&key!="scaley"&&key!="alpha"&&key!="show"&&key!="pri"&&key!="align"&&key!="texfilter"&&key!="rotz"&&key!="mulcolor"&&key!="addcolor")std::cerr<<"PENDING-IMAGE-PROPERTY "<<cmd<<" "<<key<<"="<<v<<"\n";
  }
  transition(l,before,position,color);
- auto loadBase=[&](){auto base=l.params.find("base");if(!chara||base==l.params.end()||base->second=="none"||base->second.empty())return false;
-  std::string path="chara/"+base->second;if(!assets.exists(path)&&assets.exists(path+".b"))path+=".b";
+ auto loadBase=[&](){auto base=l.params.find("base");if((!chara&&!face)||base==l.params.end()||base->second=="none"||base->second.empty())return false;
+  std::string path=(face?"face/":"chara/")+base->second;if(!assets.exists(path)&&assets.exists(path+".b"))path+=".b";
   if(!assets.exists(path))throw std::runtime_error("Missing character base "+path);
   auto it=composites.find(path);if(it==composites.end())it=composites.emplace(path,std::make_shared<Composite>(assets.read(path),path,particleState)).first;
   l.composite=it->second;l.path=path;l.milliseconds=0;l.audioMilliseconds=-1;return true;
@@ -300,12 +308,12 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  }if(chara){auto pair=split(f,58);
  if(pair.size()>1)l.prefix=pair[1];
  f=pair[0].find(47)!=std::string::npos?pair[0]:l.prefix+pair[0];
- }std::string path=(chara?"chara/":"image/")+f;
+ }std::string path=(chara?"chara/":face?"face/":"image/")+f;
  if(!assets.exists(path)){if(assets.exists(path+".png"))path+=".png";
  else if(assets.exists(path+".b"))path+=".b";
  else throw std::runtime_error("Missing image "+path);
  }l.path=path;
- if(chara)l.params["@portrait"]=path;
+ if(chara||face)l.params["@portrait"]=path;
  if(path.size()>2&&path.substr(path.size()-2)==".b"){l.pixels.reset();
  auto it=composites.find(path);
  if(it==composites.end())it=composites.emplace(path,std::make_shared<Composite>(assets.read(path),path,particleState)).first;
@@ -323,10 +331,39 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  std::cerr<<"IMAGE loaded "<<path<<" "<<l.pixels->width<<"x"<<l.pixels->height<<"\n";
  }return true;
  }
-void SceneImages::draw(qlie::Bytes&out)const{
+void SceneImages::beginPage(){faceWarning=false;auto i=layers.find("face");if(i!=layers.end())i->second.params["@face-active"]="false";}
+void SceneImages::selectFace(const std::string&speaker,const std::string&voice){
+ auto face=layers.find("face");if(face==layers.end())return;auto&params=face->second.params;
+ if(params.at("mode")!="auto"||params.at("show")!="true"||params.at("@face-active")=="true")return;
+ faceWarning=true;std::string id=faceType?voice:speaker;
+ if(id.rfind("【",0)==0){id.erase(0,std::string("【").size());auto end=id.find("】");if(end!=id.npos)id.resize(end);}
+ if(id.rfind("％",0)==0)id.erase(0,std::string("％").size());
+ for(auto&entry:faceRepId)if(id.find(entry.first)!=id.npos){id=entry.second;break;}
+ auto suffix=id.find("＠");if(suffix!=id.npos)id.resize(suffix);if(id.empty())return;
+ std::string file;
+ for(auto&entry:layers)if(entry.first.rfind("chara",0)==0&&entry.second.params.count("id")&&entry.second.params.at("id")==id&&entry.second.params.count("@portrait")){file=entry.second.params.at("@portrait");break;}
+ if(file.empty())for(auto&entry:layers)if(entry.first.rfind("chara",0)==0&&entry.second.params.count("@portrait")&&entry.second.params.at("@portrait").find(id)!=id.npos){file=entry.second.params.at("@portrait");break;}
+ if(file.empty()){return;}
+ if(file.rfind("chara/",0)==0)file.erase(0,6);
+ for(auto&entry:faceRepFile){size_t pos=0;while((pos=file.find(entry.first,pos))!=file.npos){file.replace(pos,entry.first.size(),entry.second);pos+=entry.second.size();}}
+ auto resolve=[&](std::string name){if(assets.exists("face/"+name))return name;for(auto ext:{".png",".b",".argb"})if(assets.exists("face/"+name+ext))return name+ext;return std::string{};};
+ auto resolved=resolve(file);
+ if(resolved.empty()&&!faceDefaultFile.empty()){auto fallback=faceDefaultFile;size_t pos;while((pos=fallback.find("[id]"))!=fallback.npos)fallback.replace(pos,4,id);resolved=resolve(fallback);}
+ if(resolved.empty()){std::cerr<<"PENDING-FACE unresolved candidate="<<file<<"\n";return;}
+ command("^face,file:"+resolved);
+}
+void SceneImages::draw(qlie::Bytes&out)const{render(out,0);}
+void SceneImages::drawScene(qlie::Bytes&out)const{render(out,1);}
+void SceneImages::drawFaces(qlie::Bytes&out)const{render(out,2);}
+void SceneImages::render(qlie::Bytes&out,unsigned pass)const{
  if(out.size()!=1280*720*4)throw std::runtime_error("Scene canvas size");
  std::vector<const Layer*>sorted;
- for(auto&x:layers){auto&layer=x.second;auto base=layer.params.find("base");
+ for(auto&x:layers){auto&layer=x.second;bool face=x.first=="face";
+ if((pass==1&&face)||(pass==2&&!face))continue;
+ if(face&&layer.params.at("disp")!="keep"&&layer.params.at("@face-active")!="true"){
+ if(layer.params.at("show")=="true"&&layer.params.at("mode")=="auto"&&!faceWarning){std::cerr<<"PENDING-FACE automatic portrait selection\n";faceWarning=true;}continue;
+ }
+ auto base=layer.params.find("base");
  if(base!=layer.params.end()&&!base->second.empty()&&base->second!="none"&&!layer.params.count("@portrait"))continue;
  if((layer.pixels||layer.composite)&&layer.params.at("show")!="false")sorted.push_back(&layer);
  }

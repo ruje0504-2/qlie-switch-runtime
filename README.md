@@ -51,3 +51,5 @@ build/whj2-runtime /absolute/path/to/game /absolute/path/to/test-saves --movie m
 触摸冒烟使用SDL注入事件，只验证事件处理和状态流程，不能替代实际触摸屏。资源/媒体/逻辑探针不能替代演出与Switch实机验收。构建输出集中在固定build目录，更新时覆盖，不生成重复版本副本。
 
 源码遵循GPL-2.0-or-later；原始游戏数据不属于源码许可范围。
+
+Bitmap particles (primitive 20) now use the native deterministic random table and viewport-centered depth projection. Scene state version 3 preserves generated resource identities across saves and clears stale future caches when restoring; version 2 scene saves remain readable. Nested/video particles, spherical particles, and particles with 3D rotation remain incomplete.

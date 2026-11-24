@@ -4,10 +4,22 @@
 #include <cmath>
 #include <stdexcept>
 namespace whj2 {
+uint32_t particleRandomNext(uint32_t& seed){seed=seed*0x08088405u+1u;return uint32_t(uint64_t(seed)*0x7fffffffu>>32);}
+uint32_t particleIdentityInitialState(){uint32_t seed=0x3f1754e7;for(unsigned i=0;i<1024;i++)particleRandomNext(seed);return seed;}
 std::array<uint32_t,1024> particleRandomTable(uint32_t seed){
  std::array<uint32_t,1024> table{};
- for(auto&v:table){seed=seed*0x08088405u+1u;v=uint32_t(uint64_t(seed)*0x7fffffffu>>32);}
+ for(auto&v:table)v=particleRandomNext(seed);
  return table;
+}
+// PE e8974 and daa9c: camera distance 1000, centered viewport.
+ParticleProjection projectParticle(const ParticlePoint&p,const ParticleParameters&parameters,float x,float y,float ax,float ay,float angle,unsigned width,unsigned height,unsigned textureWidth,unsigned textureHeight){
+ float radians=angle*3.14159265358979323846f/180;
+ float co=std::cos(radians),si=std::sin(radians);
+ float u=p.x-parameters.extent[0]*ax+(p.scale-1)*textureWidth*.5f,v=p.y-parameters.extent[1]*ay+(p.scale-1)*textureHeight*.5f;
+ float worldX=x+co*u-si*v,worldY=y+si*u+co*v;
+ float depth=1000-(p.z-parameters.extent[2]*.5f);
+ float ratio=1000/std::max(10.f,depth),cx=width*.5f,cy=height*.5f;
+ return {cx+(worldX-cx)*ratio,cy+(worldY-cy)*ratio,p.scale*ratio,depth,depth>=10};
 }
 namespace {
 int rounded(float x){return int(std::round(x));}

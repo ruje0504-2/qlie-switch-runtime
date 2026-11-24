@@ -14,6 +14,10 @@ struct ParticlePoint {
  unsigned alpha=0,motion=0;
  int32_t milliseconds=0;
 };
+uint32_t particleRandomNext(uint32_t& state);
+uint32_t particleIdentityInitialState();
+struct ParticleProjection {float x,y,scale,depth;bool visible;};
+ParticleProjection projectParticle(const ParticlePoint&,const ParticleParameters&,float x,float y,float anchorX,float anchorY,float angle,unsigned width,unsigned height,unsigned textureWidth=0,unsigned textureHeight=0);
 // PE a118c/a1760 and RTL 2b7c. The original default is fixed, not wall time.
 std::array<uint32_t,1024> particleRandomTable(uint32_t seed=0x3f1754e7);
 // Local particle coordinates before the parent's camera/projection transform.

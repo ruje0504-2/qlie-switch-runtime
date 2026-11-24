@@ -4,6 +4,22 @@
 #include <fstream>
 #include <iostream>
 int main(int argc,char**argv){try{if(argc<2)return 2;qlie::Assets a(argv[1]);
+if(argc==3&&std::string(argv[2])=="--particle-render"){
+ whj2::SceneImages im(a);auto emptyState=im.save();im.command("^bg01,file:cut/c_冒頭イメージ,motion:c01");im.update(1234);
+ qlie::Bytes first(1280*720*4),again(first.size()),restored(first.size());im.draw(first);im.draw(again);
+ if(first!=again)throw std::runtime_error("Particle frame changed without clock advance");
+ auto state=im.save();whj2::SceneImages second(a);second.restore(state);second.draw(restored);
+ if(first!=restored)throw std::runtime_error("Particle identity changed across restore");
+ im.update(137);second.update(137);first.assign(first.size(),0);restored.assign(restored.size(),0);im.draw(first);second.draw(restored);
+ if(first!=restored)throw std::runtime_error("Particle restored continuation diverged");
+ im.restore(emptyState);whj2::SceneImages fresh(a);fresh.restore(emptyState);
+ for(auto scene:{&im,&fresh}){scene->command("^effect,file:effect/effect01,motion:縦衝撃");scene->command("^bg01,file:cut/c_冒頭イメージ,motion:c01");scene->update(1234);}
+ first.assign(first.size(),0);restored.assign(restored.size(),0);im.draw(first);fresh.draw(restored);
+ if(first!=restored)throw std::runtime_error("Particle cache identity diverged after old save and changed load order");
+ size_t nonzero=0;for(auto byte:first)if(byte)nonzero++;
+ if(!nonzero)throw std::runtime_error("Empty opening image");
+ std::cout<<"PASS original particle scene repeated frame and cross-instance save/continuation pixels="<<1280*720<<" nonzero_bytes="<<nonzero<<"\n";return 0;
+}
 if(argc==3&&std::string(argv[2])=="--effect-render"){
  whj2::SceneImages im(a);
  im.command("^bg01,file:cut/c_青空1");

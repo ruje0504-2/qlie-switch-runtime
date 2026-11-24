@@ -14,9 +14,9 @@ $cxx -std=c++17 $common $($pc --cflags libpng libjpeg) src/qlie.cpp src/image.cp
 
 $cxx -std=c++17 $common $($pc --cflags libpng libjpeg) src/qlie.cpp src/image.cpp src/animation.cpp tools/animation_probe.cpp $($pc --libs libpng libjpeg) -o build/animation-probe
 
-$cxx -std=c++17 $common $($pc --cflags sdl2 freetype2 libpng libjpeg) src/qlie.cpp src/story.cpp src/audio.cpp src/image.cpp src/animation.cpp src/scene_images.cpp src/render_queue.cpp src/voice.cpp src/movie.cpp src/mac_runtime.cpp build/font.o build/video.o $($pc --libs sdl2 freetype2 libavformat libavcodec libswscale libswresample libavutil libpng libjpeg) -o build/whj2-runtime
+$cxx -std=c++17 $common $($pc --cflags sdl2 freetype2 libpng libjpeg) src/qlie.cpp src/story.cpp src/audio.cpp src/image.cpp src/animation.cpp src/scene_images.cpp src/particles.cpp src/render_queue.cpp src/voice.cpp src/movie.cpp src/mac_runtime.cpp build/font.o build/video.o $($pc --libs sdl2 freetype2 libavformat libavcodec libswscale libswresample libavutil libpng libjpeg) -o build/whj2-runtime
 
-$cxx -std=c++17 $common $($pc --cflags libpng libjpeg) src/qlie.cpp src/story.cpp src/image.cpp src/animation.cpp src/scene_images.cpp src/render_queue.cpp tools/presentation_probe.cpp build/video.o $($pc --libs libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -o build/presentation-probe
+$cxx -std=c++17 $common $($pc --cflags libpng libjpeg) src/qlie.cpp src/story.cpp src/image.cpp src/animation.cpp src/scene_images.cpp src/particles.cpp src/render_queue.cpp tools/presentation_probe.cpp build/video.o $($pc --libs libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -o build/presentation-probe
 
 $cxx -std=c++17 $common src/qlie.cpp src/story.cpp src/voice.cpp tools/resource_probe.cpp -o build/resource-probe
 

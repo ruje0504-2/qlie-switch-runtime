@@ -55,19 +55,22 @@ struct Composite {
  qlie::Bytes video;
  };
  Animation definition;
+ uint32_t identity=0;std::vector<uint32_t>motionIdentities;
  std::vector<Element>members;
  std::string path;
  mutable std::set<std::string>warnings;
  mutable std::map<size_t,std::unique_ptr<EmbeddedVideo>>clips;
- explicit Composite(const qlie::Bytes&bytes,const std::string&name):path(name){
+ explicit Composite(const qlie::Bytes&bytes,const std::string&name,uint32_t&randomState):path(name){
+  identity=particleRandomNext(randomState);
   bool metadata=false;
   for(auto&m:abmp(bytes)){
    if(m.type.rfind("abdata",0)==0){definition=animation(m.type,m.data);
+ for(size_t i=0;i<definition.motions.size();i++)motionIdentities.push_back(particleRandomNext(randomState));
  metadata=true;
  }
    else if(m.type.rfind("abimg",0)==0){Element e;
  if(!m.data.empty()){
-    if(m.data.size()>=5&&std::equal(m.data.begin(),m.data.begin()+5,"abmp1"))e.nested=std::make_shared<Composite>(m.data,name+"#"+m.name);
+    if(m.data.size()>=5&&std::equal(m.data.begin(),m.data.begin()+5,"abmp1"))e.nested=std::make_shared<Composite>(m.data,name+"#"+m.name,randomState);
     else if(m.data.size()>=4&&std::equal(m.data.begin(),m.data.begin()+4,"OggS")){e.video=std::move(m.data);
  }
     else if(m.data.size()>=12&&std::equal(m.data.begin(),m.data.begin()+12,"ARGBModel1.0"))warn("model="+m.name);
@@ -78,9 +81,11 @@ struct Composite {
   }
   if(!metadata)throw std::runtime_error("Composite lacks animation metadata "+name);
   for(auto&motion:definition.motions)for(auto&layer:motion.layers){if(layer.mode>2)warn("layer-mode="+std::to_string(layer.mode));
- for(auto&k:layer.keys)if(k[4]!=0&&k[4]!=1&&k[4]!=4&&k[4]!=15&&k[4]!=16)warn("primitive="+std::to_string(k[4]));
+ for(auto&k:layer.keys)if(k[4]!=0&&k[4]!=1&&k[4]!=4&&k[4]!=15&&k[4]!=16&&k[4]!=20)warn("primitive="+std::to_string(k[4]));
  }
  }
+ void saveIdentity(StateWriter&w)const{w.n(identity);w.n(motionIdentities.size());for(auto v:motionIdentities)w.n(v);for(auto&e:members)if(e.nested)e.nested->saveIdentity(w);}
+ void restoreIdentity(StateReader&r){identity=uint32_t(r.n());auto count=r.n();if(count!=motionIdentities.size())throw std::runtime_error("Composite identity motion count");for(auto&v:motionIdentities)v=uint32_t(r.n());for(auto&e:members)if(e.nested)e.nested->restoreIdentity(r);}
  void warn(const std::string&s)const{if(warnings.insert(s).second)std::cerr<<"PENDING-ANIMATION "<<path<<" "<<s<<"\n";
  }
  void enqueue(RenderQueue&queue,double ms,const std::string&motionName,const Affine2D&parent,float depth,float opacity,uint32_t parentAdd,uint32_t parentMul,unsigned parentBlend=0)const{
@@ -93,7 +98,7 @@ struct Composite {
   for(size_t index=0;index<samples.size();index++){
  auto&k=samples[index];
  if(parentBlend)k.flags=parentBlend;
- for(auto&w:k.unsupported)warn(w);
+ for(auto&w:k.unsupported)if(w!="primitive=20")warn(w);
  if(!motion->layers[index].flags||!k.kind)continue;
  k.alpha=int(k.alpha)*int(opacity)/255;k.addColor=colorAdd(k.addColor,parentAdd);k.mulColor=colorMultiply(k.mulColor,parentMul);
  if(k.kind==15||k.kind==16){queue.control(k,depth+k.priority);continue;}
@@ -104,6 +109,22 @@ struct Composite {
   static const Image white{1,1,{255,255,255,255}};
   auto shape=imagePlacement(k.x,k.y,k.scaleX,k.scaleY,k.rotationZ,k.anchorX/100,k.anchorY/100,1,1);
   queue.image(white,affine(parent,shape),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
+  continue;
+ }
+ if(k.kind==20){
+  if(k.resource>=members.size())throw std::runtime_error("Particle image index "+path);
+  auto&e=members[k.resource];
+  if(!e.image){warn("particle-nested-or-video pending");continue;}
+  bool rotation3d=false;for(auto&w:k.unsupported)if(w=="3d-rotation")rotation3d=true;
+  if(rotation3d){warn("particle-3d-rotation pending");continue;}
+  auto seed=0x35246u^identity^motionIdentities[size_t(motion-&definition.motions[0])];
+  seed=((seed&0xffff)*(seed>>16))&1023;
+  for(auto&point:particlePoints(k.particles,seed)){
+   auto pos=projectParticle(point,k.particles,k.x,k.y,k.anchorX/100,k.anchorY/100,k.rotationZ,1280,720,e.image->width,e.image->height);
+   if(!pos.visible)continue;
+   auto placement=imagePlacement(pos.x,pos.y,pos.scale,pos.scale,k.rotationZ,.5f,.5f,e.image->width,e.image->height);
+   queue.image(*e.image,affine(parent,placement),depth+k.priority,k.alpha*point.alpha/255,k.addColor,k.mulColor,k.flags&0x7f);
+  }
   continue;
  }
  if(k.kind!=4)continue;
@@ -186,7 +207,7 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  }l.path=path;
  if(path.size()>2&&path.substr(path.size()-2)==".b"){l.pixels.reset();
  auto it=composites.find(path);
- if(it==composites.end())it=composites.emplace(path,std::make_shared<Composite>(assets.read(path),path)).first;
+ if(it==composites.end())it=composites.emplace(path,std::make_shared<Composite>(assets.read(path),path,particleState)).first;
  l.composite=it->second;
  l.milliseconds=0;
  return true;
@@ -219,7 +240,8 @@ void SceneImages::draw(qlie::Bytes&out)const{
 }
 
 qlie::Bytes SceneImages::save()const{StateWriter w;
- w.str("WHJ2-images-2");
+ w.str("WHJ2-images-3");
+ w.n(particleState);
  w.n(layers.size());
  for(auto&entry:layers){w.str(entry.first);
  auto&l=entry.second;
@@ -229,13 +251,18 @@ qlie::Bytes SceneImages::save()const{StateWriter w;
  w.n(l.params.size());
  for(auto&p:l.params){w.str(p.first);
  w.str(p.second);
- }}return w.bytes;
+ }if(l.composite)l.composite->saveIdentity(w);
+ }return w.bytes;
  }
 void SceneImages::restore(const qlie::Bytes&b){StateReader r{b};
- if(r.str()!="WHJ2-images-2")throw std::runtime_error("Image state version");
+ auto version=r.str();bool v3=version=="WHJ2-images-3";
+ if(!v3&&version!="WHJ2-images-2")throw std::runtime_error("Image state version");
+ auto savedParticleState=v3?uint32_t(r.n()):particleState;
  std::map<std::string,Layer>next;
  auto count=r.n();
  if(count>256)throw std::runtime_error("Image layer count");
+ // Cached future assets must not reuse identities from the discarded timeline.
+ composites.clear();
  while(count--){auto name=r.str();
  Layer l;
  l.prefix=r.str();
@@ -246,14 +273,16 @@ void SceneImages::restore(const qlie::Bytes&b){StateReader r{b};
  while(n--){auto k=r.str();
  l.params[k]=r.str();
  }if(!l.path.empty()&&l.path.substr(l.path.size()-2)==".b"){auto it=composites.find(l.path);
- if(it==composites.end())it=composites.emplace(l.path,std::make_shared<Composite>(assets.read(l.path),l.path)).first;
+ if(it==composites.end())it=composites.emplace(l.path,std::make_shared<Composite>(assets.read(l.path),l.path,particleState)).first;
  l.composite=it->second;
  }else if(!l.path.empty()){auto it=cache.find(l.path);
  if(it==cache.end())it=cache.emplace(l.path,std::make_shared<Image>(image(assets.read(l.path)))).first;
  l.pixels=it->second;
- }next[name]=std::move(l);
+ }if(v3&&l.composite)l.composite->restoreIdentity(r);
+ next[name]=std::move(l);
  }r.end();
  layers=std::move(next);
+ particleState=savedParticleState;
  }
 
 }

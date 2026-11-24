@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <stdexcept>
 namespace whj2 {
-Settings::Settings(qlie::Assets&a){values={{"MasterVolume",100},{"BGMVolume",60},{"VoiceVolume",100},{"SEVolume",100},{"SysSEVolume",50},{"MovieVolume",80},{"WindowAlpha",210},{"TextSpeed",10},{"ClickVoiceStop",0},{"AutoPlayVoiceWait",1},{"AutoTextWait",40},{"AutoClickWait",1200}};
+Settings::Settings(qlie::Assets&a){values={{"MasterVolume",100},{"MusicModeVolume",100},{"BGMVolume",60},{"VoiceVolume",100},{"SEVolume",100},{"SysSEVolume",50},{"MovieVolume",80},{"WindowAlpha",210},{"TextSpeed",10},{"ClickVoiceStop",0},{"AutoPlayVoiceWait",1},{"AutoTextWait",40},{"AutoClickWait",1200}};
  std::istringstream in(qlie::cp932(a.read("script/config/default.txt")));std::string line;while(std::getline(in,line)){auto pos=line.find('=');if(pos==line.npos)continue;auto key=trim(line.substr(0,pos));if(values.count(key))set(key,std::stoi(trim(line.substr(pos+1))));}defaults=values;
 }
 int Settings::get(const std::string&key)const{return values.at(key);}

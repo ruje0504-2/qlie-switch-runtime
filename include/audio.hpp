@@ -5,20 +5,23 @@
 #include <atomic>
 namespace whj2 {
 struct AudioStats {uint64_t frames,nonzero;};
+struct AudioPosition {uint64_t frame=0,length=0;bool loop=false,playing=false;};
 class Audio {
 public:
  static constexpr unsigned SystemChannel=24,ChannelCount=25;
 private:
  struct Channel {std::vector<int16_t> pcm;std::string path;unsigned category=2;size_t pos=0;bool loop=false,stop=false;float gain=0,target=0,step=0;uint64_t fade=0;};
- std::array<float,5> userGains{{1,1,1,1,1}};
+ std::array<float,6> userGains{{1,1,1,1,1,1}};
  SDL_AudioDeviceID device=0;std::array<Channel,ChannelCount>channels;std::atomic<uint64_t>frames{0},nonzero{0};
  static void callback(void*,Uint8*,int);
 public:
  Audio();~Audio();Audio(const Audio&)=delete;Audio&operator=(const Audio&)=delete;
- void play(unsigned,const qlie::Bytes&,bool,float,unsigned fadeMs=0,const std::string&path="",unsigned category=5);
+ void play(unsigned,const qlie::Bytes&,bool,float,unsigned fadeMs=0,const std::string&path="",unsigned category=6);
  void volume(unsigned,float,unsigned fadeMs=0,bool stopAfter=false);
+ void setMusicModeGain(float);
  void setUserGains(const std::array<float,5>&);
  qlie::Bytes save();void restore(const qlie::Bytes&,qlie::Assets&);
+ AudioPosition position(unsigned);void seek(unsigned,uint64_t milliseconds);void setLoop(unsigned,bool);void stop(unsigned);
  bool playing(unsigned);void stopAll();AudioStats stats()const;
 };
 }

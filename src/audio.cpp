@@ -52,7 +52,7 @@ void Audio::play(unsigned ch,const qlie::Bytes&bytes,bool loop,float gain,unsign
  if(kaudio_decode(bytes.data(),bytes.size(),&raw,&n))throw std::runtime_error("PCM decode failed");
  Channel c;
  c.path=path;
- c.category=category<5?category:ch==0?0:ch==3?1:ch==7?4:2;
+ c.category=category<6?category:ch==0?0:ch==3?1:ch==7?4:2;
  c.pcm.resize(n/2);
  if(n)std::memcpy(c.pcm.data(),raw,n);
  free(raw);
@@ -76,7 +76,8 @@ void Audio::volume(unsigned ch,float gain,unsigned ms,bool stopAfter){if(ch>=cha
  c.stop=stopAfter;
  SDL_UnlockAudioDevice(device);
  }
-void Audio::setUserGains(const std::array<float,5>&gains){for(float gain:gains)if(!std::isfinite(gain)||gain<0||gain>1)throw std::runtime_error("Invalid category gain");SDL_LockAudioDevice(device);userGains=gains;SDL_UnlockAudioDevice(device);}
+void Audio::setMusicModeGain(float gain){if(!std::isfinite(gain)||gain<0||gain>1)throw std::runtime_error("Music mode gain");SDL_LockAudioDevice(device);userGains[5]=gain;SDL_UnlockAudioDevice(device);}
+void Audio::setUserGains(const std::array<float,5>&gains){for(float gain:gains)if(!std::isfinite(gain)||gain<0||gain>1)throw std::runtime_error("Invalid category gain");SDL_LockAudioDevice(device);std::copy(gains.begin(),gains.end(),userGains.begin());SDL_UnlockAudioDevice(device);}
 void Audio::stopAll(){SDL_LockAudioDevice(device);
  for(auto&c:channels)c=Channel{};
  SDL_UnlockAudioDevice(device);
@@ -116,7 +117,7 @@ void Audio::restore(const qlie::Bytes&bytes,qlie::Assets&assets){StateReader r{b
  std::array<Channel,ChannelCount>next;
  for(size_t index=0;index<count;++index){auto&c=next[index];c.path=r.str();
  c.category=categories?unsigned(r.n()):index==0?0:index==3?1:index==7?4:2;
- if(c.category>4)throw std::runtime_error("Audio category");
+ if(c.category>5)throw std::runtime_error("Audio category");
  c.pos=r.n();
  c.loop=r.n()!=0;
  c.stop=r.n()!=0;
@@ -142,6 +143,17 @@ void Audio::restore(const qlie::Bytes&bytes,qlie::Assets&assets){StateReader r{b
  SDL_UnlockAudioDevice(device);
  std::cerr<<"AUDIO restored "<<channels.size()<<" channels\n";
  }
+
+AudioPosition Audio::position(unsigned ch){if(ch>=channels.size())throw std::runtime_error("Audio channel index");
+ SDL_LockAudioDevice(device);const auto&c=channels[ch];AudioPosition result{c.pos/2,c.pcm.size()/2,c.loop,!c.pcm.empty()&&(c.pos<c.pcm.size()||c.loop)&&!(c.stop&&!c.fade&&c.gain==0)};SDL_UnlockAudioDevice(device);return result;
+}
+void Audio::seek(unsigned ch,uint64_t milliseconds){if(ch>=channels.size())throw std::runtime_error("Audio channel index");
+ SDL_LockAudioDevice(device);auto&c=channels[ch];uint64_t length=c.pcm.size()/2;
+ uint64_t frame=milliseconds>length*1000/44100?length:milliseconds*44100/1000;
+ c.pos=size_t(std::min(frame,length))*2;SDL_UnlockAudioDevice(device);
+}
+void Audio::setLoop(unsigned ch,bool loop){if(ch>=channels.size())throw std::runtime_error("Audio channel index");SDL_LockAudioDevice(device);channels[ch].loop=loop;SDL_UnlockAudioDevice(device);}
+void Audio::stop(unsigned ch){if(ch>=channels.size())throw std::runtime_error("Audio channel index");SDL_LockAudioDevice(device);channels[ch]=Channel{};SDL_UnlockAudioDevice(device);}
 
 bool Audio::playing(unsigned n){if(n>=channels.size())throw std::runtime_error("Audio channel index");
  SDL_LockAudioDevice(device);

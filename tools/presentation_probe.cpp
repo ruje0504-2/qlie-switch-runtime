@@ -22,6 +22,22 @@ if(argc==3&&std::string(argv[2])=="--face-render"){
  scene.beginPage();scene.selectFace("","");actual.assign(actual.size(),0);scene.drawFaces(actual);if(actual!=background)throw std::runtime_error("Narration kept automatic once portrait");
  std::cout<<"PASS original face placement, overlay isolation, once/keep/show/clear and saved state\n";return 0;
 }
+if(argc==3&&std::string(argv[2])=="--image-replacement"){
+ auto draw=[](whj2::SceneImages&scene){qlie::Bytes out(1280*720*4);scene.draw(out);return out;};
+ const std::string base="^bg01,file:cut/eyecatch01,x:640,y:360,align:center:center";
+ whj2::SceneImages original(a),changed(a),reference(a);original.command(base);original.update(700);auto plain=draw(original);
+ changed.command(base+",rep0:cut/eyecatch01_蓮花");changed.update(700);auto first=draw(changed);if(first==plain)throw std::runtime_error("Replacement left original pixels");
+ reference.command("^ui_reference,file:image/cut/eyecatch01.b,x:640,y:360,align:center:center");reference.uiSlot("ui_reference",0,"image/cut/eyecatch01_蓮花.png");reference.update(700);if(draw(reference)!=first)throw std::runtime_error("Replacement did not target original image slot zero");
+ auto saved=changed.save();whj2::SceneImages loaded(a);loaded.restore(saved);if(draw(loaded)!=first)throw std::runtime_error("Replacement lost on restore");
+ changed.command("^bg01,rep0:cut/eyecatch01_雫");auto second=draw(changed);if(second==first)throw std::runtime_error("Replacement update did not change image");
+ if(draw(loaded)!=first)throw std::runtime_error("Replacement leaked between instances");
+ changed.command(base);changed.update(700);if(draw(changed)!=plain)throw std::runtime_error("New base file kept stale replacement");
+ changed.command("^bg01,rep0:cut/eyecatch01_蓮花,rep1:cut/eyecatch01_雫");if(draw(changed)!=second)throw std::runtime_error("Original rep order/slot mapping");
+ changed.command("^bg01,rep0:none");auto cleared=draw(changed);if(cleared==second)throw std::runtime_error("Replacement none did not clear slot");
+ auto blank=changed.save();loaded.restore(blank);if(draw(loaded)!=cleared)throw std::runtime_error("Empty replacement lost on restore");
+ whj2::SceneImages flash(a);flash.command("^bg01,file:effect/フラッシュH,rep0:ev/w＠08_04_1_014");flash.update(100);draw(flash);auto shown=flash.takeShownFiles();if(!shown.count("image/ev/w＠08_04_1_014.png"))throw std::runtime_error("Replacement CG not recorded as displayed");
+ std::cout<<"PASS original replacement pixels / slot order / restore / instance isolation / file reset / none / CG tracking\n";return 0;
+}
 if(argc==3&&std::string(argv[2])=="--named-filter"){
  for(const auto&item:std::vector<std::pair<std::string,std::string>>{{"pass","0"},{"point","1"},{"linear","2"}}){
   whj2::SceneImages named(a),numeric(a);auto base="^bg01,$base_bg,file:cut/eyecatch01,scalex:37,scaley:37,texfilter:";

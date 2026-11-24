@@ -157,8 +157,10 @@ struct Composite {
  }
  if(k.kind==10){
   if(k.resource>=members.size()||k.childMotion>=members.size())throw std::runtime_error("Mask image index "+path);
-  const auto&source=members[k.resource].image;const auto&mask=members[k.childMotion].image;
+  const Image*source=members[k.resource].image.get();const Image*mask=members[k.childMotion].image.get();
+   if(uiSlots){auto src=uiSlots->find(k.resource);if(src!=uiSlots->end())source=src->second;auto msk=uiSlots->find(k.childMotion);if(msk!=uiSlots->end())mask=msk->second;}
   if(!source||!mask){warn("mask-nonbitmap-resource");continue;}
+   if(!source->width||!source->height||!mask->width||!mask->height)continue;
   bool rotated=false;for(auto&w:k.unsupported)if(w=="3d-rotation")rotated=true;
   if(rotated){warn("mask-3d-rotation");continue;}
   auto&output=maskedImages[index];output.width=source->width;output.height=source->height;output.pixels.resize(source->pixels.size());
@@ -178,8 +180,9 @@ struct Composite {
  }
  if(k.kind==20){
   if(k.resource>=members.size())throw std::runtime_error("Particle image index "+path);
-  auto&e=members[k.resource];
-  if(e.nested){
+  auto&e=members[k.resource];const Image*particleImage=e.image.get();bool overridden=false;
+  if(uiSlots){auto slot=uiSlots->find(k.resource);if(slot!=uiSlots->end()){particleImage=slot->second;overridden=true;}}
+  if(e.nested&&!overridden){
    auto frame=k;frame.scaleX=frame.scaleY=frame.scaleZ=100;
    auto base=combine(parent3D?*parent3D:from2D(parent),placement3D(frame,unsigned(k.particles.extent[0]),unsigned(k.particles.extent[1])));
    Matrix3D center;center.m[2][3]=-k.particles.extent[2]*.5f;base=combine(base,center);
@@ -191,16 +194,17 @@ struct Composite {
    }
    continue;
   }
-  if(!e.image){warn("particle-video pending");continue;}
+  if(!particleImage){warn("particle-video pending");continue;}
+   if(!particleImage->width||!particleImage->height)continue;
   bool rotation3d=false;for(auto&w:k.unsupported)if(w=="3d-rotation")rotation3d=true;
   if(rotation3d){warn("particle-3d-rotation pending");continue;}
   auto seed=0x35246u^identity^motionIdentities[size_t(motion-&definition.motions[0])];
   seed=((seed&0xffff)*(seed>>16))&1023;
   for(auto&point:particlePoints(k.particles,seed)){
-   auto pos=projectParticle(point,k.particles,k.x,k.y,k.anchorX/100,k.anchorY/100,k.rotationZ,1280,720,e.image->width,e.image->height);
+   auto pos=projectParticle(point,k.particles,k.x,k.y,k.anchorX/100,k.anchorY/100,k.rotationZ,1280,720,particleImage->width,particleImage->height);
    if(!pos.visible)continue;
-   auto placement=imagePlacement(pos.x,pos.y,pos.scale,pos.scale,k.rotationZ,.5f,.5f,e.image->width,e.image->height);
-   queue.image(*e.image,affine(parent,placement),depth+k.priority,k.alpha*point.alpha/255,k.addColor,k.mulColor,k.flags&0x7f,k.textureFilter);
+   auto placement=imagePlacement(pos.x,pos.y,pos.scale,pos.scale,k.rotationZ,.5f,.5f,particleImage->width,particleImage->height);
+   queue.image(*particleImage,affine(parent,placement),depth+k.priority,k.alpha*point.alpha/255,k.addColor,k.mulColor,k.flags&0x7f,k.textureFilter);
   }
   continue;
  }
@@ -280,6 +284,12 @@ std::string SceneImages::expand(std::string s,const std::string&type){auto&map=t
  }}if(!changed)return s;
  }throw std::runtime_error("Image template recursion");
  }
+void SceneImages::loadReplacement(Layer&layer,const std::string&path){
+ layer.params["@replacement"]=path;
+ if(path.empty()){layer.scriptReplacement=std::make_shared<Image>();return;}
+ auto at=cache.find(path);if(at==cache.end())at=cache.emplace(path,std::make_shared<Image>(image(assets.read(path)))).first;
+ layer.scriptReplacement=at->second;
+}
 void SceneImages::uiSlot(const std::string&name,unsigned slot,const std::string&path){if(name.rfind("ui_",0)!=0)throw std::runtime_error("UI slot owner");auto i=cache.find(path);if(i==cache.end())i=cache.emplace(path,std::make_shared<Image>(image(assets.read(path)))).first;layers.at(name).uiSlots[slot]=i->second;}
 void SceneImages::uiSlot(const std::string&name,unsigned slot,const Image&value){if(name.rfind("ui_",0)!=0)throw std::runtime_error("UI slot owner");layers.at(name).uiSlots[slot]=std::make_shared<Image>(value);}
 bool SceneImages::uiHit(const std::string&name,float x,float y)const{
@@ -369,13 +379,17 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  if(l.params.empty())l.params={{"x",ui?"0":"640"},{"y",ui?"0":chara?"720":"360"},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri",chara?"500":"0"},{"show","true"},{"align",chara?"center:bottom":(ui||cmd=="effect")?"left:top":"center:center"}};
  if(chara){auto motion=l.params.find("motion");if(motion!=l.params.end()&&motion->second!="def"&&motion->second!="0"&&motion->second.find('+')==std::string::npos){motion->second="def";l.milliseconds=0;l.audioMilliseconds=-1;}}
  auto args=split(expand(p==line.npos?"":line.substr(p+1),chara?"chara":face?"face":message?"message":"image"),44);
- Layer before=l;bool file=false,baseChanged=false,position=false,color=false,messageShow=false;
+ Layer before=l;bool file=false,baseChanged=false,position=false,color=false,messageShow=false;bool replacementChanged[4]={};
+ if(std::any_of(args.begin(),args.end(),[](const std::string&arg){return arg.rfind("file:",0)==0;})){
+  l.scriptReplacement.reset();l.params.erase("@replacement");for(unsigned i=0;i<4;i++)l.params.erase("rep"+std::to_string(i));
+ }
  for(auto&s:args){if(s.empty())continue;
  auto c=s.find(58);
  if(c==s.npos)throw std::runtime_error("Unknown image template "+s);
  auto key=s.substr(0,c),v=s.substr(c+1);
+ if(key.size()==4&&key.rfind("rep",0)==0&&key[3]>='0'&&key[3]<='3')replacementChanged[key[3]-'0']=true;
  if(face&&key=="clear"&&v=="def"){l=Layer{};l.params=faceDefaults;continue;}
- if(key=="clear"){l.params.erase("@portrait");l.path.clear();
+ if(key=="clear"){l.params.erase("@portrait");l.params.erase("@replacement");l.scriptReplacement.reset();l.path.clear();
  l.pixels.reset();
  l.composite.reset();
  l.params["show"]="false";
@@ -388,12 +402,20 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  if(key=="alpha"||key=="mulcolor"||key=="addcolor")color=true;
  if(key=="vol"&&std::stof(v)==0)l.audioStopPending=true;
  if(key=="motion"){l.milliseconds=0;l.audioMilliseconds=-1;}
- if(key!="textarea"&&key!="fontsize"&&key!="fontcolor"&&key!="fontno"&&key!="trans"&&key!="id"&&key!="mode"&&key!="disp"&&key!="base"&&key!="time"&&key!="speed"&&key!="move"&&key!="movepow"&&key!="ax"&&key!="ay"&&key!="vol"&&key!="voltype"&&key!="dchannel"&&key!="motion"&&key!="file"&&key!="x"&&key!="y"&&key!="scalex"&&key!="scaley"&&key!="alpha"&&key!="show"&&key!="pri"&&key!="align"&&key!="texfilter"&&key!="rotz"&&key!="mulcolor"&&key!="addcolor")std::cerr<<"PENDING-IMAGE-PROPERTY "<<cmd<<" "<<key<<"="<<v<<"\n";
+ if(key!="rep0"&&key!="rep1"&&key!="rep2"&&key!="rep3"&&key!="textarea"&&key!="fontsize"&&key!="fontcolor"&&key!="fontno"&&key!="trans"&&key!="id"&&key!="mode"&&key!="disp"&&key!="base"&&key!="time"&&key!="speed"&&key!="move"&&key!="movepow"&&key!="ax"&&key!="ay"&&key!="vol"&&key!="voltype"&&key!="dchannel"&&key!="motion"&&key!="file"&&key!="x"&&key!="y"&&key!="scalex"&&key!="scaley"&&key!="alpha"&&key!="show"&&key!="pri"&&key!="align"&&key!="texfilter"&&key!="rotz"&&key!="mulcolor"&&key!="addcolor")std::cerr<<"PENDING-IMAGE-PROPERTY "<<cmd<<" "<<key<<"="<<v<<"\n";
  }
  if(messageShow&&l.composite){const std::string mode=l.params["show"]=="true"?"*Enable":"*Disable";
   if(findMotion(l.composite->definition,mode)){l.params["motion"]=mode;l.milliseconds=0;l.audioMilliseconds=-1;
    if(mode=="*Disable"){l.params["show"]="true";l.params["@hiding"]="true";}else l.params.erase("@hiding");
   }
+ }
+ // Imoscripter applies rep0..rep3 in order, each to member zero.
+ for(unsigned i=0;i<4;i++)if(replacementChanged[i]){
+  auto replacement=l.params.at("rep"+std::to_string(i));std::string path;
+  if(!replacement.empty()&&replacement!="none"){
+   path="image/"+replacement;
+   if(!assets.exists(path)){if(assets.exists(path+".png"))path+=".png";else if(assets.exists(path+".b"))path+=".b";else throw std::runtime_error("Missing replacement image "+path);}
+  }loadReplacement(l,path);
  }
  transition(l,before,position,color);
  auto loadBase=[&](){auto base=l.params.find("base");if((!chara&&!face)||base==l.params.end()||base->second=="none"||base->second.empty())return false;
@@ -404,7 +426,7 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  };
  if(baseChanged&&!file){if(!loadBase()){l.composite.reset();auto portrait=l.params.find("@portrait");l.path=portrait==l.params.end()?"":portrait->second;}return true;}
  if(file){std::string f=l.params["file"];
- if(f=="none"||f=="none:none"){l.params.erase("@portrait");l.path.clear();
+ if(f=="none"||f=="none:none"){l.params.erase("@portrait");l.params.erase("@replacement");l.scriptReplacement.reset();l.path.clear();
  l.pixels.reset();
  l.composite.reset();
  return true;
@@ -490,11 +512,11 @@ void SceneImages::render(qlie::Bytes&out,unsigned pass)const{
  float ax=align.rfind("center",0)==0?0.5f:align.rfind("right",0)==0?1.f:0.f,ay=align.find(":bottom")!=align.npos?1.f:align.find(":center")!=align.npos?0.5f:0.f;
  unsigned w=l->composite?unsigned(l->composite->definition.bounds[0]):l->pixels->width,h=l->composite?unsigned(l->composite->definition.bounds[1]):l->pixels->height;
  auto placement=imagePlacement(get(l,"x",640),get(l,"y",360),get(l,"scalex",100)/100,get(l,"scaley",100)/100,get(l,"rotz",0),ax,ay,w,h);
- std::map<unsigned,const Image*> uiSlots;for(auto&slot:l->uiSlots)uiSlots[slot.first]=slot.second.get();
+ std::map<unsigned,const Image*> uiSlots;for(auto&slot:l->uiSlots)uiSlots[slot.first]=slot.second.get();if(l->scriptReplacement)uiSlots[0]=l->scriptReplacement.get();
  AnimationContext external;for(unsigned i=0;i<16;i++){auto v=l->params.find("@exv"+std::to_string(i));if(v!=l->params.end()){external.external[i]=numeric(v->second);external.externalMask|=uint16_t(1u<<i);}}
  if(l->composite){auto m=l->params.find("motion");l->composite->enqueue(queue,l->milliseconds,m==l->params.end()?"":m->second,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),0,l->params.count("@portrait")?l->pixels.get():nullptr,layers.count("message")&&l==(&layers.at("message"))?l->pixels.get():nullptr,windowAlpha,uiSlots.empty()?nullptr:&uiSlots,&external,nullptr,unsigned(get(l,"texfilter",0)));}
  else queue.image(*l->pixels,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),0,unsigned(get(l,"texfilter",0)));
- if(queue.imageCount()>beforeImages&&qlie::canonical(l->path).rfind("image/ev/",0)==0)shownFiles.insert(qlie::canonical(l->path));
+ if(queue.imageCount()>beforeImages){if(qlie::canonical(l->path).rfind("image/ev/",0)==0)shownFiles.insert(qlie::canonical(l->path));auto replacement=l->params.find("@replacement");if(replacement!=l->params.end()&&qlie::canonical(replacement->second).rfind("image/ev/",0)==0)shownFiles.insert(qlie::canonical(replacement->second));}
  }
  queue.draw(out,1280,720);
 }
@@ -546,6 +568,7 @@ void SceneImages::restore(const qlie::Bytes&b){StateReader r{b};
  l.pixels=it->second;
  }if(l.composite&&l.params.count("@portrait")&&l.path!=l.params.at("@portrait")){auto portrait=l.params.at("@portrait");auto it=cache.find(portrait);if(it==cache.end())it=cache.emplace(portrait,std::make_shared<Image>(image(assets.read(portrait)))).first;l.pixels=it->second;}
  if(v3&&l.composite)l.composite->restoreIdentity(r);
+ if(l.params.count("@replacement"))loadReplacement(l,l.params.at("@replacement"));
  next[name]=std::move(l);
  }r.end();
  layers=std::move(next);

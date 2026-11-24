@@ -23,3 +23,5 @@ $cxx -std=c++17 $common src/qlie.cpp src/story.cpp src/voice.cpp tools/resource_
 $cxx -std=c++17 $common src/qlie.cpp src/animation.cpp tools/animation_stack_probe.cpp -o build/animation-stack-probe
 
 $cxx -std=c++17 $common src/render_queue.cpp tools/render_queue_probe.cpp -o build/render-queue-probe
+
+$cxx -std=c++17 $common src/qlie.cpp src/image.cpp src/animation.cpp src/particles.cpp tools/particle_probe.cpp $($pc --cflags --libs libpng libjpeg) -o build/particle-probe

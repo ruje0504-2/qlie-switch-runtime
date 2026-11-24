@@ -106,6 +106,16 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
  out.priority=val(0x20,a.at(0x30),a.at(0x31)/100.f);
  out.rotationZ=val(0x22,a.at(0x30),a.at(0x31)/100.f);
  out.alpha=val(0x35,a.at(0x33),a.at(0x3b)/100.f);
+ if((out.kind==20||out.kind==21)&&a.size()<152)out.unsupported.push_back("particle-layout="+std::to_string(layer.version));
+ if((out.kind==20||out.kind==21)&&a.size()>=152){
+  auto particleValue=[&](size_t offset){return val(offset,a.at(0x2d),a.at(0x2e)/100.f);};
+  out.particles.count=particleValue(8);out.particles.edge=particleValue(0xa);
+  out.particles.divisions=particleValue(0xc);out.particles.scaleOffset=particleValue(0x46);
+  for(unsigned axis=0;axis<3;axis++)out.particles.phase[axis]=particleValue(0x40+axis*2);
+  out.particles.extent={out.scaleX,out.scaleY,val(0x96,a.at(0x30),a.at(0x31)/100.f)};
+  auto childTime=[&](size_t offset){return int32_t(sampleValue(float(int32_t(keyU32(a,offset))),float(int32_t(keyU32(b,offset))),a.at(0x3c),a.at(0x3d)/100.f,t,out.unsupported));};
+  out.particles.timeBegin=childTime(0x10);out.particles.timeEnd=childTime(0x14);
+ }
  out.anchorX=number(a,0x85);
  out.anchorY=number(a,0x87);
  auto color=[&](size_t p){uint32_t z=0;

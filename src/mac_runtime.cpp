@@ -97,7 +97,7 @@ struct Frontend {
  std::array<unsigned,3>audioTypes{{0,2,2}};
  bool cpuInterlaced=false;unsigned cpuScanlinePhase=0;qlie::Bytes cpuScanlineHistory;
  KFont*font=nullptr;
- std::vector<std::string> fontFiles{std::string()};int selectedFont=0;
+ std::vector<std::string> fontFiles{std::string()};int selectedFont=0;qlie::Bytes fontSettingsSnapshot;
  SDL_Window*window=nullptr;
  SDL_Renderer*renderer=nullptr;
  SDL_Texture*texture=nullptr;
@@ -247,7 +247,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   std::unique_ptr<KFont,void(*)(KFont*)> nextFont(kfont_open(index?path.c_str():nullptr,0),kfont_close);
   if(!nextFont){status="フォントを読み込めませんでした。";std::cerr<<"FONT FAIL file="<<fontFiles[index]<<"\n";return false;}
   if(persist)qlie::write_file(saveDir+"/font.cfg",qlie::Bytes(fontFiles[index].begin(),fontFiles[index].end()));
-  auto*previous=font;font=nextFont.release();selectedFont=index;kfont_set_antialias(font,unsigned(settings.get("FontAA")));uiGlyphs.clear();musicScreen->setFont(font);cgScreen->setFont(font);
+  auto*previous=font;font=nextFont.release();selectedFont=index;kfont_set_antialias(font,1u<<settings.get("FontAA"));kfont_set_style(font,unsigned(settings.get("FontStyle")),uint32_t(settings.get("FontStyleColor")));uiGlyphs.clear();musicScreen->setFont(font);cgScreen->setFont(font);
   refreshFontPreviews();if(!text.empty())refreshMessage();
   if(story.state.awaiting){auto savedChoice=choiceScreen->save();choiceScreen->restore(savedChoice,font);}
   kfont_close(previous);return true;
@@ -264,13 +264,14 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   }catch(const std::exception&e){status="フォント設定を読み込めませんでした。";std::cerr<<"FONT CONFIG FAIL "<<e.what()<<"\n";}
  }
  void applySettings(bool persist=true){
- if(kfont_set_antialias(font,unsigned(settings.get("FontAA")))>0){uiGlyphs.clear();refreshFontPreviews();if(!text.empty())refreshMessage();if(story.state.awaiting){auto state=choiceScreen->save();choiceScreen->restore(state,font);}}
+ int fontChanged=kfont_set_antialias(font,1u<<settings.get("FontAA"));fontChanged|=kfont_set_style(font,unsigned(settings.get("FontStyle")),uint32_t(settings.get("FontStyleColor")));
+ if(fontChanged>0){uiGlyphs.clear();refreshFontPreviews();if(!text.empty())refreshMessage();if(story.state.awaiting){auto state=choiceScreen->save();choiceScreen->restore(state,font);}}
  bool interlace=settings.get("Interlace")!=0;bool cpuMode=interlace;
 #ifdef WHJ2_WITH_VULKAN
  if(vulkan){vulkan->setInterlaced(interlace);cpuMode=false;}
 #endif
  if(cpuInterlaced!=cpuMode){cpuInterlaced=cpuMode;if(cpuMode)cpuScanlineHistory=pixels;else cpuScanlineHistory.clear();}
- audio->setUserGains(settings.gains());images->setWindowAlpha(unsigned(settings.get("WindowAlpha")));messageText->setSpeed(settings.get("TextSpeed"));if(!text.empty())refreshMessage();if(persist)qlie::write_file(saveDir+"/settings.cfg",settings.save());gameMenu.settingsDirty=false;}
+ audio->setUserGains(settings.gains());images->setWindowAlpha(unsigned(settings.get("WindowAlpha")));messageText->setSpeed(settings.get("TextSpeed"));if(!text.empty())refreshMessage();if(persist&&gameMenu.panel!=whj2::GameMenu::Fonts)qlie::write_file(saveDir+"/settings.cfg",settings.save());gameMenu.settingsDirty=false;}
  void drawGlyph(uint32_t cp,int x,int y,unsigned width,unsigned height,uint32_t color){
  if(!frameTarget){kfont_draw(font,newImage(),cp,x,y,width,height,color);return;}
  auto key=std::make_tuple(cp,width,height,color);auto at=uiGlyphs.find(key);
@@ -542,9 +543,10 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(action==UI::ResetSettings){settings.reset();selectFont(0,true);applySettings();return;}
  if(action==UI::Quit){done=true;return;}
  if(action==UI::Title){if(movie->playing())movie->stop();showTitle();return;}}
- if(action==UI::ChooseFont){gameMenu.open(UI::Fonts);gameMenu.fontCount=int(fontFiles.size())+1;gameMenu.focus=selectedFont;return;}
- if(action==UI::ApplyFont){if(selectFont(gameMenu.focus,true)){gameMenu.open(UI::Settings);gameMenu.focus=24;status.clear();}return;}
- if(action==UI::Close){if(gameMenu.panel==UI::Fonts){gameMenu.open(UI::Settings);gameMenu.focus=24;status.clear();return;}if(gameMenu.panel==UI::History&&historyVoicePlayed)audio->volume(3,0,200,true);historyVoicePlayed=false;gameMenu.close();return;}
+ if(action==UI::ChooseFont){fontSettingsSnapshot=settings.save();gameMenu.open(UI::Fonts);gameMenu.fontCount=int(fontFiles.size())+8;gameMenu.focus=selectedFont;return;}
+ if(action==UI::AcceptFont){gameMenu.open(UI::Settings);gameMenu.focus=24;applySettings();status.clear();return;}
+ if(action==UI::ApplyFont){if(selectFont(gameMenu.focus,true)){gameMenu.open(UI::Settings);gameMenu.focus=24;applySettings();status.clear();}return;}
+ if(action==UI::Close){if(gameMenu.panel==UI::Fonts){settings.restore(fontSettingsSnapshot);applySettings(false);gameMenu.open(UI::Settings);gameMenu.focus=24;status.clear();return;}if(gameMenu.panel==UI::History&&historyVoicePlayed)audio->volume(3,0,200,true);historyVoicePlayed=false;gameMenu.close();return;}
  if(action==UI::Quit||action==UI::Title||action==UI::ResetSettings){gameMenu.ask(action);return;}
  if(action==UI::DeleteSlot){selectedSlot=unsigned(gameMenu.slot());if(std::filesystem::exists(slotPrefix(selectedSlot)+".story"))gameMenu.ask(UI::DeleteSlot);else status="保存データがありません。";return;}
  if(action==UI::Slot){selectedSlot=unsigned(gameMenu.slot());
@@ -599,10 +601,10 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(gameMenu.asking){auto prompt=gameMenu.requested==UI::Quit?"ゲームを終了しますか？":gameMenu.requested==UI::Title?"タイトルに戻りますか？":gameMenu.requested==UI::ResetSettings?"設定を初期状態に戻しますか？":gameMenu.requested==UI::DeleteSlot?"データを削除しますか？":gameMenu.panel==UI::Load?"データをロードしますか？":"データを上書き保存しますか？";line(prompt,440,275,28);return;}
  if(gameMenu.panel==UI::Fonts){
   line("フォント選択",350,150,30);int first=gameMenu.focus/5*5;
-  for(int row=0;row<5&&first+row<gameMenu.fontCount;row++){int index=first+row;auto label=index==int(fontFiles.size())?"アンチエイリアス ×"+std::to_string(settings.get("FontAA")):index?fontFiles[index]:"標準フォント";if(index==selectedFont)label="* "+label;line(label,340,220+row*60,24,index==gameMenu.focus?0xffff88:0xffffff);}
+  for(int row=0;row<5&&first+row<gameMenu.fontCount;row++){int index=first+row;std::string label;if(index<int(fontFiles.size()))label=index?fontFiles[index]:"標準フォント";else {int option=index-int(fontFiles.size()),style=settings.get("FontStyle");if(option==0)label="アンチエイリアス ×"+std::to_string(1<<settings.get("FontAA"));else if(option==1)label=std::string("太字：")+((style&1)?"する":"しない");else if(option==2)label=std::string("影：")+((style&2)?"する":"しない");else if(option==3)label="縁取り："+std::to_string((style&8)?2:(style&4)?1:0);else if(option==7)label="設定";else {const char*channels[]={"R","G","B"};label=std::string("縁・影の色 ")+channels[option-4]+"："+std::to_string((settings.get("FontStyleColor")>>((6-option)*8))&255);}}if(index==selectedFont)label="* "+label;line(label,340,220+row*60,24,index==gameMenu.focus?0xffff88:0xffffff);}
   if(first>0)line("前へ",840,170,24);
   if(first+5<gameMenu.fontCount)line("次へ",840,555,24);
-  line("キャンセル",570,565,24);if(!status.empty())line(status,320,525,18);return;
+  line("設定",420,565,24);line("キャンセル",640,565,24);if(!status.empty())line(status,320,525,18);return;
  }
  if(gameMenu.panel==UI::Settings&&gameMenu.allowSceneReturn)line("回想を終了",520,680,26,gameMenu.focus==16?0xffff88:0xffffff);
  if(gameMenu.panel==UI::Save||gameMenu.panel==UI::Load){for(int i=0;i<8;i++){unsigned slot=unsigned(gameMenu.page*8+i+1);int x=i<4?198:834,y=136+(i%4)*135;line("No."+std::to_string(slot),x,y,16,0xff5555);auto&preview=slotPreview(slot);if(preview.exists){if(!preview.thumbnail.pixels.empty()){whj2::RenderQueue queue;queue.image(preview.thumbnail,whj2::imagePlacement(i<4?27:660,137+(i%4)*135,1,1,0,0,0,160,90),0,255,0,0xffffff);if(frameTarget)queue.draw(*frameTarget,1280,720);else queue.draw(pixels,1280,720);}auto&chars=preview.excerpt;int px=x;for(size_t n=0;n<chars.size()&&n<23;n++){drawGlyph(chars[n],px,y+22,18,18,0xffffff);px+=chars[n]<128?9:18;}}else line("NO DATA",x,y+24,18,0x999999);}

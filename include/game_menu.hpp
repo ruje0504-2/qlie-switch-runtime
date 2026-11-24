@@ -15,9 +15,10 @@ class GameMenu {
  std::array<Image,2> textPreviews;
  void put(RenderQueue&,const std::string&,float,float,bool center=false,unsigned opacity=255);
  void render(qlie::Bytes*,RenderTarget*);
+ bool adjustFont(int,bool);
 public:
  enum Panel {None,Save,Load,History,Settings,Fonts};
- enum Action {Nothing,Close,Slot,Quit,Title,Yes,No,SettingsChanged,ResetSettings,SceneReturn,ReplayVoice,TestVolume,DeleteSlot,ChooseFont,ApplyFont};
+ enum Action {Nothing,Close,Slot,Quit,Title,Yes,No,SettingsChanged,ResetSettings,SceneReturn,ReplayVoice,TestVolume,DeleteSlot,ChooseFont,ApplyFont,AcceptFont};
  Panel panel=None;int focus=0,page=0,historyOffset=0;bool asking=false;
  Action requested=Nothing;
  bool settingsDirty=false,allowSceneReturn=false;

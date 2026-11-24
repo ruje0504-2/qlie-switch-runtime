@@ -3,6 +3,7 @@
 #include <string.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include FT_SYNTHESIS_H
 #ifdef __SWITCH__
 #include <switch.h>
 #endif
@@ -16,7 +17,8 @@ typedef struct KFontGlyph {
     struct KFontGlyph *hash_next,*newer,*older;
 } KFontGlyph;
 struct KFont {
-    FT_Library library;FT_Face faces[3];unsigned count,shared,supersample;
+    FT_Library library;FT_Face faces[3];unsigned count,shared,supersample,style,style_set;
+    uint32_t style_color;
     KFontGlyph *glyphs[FONT_CACHE_BUCKETS],*newest,*oldest;
     size_t cache_count,cache_bytes;
     uint64_t cache_hits,rasterizations;
@@ -99,6 +101,12 @@ int kfont_set_antialias(KFont *f,unsigned factor){
     while(f->oldest)font_cache_evict(f);
     f->supersample=factor;return 1;
 }
+int kfont_set_style(KFont *f,unsigned style,uint32_t color){
+    if(!f||style>15||color>0xffffff)return -1;
+    if(f->style_set&&f->style==style&&f->style_color==color)return 0;
+    while(f->oldest)font_cache_evict(f);
+    f->style=style;f->style_color=color;f->style_set=1;return 1;
+}
 int kfont_cache_stats(const KFont *f,KFontCacheStats *stats){
     if(!f||!stats)return -1;
     *stats=(KFontCacheStats){f->cache_count,f->cache_bytes,FONT_CACHE_GLYPHS,FONT_CACHE_BYTES,
@@ -147,8 +155,10 @@ static int font_load_glyph(KFont *f,uint32_t cp,unsigned width,unsigned height,
     FT_Face face=NULL;FT_UInt index=0;
     for(unsigned i=0;i<f->count;i++)if((index=glyph_index(f->faces[i],cp))){face=f->faces[i];break;}
     unsigned factor=f->supersample?f->supersample:1;
-    FT_Int32 flags=FT_LOAD_RENDER|(f->supersample?(FT_LOAD_TARGET_MONO|FT_LOAD_MONOCHROME):FT_LOAD_TARGET_NORMAL);
+    FT_Int32 flags=f->supersample?(FT_LOAD_TARGET_MONO|FT_LOAD_MONOCHROME):FT_LOAD_TARGET_NORMAL;
     if(!face||FT_Set_Pixel_Sizes(face,width*factor,height*factor)||FT_Load_Glyph(face,index,flags))return -1;
+    if(f->style_set&&(f->style&1)&&!(face->style_flags&FT_STYLE_FLAG_BOLD))FT_GlyphSlot_Embolden(face->glyph);
+    if(FT_Render_Glyph(face->glyph,f->supersample?FT_RENDER_MODE_MONO:FT_RENDER_MODE_NORMAL))return -1;
     f->rasterizations++;
     FT_GlyphSlot g=face->glyph;FT_Bitmap *bitmap=&g->bitmap;
     if(bitmap->pixel_mode!=FT_PIXEL_MODE_GRAY&&bitmap->pixel_mode!=FT_PIXEL_MODE_MONO)return -1;
@@ -242,6 +252,20 @@ int kfont_draw_outline(KFont *f,KImage *dst,uint32_t cp,int x,int y,unsigned wid
     FT_Bitmap *bitmap=NULL;int64_t left=0,top=0;
     if(font_load_glyph(f,cp,width,height,&bitmap,&left,&top))return -1;
     left+=x;top+=y;
+    if(f->style_set){
+        int offsets[9][2];unsigned opacity[9],count=0;
+        if(f->style&2){offsets[count][0]=2;offsets[count][1]=2;opacity[count++]=0x66;}
+        if(f->style&(4|8)){
+            int radius=(f->style&8)?2:1;
+            const int direction[8][2]={{-1,0},{1,0},{0,1},{0,-1},{-1,-1},{1,-1},{-1,1},{1,1}};
+            for(unsigned i=0;i<((f->style&8)?8u:4u);i++){offsets[count][0]=direction[i][0]*(i<4?radius:1);offsets[count][1]=direction[i][1]*(i<4?radius:1);opacity[count++]=255;}
+        }
+        for(unsigned pass=0;pass<count;pass++)for(unsigned row=0;row<bitmap->rows;row++){
+            const uint8_t *source=bitmap->buffer+(bitmap->pitch>=0?row:bitmap->rows-row-1)*(size_t)abs(bitmap->pitch);
+            for(unsigned col=0;col<bitmap->width;col++)font_blend_pixel(dst,left+col+offsets[pass][0],top+row+offsets[pass][1],font_bitmap_alpha(bitmap,source,col)*opacity[pass]/255,f->style_color);
+        }
+        return kfont_draw(f,dst,cp,x,y,width,height,rgb);
+    }
     /* One glyph rasterization, a half-alpha one-pixel core, and a faint
        second outward pixel: the edge reads on bright artwork without making
        the glyph heavy.  This avoids the old nine full FreeType renders per

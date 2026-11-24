@@ -3,6 +3,7 @@
 #include "story.hpp"
 #include "state_io.hpp"
 #include "animation.hpp"
+#include "render_queue.hpp"
 #include <set>
 extern "C" {
 #include "video.h"
@@ -15,37 +16,7 @@ namespace whj2 {
 namespace {
 float numeric(const std::string&s){return !s.empty()&&s[0]=='$'?float(std::stoul(s.substr(1),nullptr,16)):std::stof(s);
  }
-void blit(qlie::Bytes&out,unsigned width,unsigned height,const Image&im,float x,float y,float sx,float sy,float rotation,float anchorX,float anchorY,float alpha,uint32_t add,uint32_t mul,const Affine2D&post={}){
- if(!im.width||!im.height||!sx||!sy||alpha<=0)return;
- constexpr float pi=3.14159265358979323846f;
- float c=std::cos(rotation*pi/180),s=std::sin(rotation*pi/180);
- float ax=im.width*anchorX,ay=im.height*anchorY;
- float a=post.a*c*sx+post.b*s*sx,b=-post.a*s*sy+post.b*c*sy;
- float cc=post.c*c*sx+post.d*s*sx,d=-post.c*s*sy+post.d*c*sy;
- float px=post.a*x+post.b*y+post.x,py=post.c*x+post.d*y+post.y;
- float det=a*d-b*cc;if(std::abs(det)<1e-12f)return;
- float xmin=px,xmax=px,ymin=py,ymax=py;
- for(int i=0;i<4;i++){float u=((i&1)?im.width:0)-ax,v=((i&2)?im.height:0)-ay;
- float xx=px+a*u+b*v,yy=py+cc*u+d*v;
- xmin=std::min(xmin,xx);
- xmax=std::max(xmax,xx);
- ymin=std::min(ymin,yy);
- ymax=std::max(ymax,yy);
- }
- for(int yy=std::max(0,int(std::floor(ymin)));yy<std::min(int(height),int(std::ceil(ymax)));yy++)for(int xx=std::max(0,int(std::floor(xmin)));xx<std::min(int(width),int(std::ceil(xmax)));xx++){
-  float dx=xx+0.5f-px,dy=yy+0.5f-py;
- int u=int(std::floor((d*dx-b*dy)/det+ax)),v=int(std::floor((-cc*dx+a*dy)/det+ay));
- if(u<0||v<0||u>=int(im.width)||v>=int(im.height))continue;
-  const auto*src=im.pixels.data()+(size_t(v)*im.width+u)*4;
- auto*dst=out.data()+(size_t(yy)*width+xx)*4;
- unsigned sa=unsigned(src[3])*unsigned(std::clamp(alpha,0.f,255.f))/255;
- if(!sa)continue;
- unsigned da=dst[3],oa=sa+da*(255-sa)/255;
-  for(unsigned n=0;n<3;n++){unsigned col=std::min(255u,unsigned(src[n])*((mul>>(8*n))&255)/255+((add>>(8*n))&255));
- dst[n]=uint8_t((col*sa+unsigned(dst[n])*da*(255-sa)/255)/oa);
- }dst[3]=uint8_t(oa);
- }
-}
+
 }
 struct EmbeddedVideo {
  const qlie::Bytes&bytes;
@@ -112,25 +83,27 @@ struct Composite {
  }
  void warn(const std::string&s)const{if(warnings.insert(s).second)std::cerr<<"PENDING-ANIMATION "<<path<<" "<<s<<"\n";
  }
- Image render(double ms,const std::string&motionName)const{
+ void enqueue(RenderQueue&queue,double ms,const std::string&motionName,const Affine2D&parent,float depth,float opacity,uint32_t parentAdd,uint32_t parentMul)const{
   if(definition.bounds[0]<=0||definition.bounds[1]<=0||definition.bounds[0]>4096||definition.bounds[1]>4096)throw std::runtime_error("Composite bounds "+path);
   const Motion*motion=nullptr;
  for(auto&m:definition.motions)if(m.name==motionName)motion=&m;
  if(!motion&&(motionName.empty()||motionName=="def"||motionName=="0")&&!definition.motions.empty())motion=&definition.motions.front();
  if(!motion)throw std::runtime_error("Missing motion "+motionName+" in "+path);
-  Image frame{unsigned(definition.bounds[0]),unsigned(definition.bounds[1]),qlie::Bytes(size_t(definition.bounds[0])*definition.bounds[1]*4)};
-  auto samples=sampleMotion(*motion,ms,frame.width,frame.height);
+  auto samples=sampleMotion(*motion,ms,1280,720,false);
   for(size_t index=0;index<samples.size();index++){
  auto&k=samples[index];
  for(auto&w:k.unsupported)warn(w);
- if(!motion->layers[index].flags||k.kind!=4)continue;
+ if(!motion->layers[index].flags||!k.kind)continue;
+ k.alpha=int(k.alpha)*int(opacity)/255;k.addColor=colorAdd(k.addColor,parentAdd);k.mulColor=colorMultiply(k.mulColor,parentMul);
+ if(k.kind==15||k.kind==16){queue.control(k,depth+k.priority);continue;}
+ if(k.kind!=4)continue;
  if(k.resource>=members.size())throw std::runtime_error("Composite image index "+path);
    auto&e=members[k.resource];
- Image nested;
  const Image*source=e.image.get();
    if(e.nested){warn("nested-motion origin alignment unverified");
- nested=e.nested->render(ms,"");
- source=&nested;
+ auto local=imagePlacement(k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,unsigned(e.nested->definition.bounds[0]),unsigned(e.nested->definition.bounds[1]));
+ e.nested->enqueue(queue,ms,"",affine(parent,local),depth+k.priority,k.alpha,k.addColor,k.mulColor);
+ continue;
  }
    else if(!e.video.empty()){
     auto&clip=clips[index];
@@ -140,9 +113,8 @@ struct Composite {
     warn("video-member origin alignment unverified");
  source=&clip->at(ms);
    }
-   if(source)blit(frame.pixels,frame.width,frame.height,*source,k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,k.alpha,k.addColor,k.mulColor,k.screen);
+   if(source)queue.image(*source,affine(parent,imagePlacement(k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,source->width,source->height)),depth+k.priority,k.alpha,k.addColor,k.mulColor);
   }
-  return frame;
  }
 };
 SceneImages::SceneImages(qlie::Assets&a):assets(a){for(auto type:{"image","chara"}){std::istringstream in(qlie::cp932(a.read(std::string("avg/imoscripter_template_")+type+".txt")));
@@ -224,16 +196,16 @@ void SceneImages::draw(qlie::Bytes&out)const{
  return i==l->params.end()?def:numeric(i->second);
  };
  std::stable_sort(sorted.begin(),sorted.end(),[&](auto*a,auto*b){return get(a,"pri",0)<get(b,"pri",0);});
- for(auto*l:sorted){Image generated;
- const Image*im=l->pixels.get();
- if(l->composite){auto m=l->params.find("motion");
- generated=l->composite->render(l->milliseconds,m==l->params.end()?"":m->second);
- im=&generated;
- }if(!im)continue;
+ RenderQueue queue;
+ for(auto*l:sorted){
  auto align=l->params.at("align");
  float ax=align.rfind("center",0)==0?0.5f:align.rfind("right",0)==0?1.f:0.f,ay=align.find(":bottom")!=align.npos?1.f:align.find(":center")!=align.npos?0.5f:0.f;
-  blit(out,1280,720,*im,get(l,"x",640),get(l,"y",360),get(l,"scalex",100)/100,get(l,"scaley",100)/100,get(l,"rotz",0),ax,ay,get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)));
+ unsigned w=l->composite?unsigned(l->composite->definition.bounds[0]):l->pixels->width,h=l->composite?unsigned(l->composite->definition.bounds[1]):l->pixels->height;
+ auto placement=imagePlacement(get(l,"x",640),get(l,"y",360),get(l,"scalex",100)/100,get(l,"scaley",100)/100,get(l,"rotz",0),ax,ay,w,h);
+ if(l->composite){auto m=l->params.find("motion");l->composite->enqueue(queue,l->milliseconds,m==l->params.end()?"":m->second,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)));}
+ else queue.image(*l->pixels,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)));
  }
+ queue.draw(out,1280,720);
 }
 
 qlie::Bytes SceneImages::save()const{StateWriter w;

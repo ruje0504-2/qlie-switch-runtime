@@ -95,6 +95,7 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms){
  out.y=val(0x1a,a.at(0x30),a.at(0x31)/100.f);
  out.scaleX=val(0x1c,a.at(0x30),a.at(0x31)/100.f);
  out.scaleY=val(0x1e,a.at(0x30),a.at(0x31)/100.f);
+ out.priority=val(0x20,a.at(0x30),a.at(0x31)/100.f);
  out.rotationZ=val(0x22,a.at(0x30),a.at(0x31)/100.f);
  out.alpha=val(0x35,a.at(0x33),a.at(0x3b)/100.f);
  out.anchorX=float(keyI16(a,0x85));
@@ -107,6 +108,7 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms){
  };
  out.addColor=color(0x24);
  out.mulColor=color(0x28);
+ for(unsigned n=0;n<4;n++)if(a.at(0x51+12*n)&&a.at(0x52+12*n))out.unsupported.push_back("procedural-track="+std::to_string(n));
  if(keyI16(a,0x48)||keyI16(a,0x4a))out.unsupported.push_back("3d-rotation");
  if(out.kind!=0&&out.kind!=4&&out.kind!=15&&out.kind!=16)out.unsupported.push_back("primitive="+std::to_string(out.kind));
  if(layer.mode>2)out.unsupported.push_back("layer-mode="+std::to_string(layer.mode));
@@ -116,12 +118,12 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms){
 // Original PE ea267/ea29c: push before applying the top state, pop after.
 // f6cfc/f6e5c add translation/rotation, multiply scale, saturate additive
 // color and multiply tint/alpha. The stack is reset for each motion draw.
-std::vector<AnimationSample> sampleMotion(const Motion&motion,double ms,unsigned width,unsigned height){
+std::vector<AnimationSample> sampleMotion(const Motion&motion,double ms,unsigned width,unsigned height,bool applyRenderState){
  std::vector<AnimationSample> result,stack;
  auto compose=[](AnimationSample value,const AnimationSample&parent){
   value.x+=parent.x;value.y+=parent.y;
   if(value.kind!=3){value.scaleX*=parent.scaleX/100;value.scaleY*=parent.scaleY/100;}
-  value.rotationZ+=parent.rotationZ;
+  value.rotationZ+=parent.rotationZ;value.priority+=parent.priority;
   value.alpha=float(int(value.alpha)*int(parent.alpha)/255);
   uint32_t add=0,mul=0;
   for(unsigned n=0;n<3;n++){
@@ -153,6 +155,7 @@ std::vector<AnimationSample> sampleMotion(const Motion&motion,double ms,unsigned
  // PE ec148 -> da90c -> dafc4 is a separate render-state stack.
  // dad00 translates, rotates clockwise-negative about the screen center,
  // then scales about that center. These operations can produce shear.
+ if(!applyRenderState)return result;
  std::vector<AnimationSample> renderStack;
  for(size_t i=0;i<result.size();i++){
   auto&value=result[i];

@@ -351,12 +351,12 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }else audio->volume(ch,volumes[ch],ms);
  return true;
  }
- void playVoice(const std::string&id,bool historyReplay=false,const std::string&speaker=""){
+ void playVoice(const std::string&id,bool historyReplay=false){
  if(!historyReplay&&!voices->forcePlay&&normalSkip){audio->stop(3);return;}
  if(id.empty())return;
  auto match=voices->resolve(id);
  if(!match){std::cerr<<"VOICE unresolved id="<<id;for(auto&candidate:voices->candidates(id))std::cerr<<" candidate="<<candidate;std::cerr<<"\n";if(voices->fileErrors)throw std::runtime_error("Voice file not found: "+id);return;}
- audio->playFile(assets,3,match->request,false,settings.voiceMuted(historyReplay?speaker:name)?0:voices->gain,0,1);
+ audio->playFile(assets,3,match->request,false,voices->gain,0,1);
  std::cerr<<"VOICE playing id="<<id<<" source="<<match->source.path<<" offset="<<match->source.offset<<" stored_bytes="<<match->source.size<<" loose="<<match->source.loose<<"\n";
  }
  void refreshMessage(bool show=false){images->setMessageImage(messageText->render(font,images->messageStyle()),show);lastMessageVisible=messageText->visible();}
@@ -563,7 +563,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    if(offset+size_t(row)>=history.size())continue;
    auto&entry=history[history.size()-1-offset-size_t(row)];
    if(entry.voice.empty()||!voices->resolve(entry.voice))continue;
-   playVoice(entry.voice,true,entry.speaker);historyVoicePlayed=true;return;
+   playVoice(entry.voice,true);historyVoicePlayed=true;return;
   }
   return;
  }

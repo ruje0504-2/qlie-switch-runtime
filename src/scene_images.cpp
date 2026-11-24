@@ -58,6 +58,7 @@ struct Composite {
  Animation definition;
  uint32_t identity=0;std::vector<uint32_t>motionIdentities;
  std::vector<Element>members;
+ std::vector<qlie::Bytes>sounds;
  std::string path;
  mutable std::set<std::string>warnings;
  mutable std::map<size_t,std::unique_ptr<EmbeddedVideo>>clips;
@@ -79,7 +80,7 @@ struct Composite {
     else e.image=std::make_shared<Image>(image(m.data));
    }members.push_back(std::move(e));
  }
-   else if(m.type.rfind("absnd",0)==0&&!m.data.empty())warn("embedded-audio="+m.name);
+   else if(m.type.rfind("absnd",0)==0)sounds.push_back(std::move(m.data));
   }
   if(!metadata)throw std::runtime_error("Composite lacks animation metadata "+name);
   for(auto&motion:definition.motions)for(auto&layer:motion.layers){if(layer.mode>2)warn("layer-mode="+std::to_string(layer.mode));
@@ -130,7 +131,7 @@ struct Composite {
    unsigned sx=pixel(k.mask.sourceX-width*k.mask.alignX+u*width,source->width),sy=pixel(k.mask.sourceY-height*k.mask.alignY+v*height,source->height);
    unsigned mx=pixel(k.mask.x-maskWidth*k.mask.alignX+u*maskWidth,mask->width),my=pixel(k.mask.y-maskHeight*k.mask.alignY+v*maskHeight,mask->height);
    auto src=source->pixels.data()+(size_t(sy)*source->width+sx)*4;auto dst=output.pixels.data()+(size_t(y)*output.width+x)*4;
-   std::copy(src,src+4,dst);dst[3]=gradientMaskAlpha(src[3],mask->pixels[(size_t(my)*mask->width+mx)*4+2],k.mask.amount,k.mask.mode);
+   std::copy(src,src+4,dst);dst[3]=gradientMaskAlpha(src[3],mask->pixels[(size_t(my)*mask->width+mx)*4],k.mask.amount,k.mask.mode);
   }
   auto placement=imagePlacement(k.x,k.y,k.scaleX/100*width/source->width,k.scaleY/100*height/source->height,k.rotationZ,k.anchorX/100,k.anchorY/100,source->width,source->height);
   queue.image(output,affine(parent,placement),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
@@ -195,6 +196,22 @@ void SceneImages::clear(){layers.clear();
  cache.clear();
  composites.clear();
  }
+std::vector<SceneSoundEvent> SceneImages::takeSoundEvents(){
+ std::vector<SceneSoundEvent> result;
+ for(auto&entry:layers){auto&layer=entry.second;if(!layer.composite)continue;
+  auto&object=*layer.composite;const Motion*motion=nullptr;auto i=layer.params.find("motion");
+  if(i!=layer.params.end())for(auto&m:object.definition.motions)if(m.name==i->second)motion=&m;
+  if(!motion&&!object.definition.motions.empty()&&(i==layer.params.end()||i->second==""||i->second=="def"||i->second=="0"))motion=&object.definition.motions.front();
+  if(!motion)continue;
+  for(auto event:animationSoundEvents(*motion,layer.audioMilliseconds,layer.milliseconds)){
+   if(event.channel>2)throw std::runtime_error("Embedded sound channel exceeds configured mixer bus");
+   SceneSoundEvent sound; sound.stop=event.stop;sound.loop=event.loop;sound.channel=event.channel+4;sound.gain=event.gain;
+   if(!event.stop){if(event.resource>=object.sounds.size()||object.sounds[event.resource].empty())throw std::runtime_error("Embedded sound resource missing "+layer.path);
+    sound.source="@abmp:"+std::to_string(event.resource)+":"+layer.path;sound.bytes=object.sounds[event.resource];
+   }result.push_back(std::move(sound));
+  }layer.audioMilliseconds=layer.milliseconds;
+ }return result;
+}
 void SceneImages::update(double ms){for(auto&l:layers)l.second.milliseconds+=ms;
  }
 bool SceneImages::command(const std::string&line){auto p=line.find(44);
@@ -216,7 +233,7 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  continue;
  }l.params[key]=v;
  if(key=="file")file=true;
- if(key=="motion")l.milliseconds=0;
+ if(key=="motion"){l.milliseconds=0;l.audioMilliseconds=-1;}
  if(key!="motion"&&key!="file"&&key!="x"&&key!="y"&&key!="scalex"&&key!="scaley"&&key!="alpha"&&key!="show"&&key!="pri"&&key!="align"&&key!="texfilter"&&key!="rotz"&&key!="mulcolor"&&key!="addcolor")std::cerr<<"PENDING-IMAGE-PROPERTY "<<cmd<<" "<<key<<"="<<v<<"\n";
  }
  if(file){std::string f=l.params["file"];
@@ -237,12 +254,14 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  if(it==composites.end())it=composites.emplace(path,std::make_shared<Composite>(assets.read(path),path,particleState)).first;
  l.composite=it->second;
  l.milliseconds=0;
+ l.audioMilliseconds=-1;
  return true;
  }auto it=cache.find(path);
  if(it==cache.end())it=cache.emplace(path,std::make_shared<Image>(image(assets.read(path)))).first;
  l.pixels=it->second;
  l.composite.reset();
  l.milliseconds=0;
+ l.audioMilliseconds=-1;
  std::cerr<<"IMAGE loaded "<<path<<" "<<l.pixels->width<<"x"<<l.pixels->height<<"\n";
  }return true;
  }
@@ -267,7 +286,7 @@ void SceneImages::draw(qlie::Bytes&out)const{
 }
 
 qlie::Bytes SceneImages::save()const{StateWriter w;
- w.str("WHJ2-images-3");
+ w.str("WHJ2-images-4");
  w.n(particleState);
  w.n(layers.size());
  for(auto&entry:layers){w.str(entry.first);
@@ -275,6 +294,7 @@ qlie::Bytes SceneImages::save()const{StateWriter w;
  w.str(l.prefix);
  w.str(l.path);
  w.n(uint64_t(l.milliseconds*1000));
+ w.n(l.audioMilliseconds<0?0:uint64_t(l.audioMilliseconds*1000)+1);
  w.n(l.params.size());
  for(auto&p:l.params){w.str(p.first);
  w.str(p.second);
@@ -282,7 +302,7 @@ qlie::Bytes SceneImages::save()const{StateWriter w;
  }return w.bytes;
  }
 void SceneImages::restore(const qlie::Bytes&b){StateReader r{b};
- auto version=r.str();bool v3=version=="WHJ2-images-3";
+ auto version=r.str();bool v4=version=="WHJ2-images-4",v3=v4||version=="WHJ2-images-3";
  if(!v3&&version!="WHJ2-images-2")throw std::runtime_error("Image state version");
  auto savedParticleState=v3?uint32_t(r.n()):particleState;
  std::map<std::string,Layer>next;
@@ -295,6 +315,7 @@ void SceneImages::restore(const qlie::Bytes&b){StateReader r{b};
  l.prefix=r.str();
  l.path=r.str();
  l.milliseconds=r.n()/1000.;
+ if(v4){auto cursor=r.n();l.audioMilliseconds=cursor?(cursor-1)/1000.:-1;}else l.audioMilliseconds=l.milliseconds;
  auto n=r.n();
  if(n>256)throw std::runtime_error("Image property count");
  while(n--){auto k=r.str();

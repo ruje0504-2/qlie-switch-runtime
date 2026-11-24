@@ -85,6 +85,20 @@ float sampleValue(float a,float b,unsigned mode,float power,double t,std::vector
  return float(a+(b-a)*q);
 }
 }
+// PE e6e38/e6f74: control event8 starts a sound, event11 stops a channel.
+std::vector<AnimationSoundEvent> animationSoundEvents(const Motion&motion,double previous,double current){
+ std::vector<AnimationSoundEvent> out;
+ for(const auto&layer:motion.layers){if(!layer.flags)continue;
+  for(const auto&key:layer.keys){double time=keyU32(key,0);if(time<=previous||time>current||key.size()<0x91)continue;
+   unsigned event=key.at(0x34);if(event!=8&&event!=11)continue;
+   int channel=keyI16(key,event==11?0x89:0x8f);if(channel<0)continue;
+   AnimationSoundEvent sound;sound.stop=event==11;sound.channel=unsigned(channel);
+   if(!sound.stop){int index=keyI16(key,0x89);if(index<0)continue;sound.resource=unsigned(index);
+    int volume=keyI16(key,0x8b);sound.gain=std::clamp((volume?volume:256)/256.f,0.f,1.f);sound.loop=keyI16(key,0x8d)!=0;
+   }out.push_back(sound);
+  }
+ }return out;
+}
 AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const AnimationContext&context){
  AnimationSample out;
  if(layer.keys.empty()||ms<keyU32(layer.keys.front(),0))return out;

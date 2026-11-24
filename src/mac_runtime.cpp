@@ -330,7 +330,13 @@ struct Frontend {
  unsigned frames=0;
  uint64_t lastUpdate=SDL_GetTicks64();
  while(!done){auto now=SDL_GetTicks64();
- if(!menu&&!movie->playing())images->update(double(now-lastUpdate));
+ if(!menu&&!movie->playing()){
+ images->update(double(now-lastUpdate));
+ for(auto&event:images->takeSoundEvents()){
+  if(event.stop)audio->volume(event.channel,0,0,true);
+  else audio->play(event.channel,event.bytes,event.loop,event.gain,0,event.source);
+ }
+}
  lastUpdate=now;
 #ifdef __SWITCH__
  if(!appletMainLoop()){done=true;

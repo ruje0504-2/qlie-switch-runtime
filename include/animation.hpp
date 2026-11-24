@@ -16,6 +16,8 @@ struct AnimationSample {
  unsigned kind=0,flags=0,resource=0;float x=0,y=0,scaleX=100,scaleY=100,rotationZ=0,priority=0,anchorX=50,anchorY=50,alpha=255;
  uint32_t addColor=0,mulColor=0xffffff;std::vector<std::string> unsupported;
 };
+struct AnimationSoundEvent {bool stop=false,loop=false;unsigned channel=0,resource=0;float gain=1;};
+std::vector<AnimationSoundEvent> animationSoundEvents(const Motion&,double previous,double current);
 AnimationSample sampleAnimation(const AnimationLayer&,double milliseconds,const AnimationContext& context={});
 std::vector<AnimationSample> sampleMotion(const Motion&,double milliseconds,unsigned width=1280,unsigned height=720,bool applyRenderState=true,const AnimationContext& context={});
 double nestedAnimationTime(const Animation&,double milliseconds);

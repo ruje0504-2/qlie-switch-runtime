@@ -31,7 +31,7 @@ Joy-Con：A推进/确认，B或＋/－返回菜单，上下方向/摇杆选择�
 
 已实现资源解密、日文文字、原始剧情控制流和四个结局路径、段落提交、静态背景与角色、音乐/音效、静态画面及音轨位置存读档。空存档读档会提示并留在菜单。
 
-独立Theora影片按音频采样时钟播放，Mac完整片尾自然结束已有证据。复合动画已接入跨场景图元排序、两套变换栈、周期运动轨道、上下文尺寸、矩形与位图混合（透明、屏幕、乘法、差值、最大/最小、加减）。混合使用原版定点运算规则；普通矩形、震动和闪光有原资源像素验证。粒子、模型、部分运动函数与属性、嵌套时间对齐和内嵌音轨尚未完成。对白语音ID映射未闭合。未实现路径显式写入PENDING日志，不作为完整演出通过。
+独立Theora影片按音频采样时钟播放，Mac完整片尾自然结束已有证据。复合动画已接入跨场景图元排序、两套变换栈、周期运动轨道、上下文尺寸、矩形与位图混合（透明、屏幕、乘法、差值、最大/最小、加减）。混合使用原版定点运算规则；普通矩形、震动和闪光有原资源像素验证。位图粒子、嵌套位图时钟和顶层动画内嵌音效已接通。模型、部分运动函数与属性、嵌套音轨和完整对象生命周期尚未完成。对白语音ID映射未闭合。未实现路径显式写入PENDING日志，不作为完整演出通过。
 
 保存格式仍为开发格式；完整动画存档和实机可玩性均未验收。
 
@@ -52,10 +52,12 @@ build/whj2-runtime /absolute/path/to/game /absolute/path/to/test-saves --movie m
 
 源码遵循GPL-2.0-or-later；原始游戏数据不属于源码许可范围。
 
-Bitmap particles (primitive 20) now use the native deterministic random table and viewport-centered depth projection. Scene state version 3 preserves generated resource identities across saves and clears stale future caches when restoring; version 2 scene saves remain readable. Nested/video particles, spherical particles, and particles with 3D rotation remain incomplete.
+Bitmap particles (primitive 20) now use the native deterministic random table and viewport-centered depth projection. Scene state version 4 preserves generated resource identities across saves and clears stale future caches when restoring; versions 2 and 3 scene saves remain readable. Nested/video particles, spherical particles, and particles with 3D rotation remain incomplete.
 
-Nested bitmap animations select their child motion and interpolate the child timeline from the parent key. Child loop bounds are respected. Zero-sized logical subcanvases are supported; missing dimension context remains reported. Symbolic child timeline inputs and embedded audio are still incomplete.
+Nested bitmap animations select their child motion and interpolate the child timeline from the parent key. Child loop bounds are respected. Zero-sized logical subcanvases are supported; missing dimension context remains reported. Symbolic child timeline inputs and nested embedded audio are still incomplete.
 
-Procedural function 5 uses the native time-quotient random-table lookup and restored per-scene identity seed. Other random functions and primitive 10 texture composition remain incomplete.
+Procedural function 5 uses the native time-quotient random-table lookup and restored per-scene identity seed. Other random functions remain incomplete.
 
 Primitive 10 bitmap gradient masks now use independent source/mask coordinates and native blue-channel threshold arithmetic, including inverse masks and fixed-point edge behavior. Non-bitmap and 3D mask variants remain incomplete; sampling currently follows the CPU renderer’s nearest-neighbor path.
+
+Top-level animation sound events decode embedded ABMP members on mixer channels 4–6. Looping, event timing and saved playback positions are supported; scene state also preserves the event cursor. Nested sound events and independent per-object mixer ownership remain incomplete.

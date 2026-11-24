@@ -25,3 +25,5 @@ $cxx -std=c++17 $common src/qlie.cpp src/animation.cpp src/particles.cpp tools/a
 $cxx -std=c++17 $common src/render_queue.cpp tools/render_queue_probe.cpp -o build/render-queue-probe
 
 $cxx -std=c++17 $common src/qlie.cpp src/image.cpp src/animation.cpp src/particles.cpp tools/particle_probe.cpp $($pc --cflags --libs libpng libjpeg) -o build/particle-probe
+
+$cxx -std=c++17 $common $($pc --cflags sdl2 libpng libjpeg) src/qlie.cpp src/story.cpp src/image.cpp src/animation.cpp src/particles.cpp src/scene_images.cpp src/gradient_mask.cpp src/render_queue.cpp src/audio.cpp tools/embedded_audio_probe.cpp build/video.o $($pc --libs sdl2 libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -o build/embedded-audio-probe

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "audio.hpp"
 #include "state_io.hpp"
+#include "image.hpp"
 #include <cmath>
 extern "C" {
 #include "video.h"
@@ -94,6 +95,15 @@ qlie::Bytes Audio::save(){StateWriter w;
  }SDL_UnlockAudioDevice(device);
  return w.bytes;
  }
+namespace {
+qlie::Bytes audioSource(qlie::Assets&assets,const std::string&path){
+ if(path.rfind("@abmp:",0)!=0)return assets.read(path);
+ auto split=path.find(':',6);if(split==std::string::npos)throw std::runtime_error("Embedded audio locator");
+ size_t index=std::stoul(path.substr(6,split-6)),current=0;
+ for(auto&member:abmp(assets.read(path.substr(split+1))))if(member.type.rfind("absnd",0)==0){if(current++==index)return member.data;}
+ throw std::runtime_error("Embedded audio member not found");
+}
+}
 void Audio::restore(const qlie::Bytes&bytes,qlie::Assets&assets){StateReader r{bytes};
  if(r.str()!="WHJ2-audio-1")throw std::runtime_error("Audio state version");
  std::array<Channel,8>next;
@@ -106,7 +116,7 @@ void Audio::restore(const qlie::Bytes&bytes,qlie::Assets&assets){StateReader r{b
  c.step=r.f();
  c.fade=r.n();
  if(!std::isfinite(c.gain)||!std::isfinite(c.target)||!std::isfinite(c.step)||c.gain<0||c.gain>1||c.target<0||c.target>1)throw std::runtime_error("Invalid audio gain state");
- if(!c.path.empty()){auto b=assets.read(c.path);
+ if(!c.path.empty()){auto b=audioSource(assets,c.path);
  uint8_t*raw=nullptr;
  size_t n=0;
  if(kaudio_decode(b.data(),b.size(),&raw,&n))throw std::runtime_error("Restored PCM decode failed");

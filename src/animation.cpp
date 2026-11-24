@@ -230,7 +230,7 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
  }
  if(keyI16(a,0x48)||keyI16(a,0x4a))out.unsupported.push_back("3d-rotation");
  if(out.kind==4&&(out.flags&0x7f)>8)out.unsupported.push_back("bitmap-blend="+std::to_string(out.flags&0x7f));
- if(out.kind!=0&&out.kind!=1&&out.kind!=4&&out.kind!=10&&out.kind!=15&&out.kind!=16&&out.kind!=17&&out.kind!=18)out.unsupported.push_back("primitive="+std::to_string(out.kind));
+ if(out.kind!=0&&out.kind!=1&&out.kind!=4&&out.kind!=6&&out.kind!=10&&out.kind!=15&&out.kind!=16&&out.kind!=17&&out.kind!=18)out.unsupported.push_back("primitive="+std::to_string(out.kind));
  if(layer.mode>2)out.unsupported.push_back("layer-mode="+std::to_string(layer.mode));
  return out;
 }

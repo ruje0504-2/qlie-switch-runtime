@@ -26,6 +26,7 @@ public:
  // UI slots are transient presentation state owned by title/choice screens.
  void uiSlot(const std::string&layer,unsigned slot,const std::string&asset);
  void uiSlot(const std::string&layer,unsigned slot,const Image&);
+ bool uiHit(const std::string&layer,float x,float y)const;
  void uiExternal(const std::string&layer,unsigned index,float value);
  qlie::Bytes save()const;void restore(const qlie::Bytes&);
  std::vector<SceneSoundEvent> takeSoundEvents();

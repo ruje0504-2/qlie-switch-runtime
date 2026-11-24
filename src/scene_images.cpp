@@ -14,6 +14,7 @@ extern "C" {
 #include <algorithm>
 #include <iostream>
 #include <cmath>
+#include <cstring>
 namespace whj2 {
 namespace {
 float numeric(const std::string&s){return !s.empty()&&s[0]=='$'?float(std::stoul(s.substr(1),nullptr,16)):std::stof(s);
@@ -117,7 +118,7 @@ struct Composite {
   }
   if(!metadata)throw std::runtime_error("Composite lacks animation metadata "+name);
   for(auto&motion:definition.motions)for(auto&layer:motion.layers){if(layer.mode>2)warn("layer-mode="+std::to_string(layer.mode));
- for(auto&k:layer.keys)if(k[4]!=0&&k[4]!=1&&k[4]!=4&&k[4]!=10&&k[4]!=15&&k[4]!=16&&k[4]!=17&&k[4]!=18&&k[4]!=20)warn("primitive="+std::to_string(k[4]));
+ for(auto&k:layer.keys)if(k[4]!=0&&k[4]!=1&&k[4]!=4&&k[4]!=6&&k[4]!=10&&k[4]!=15&&k[4]!=16&&k[4]!=17&&k[4]!=18&&k[4]!=20)warn("primitive="+std::to_string(k[4]));
  }
  }
  void saveIdentity(StateWriter&w)const{w.n(identity);w.n(motionIdentities.size());for(auto v:motionIdentities)w.n(v);for(auto&e:members)if(e.nested)e.nested->saveIdentity(w);}
@@ -205,13 +206,18 @@ struct Composite {
   for(const auto&object:mesh.objects)if(object.visible)for(const auto&face:object.faces){
    if(face.material<0)continue;
    const auto&material=mesh.materials.at(unsigned(face.material));const Image*texture=nullptr;
+   // PE df684 maps properties[0] to material+0xc; e0198 bypasses lighting for1.
+   if(material.properties[0]!=1)warn("model-material-lighting="+std::to_string(material.properties[0]));
+   auto channel=[&](unsigned index){float v;auto bits=material.properties[index];std::memcpy(&v,&bits,4);return unsigned(std::lround(std::clamp(v,0.f,1.f)*255));};
+   unsigned materialAlpha=channel(2);uint32_t materialColor=(channel(3)<<16)|(channel(4)<<8)|channel(5);
+
    for(const auto&member:members)if(member.name==material.name){texture=member.image.get();break;}
    if(!texture){warn("model-material-texture="+material.name);continue;}
    std::array<TextureVertex,4> vertices;for(unsigned i=0;i<face.corners;i++){auto point=matrix.point(object.vertices.at(face.vertices[i]));vertices[i]={point.x,point.y,1000-point.z,face.uv[i]*texture->width,face.uv[i+4]*texture->height};}
-   queue.triangle(*texture,{vertices[0],vertices[1],vertices[2]},depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
-   if(face.corners==4)queue.triangle(*texture,{vertices[0],vertices[2],vertices[3]},depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
+   queue.triangle(*texture,{vertices[0],vertices[1],vertices[2]},depth+k.priority,k.alpha*materialAlpha/255,k.addColor,colorMultiply(k.mulColor,materialColor),k.flags&0x7f);
+   if(face.corners==4)queue.triangle(*texture,{vertices[0],vertices[2],vertices[3]},depth+k.priority,k.alpha*materialAlpha/255,k.addColor,colorMultiply(k.mulColor,materialColor),k.flags&0x7f);
   }
-  warn("model-material-lighting pending");continue;
+  continue;
  }
  if(k.kind!=4)continue;
  if(k.resource>=members.size())throw std::runtime_error("Composite image index "+path);
@@ -272,6 +278,23 @@ std::string SceneImages::expand(std::string s,const std::string&type){auto&map=t
  }
 void SceneImages::uiSlot(const std::string&name,unsigned slot,const std::string&path){if(name.rfind("ui_",0)!=0)throw std::runtime_error("UI slot owner");auto i=cache.find(path);if(i==cache.end())i=cache.emplace(path,std::make_shared<Image>(image(assets.read(path)))).first;layers.at(name).uiSlots[slot]=i->second;}
 void SceneImages::uiSlot(const std::string&name,unsigned slot,const Image&value){if(name.rfind("ui_",0)!=0)throw std::runtime_error("UI slot owner");layers.at(name).uiSlots[slot]=std::make_shared<Image>(value);}
+bool SceneImages::uiHit(const std::string&name,float x,float y)const{
+ if(name.rfind("ui_",0)!=0)throw std::runtime_error("UI hit owner");
+ auto found=layers.find(name);if(found==layers.end())return false;const auto&l=found->second;
+ if(!l.composite||l.params.at("show")=="false")return false;
+ const auto&definition=l.composite->definition;auto selected=l.params.find("motion");auto motion=findMotion(definition,selected==l.params.end()?"":selected->second);if(!motion)return false;
+ auto align=l.params.at("align");float ax=align.rfind("center",0)==0?.5f:align.rfind("right",0)==0?1.f:0.f,ay=align.find(":bottom")!=align.npos?1.f:align.find(":center")!=align.npos?.5f:0.f;
+ auto parent=imagePlacement(value(l,"x",0),value(l,"y",0),value(l,"scalex",100)/100,value(l,"scaley",100)/100,value(l,"rotz",0),ax,ay,unsigned(definition.bounds[0]),unsigned(definition.bounds[1]));
+ auto samples=sampleMotion(*motion,l.milliseconds,1280,720,true,AnimationContext{unsigned(definition.bounds[0]),unsigned(definition.bounds[1]),1280,720});
+ for(size_t i=0;i<samples.size();i++){auto&k=samples[i];if(!motion->layers[i].flags||k.kind!=6)continue;
+  // Primitive6 is the authored collision rectangle; eae50 is its debug overlay.
+  auto local=imagePlacement(k.x,k.y,k.scaleX,k.scaleY,k.rotationZ,k.anchorX/100,k.anchorY/100,1,1);
+  auto matrix=affine(k.screen,affine(parent,local));float det=matrix.a*matrix.d-matrix.b*matrix.c;if(std::abs(det)<1e-9f)continue;
+  float dx=x-matrix.x,dy=y-matrix.y,u=(matrix.d*dx-matrix.b*dy)/det,v=(-matrix.c*dx+matrix.a*dy)/det;
+  if(u>=0&&u<=1&&v>=0&&v<=1)return true;
+ }
+ return false;
+}
 void SceneImages::uiExternal(const std::string&name,unsigned index,float v){if(name.rfind("ui_",0)!=0||index>=16||!std::isfinite(v))throw std::runtime_error("UI external variable");layers.at(name).params["@exv"+std::to_string(index)]=std::to_string(v);}
 void SceneImages::clear(){layers.clear();
  cache.clear();

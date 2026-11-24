@@ -15,6 +15,6 @@ void TitleScreen::update(double ms){ms=std::max(0.,ms);if(!shown){double part=st
 void TitleScreen::skipIntro(){if(!ready())update(5500-elapsed);}
 int TitleScreen::move(int direction){if(!ready())return selected;int next=selected;do{next=(next+(direction<0?-1:1)+5)%5;}while(next==2&&!extras);select(next);return selected;}
 bool TitleScreen::select(int index){if(!ready()||index<0||index>=5||(index==2&&!extras))return false;if(selected!=index){selected=index;highlight();}return true;}
-int TitleScreen::hit(float x,float y)const{if(!ready())return -1;for(int i=0;i<5;i++)if(std::abs(x-1080)<=80&&std::abs(y-(310+i*70))<=20)return i;return -1;}
+int TitleScreen::hit(float x,float y)const{if(!ready())return -1;for(int i=0;i<5;i++)if(scene.uiHit("ui_button"+std::to_string(i),x,y))return i;return -1;}
 TitleScreen::Action TitleScreen::confirm(){if(!ready()){if(elapsed<5000)update(5000-elapsed);return None;}if(selected==2&&!extras)return None;return Action(selected+1);}
 }

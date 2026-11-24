@@ -12,6 +12,7 @@ public:
  ReplayScreen(qlie::Assets&a,const Progress&p):progress(p),catalog(a),scene(a){}
  void open(unsigned pageIndex=0);void close();bool visible()const{return opened;}
  void update(double);void draw(qlie::Bytes&out)const{scene.draw(out);}
+ void draw(RenderTarget&out)const{scene.draw(out);}
  void move(int,int);int confirm();int tap(float,float);
  unsigned pageIndex()const{return page;}int selection()const{return selected;}
  const ReplayEntry&entry(unsigned i)const{return catalog.items().at(i);}

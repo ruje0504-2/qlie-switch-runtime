@@ -163,9 +163,12 @@ struct Composite {
    if(!source->width||!source->height||!mask->width||!mask->height)continue;
   bool rotated=false;for(auto&w:k.unsupported)if(w=="3d-rotation")rotated=true;
   if(rotated){warn("mask-3d-rotation");continue;}
-  auto&output=maskedImages[index];output.width=source->width;output.height=source->height;output.pixels.resize(source->pixels.size());
+
   float width=k.mask.width?k.mask.width:source->width,height=k.mask.height?k.mask.height:source->height;
   float maskWidth=k.mask.maskWidth?k.mask.maskWidth:mask->width,maskHeight=k.mask.maskHeight?k.mask.maskHeight:mask->height;
+   auto placement=imagePlacement(k.x,k.y,k.scaleX/100*width/source->width,k.scaleY/100*height/source->height,k.rotationZ,k.anchorX/100,k.anchorY/100,source->width,source->height);
+   if(queue.supportsMasks()){queue.maskedImage(*source,*mask,k.mask,affine(parent,placement),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,k.textureFilter);continue;}
+   auto&output=maskedImages[index];output.width=source->width;output.height=source->height;output.pixels.resize(source->pixels.size());
   auto pixel=[](float value,unsigned size){return unsigned(std::clamp(int(std::floor(value)),0,int(size)-1));};
   for(unsigned y=0;y<output.height;y++)for(unsigned x=0;x<output.width;x++){
    float u=(x+.5f)/output.width,v=(y+.5f)/output.height;
@@ -174,7 +177,7 @@ struct Composite {
    auto src=source->pixels.data()+(size_t(sy)*source->width+sx)*4;auto dst=output.pixels.data()+(size_t(y)*output.width+x)*4;
    std::copy(src,src+4,dst);dst[3]=gradientMaskAlpha(src[3],mask->pixels[(size_t(my)*mask->width+mx)*4],k.mask.amount,k.mask.mode);
   }
-  auto placement=imagePlacement(k.x,k.y,k.scaleX/100*width/source->width,k.scaleY/100*height/source->height,k.rotationZ,k.anchorX/100,k.anchorY/100,source->width,source->height);
+
   queue.snapshot(output,affine(parent,placement),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,k.textureFilter);
   continue;
  }
@@ -492,6 +495,9 @@ void SceneImages::setMessageImage(const Image&image,bool show){if(!layers.count(
 }
 
 void SceneImages::draw(RenderTarget&target)const{qlie::Bytes unused;render(unused,0,&target);}
+void SceneImages::drawScene(RenderTarget&target)const{qlie::Bytes unused;render(unused,1,&target);}
+void SceneImages::drawFaces(RenderTarget&target)const{qlie::Bytes unused;render(unused,2,&target);}
+void SceneImages::drawMessages(RenderTarget&target)const{qlie::Bytes unused;render(unused,3,&target);}
 void SceneImages::render(qlie::Bytes&out,unsigned pass,RenderTarget*target)const{
  if(!target&&out.size()!=1280*720*4)throw std::runtime_error("Scene canvas size");
  std::vector<const Layer*>sorted;
@@ -506,7 +512,7 @@ void SceneImages::render(qlie::Bytes&out,unsigned pass,RenderTarget*target)const
  }
  auto get=[](const Layer*l,const std::string&k,float def){return value(*l,k,def);};
  std::stable_sort(sorted.begin(),sorted.end(),[&](auto*a,auto*b){return get(a,"pri",0)<get(b,"pri",0);});
- RenderQueue queue;
+ RenderQueue queue(target&&target->supportsMasks());
  for(auto*l:sorted){
  auto beforeImages=queue.imageCount();
  auto align=l->params.at("align");

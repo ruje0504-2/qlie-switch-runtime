@@ -12,6 +12,7 @@ public:
  CgScreen(qlie::Assets&a,const Progress&p,KFont*f):progress(p),catalog(a),menuScene(a),viewScene(a),assets(a),font(f){}
  void open();void close();bool visible()const{return opened;}bool inView()const{return viewing;}
  void update(double);void draw(qlie::Bytes&)const;void move(int,int);Action confirm();Action tap(float,float);Action back();void toggleZoom();void pan(float,float);void panDelta(float,float);
+ void draw(RenderTarget&)const;
  std::set<std::string> takeShownFiles(){return viewScene.takeShownFiles();}
  unsigned pageIndex()const{return page;}unsigned variantIndex()const{return variant;}unsigned zoomLevel()const{return zoom;}int selection()const{return selected;}
 };

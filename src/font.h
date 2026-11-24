@@ -12,6 +12,8 @@ void kfont_close(KFont *font);
 /* Read-only diagnostics for the per-font, colour-independent LRU cache.
    Bitmap bytes exclude fixed hash buckets and bounded entry metadata. */
 int kfont_cache_stats(const KFont *font,KFontCacheStats *stats);
+typedef struct {int left,top;unsigned width,height;} KFontGlyphBounds;
+int kfont_glyph_bounds(KFont*,uint32_t,unsigned,unsigned,KFontGlyphBounds*);
 int kfont_draw(KFont *font,KImage *dst,uint32_t codepoint,int x,int y,unsigned width,unsigned height,uint32_t rgb);
 /* Draw a glyph with a thin black core and faint outer edge. Used only by the
    supplied story/choice font; HOS UI panels continue using plain glyphs. */

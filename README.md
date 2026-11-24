@@ -42,7 +42,7 @@ Mac和Switch运行循环统一限制为最高60 FPS，保留垂直同步；输�
 - QLIE资源解密/BPE、日文显示、剧情控制流与四结局逻辑、段落提交、空存档正常处理。
 - 全局图元排序、包含零图元控制层的变换栈、原版定点混合、矩形、部分周期/随机轨道、上下文尺寸、位图与嵌套动画粒子。渲染状态支持压栈、退一层和清空全栈。
 - 原标题与选择框资源、动画和碰撞矩形；天空模型的纹理三角形、单轴嵌套三维变换、透视UV与近裁剪。无光照材质使用原始颜色；多轴精度和其他光照模式仍待完成。
-- 双纹理位图遮罩、蓝通道阈值。动态遮罩和影片帧保有队列内快照，静态图片继续共享。
+- 双纹理位图遮罩、蓝通道阈值。GPU直接采样原图与遮罩；CPU回退的动态遮罩和影片帧保有队列内快照，静态图片继续共享。
 - 角色基础动作与独立立绘替换槽、命名/数字动作、直接后向关键帧循环。显式与自动头像选择、逐页/持续显隐、前景层。
 - 图层位置/颜色渐变、相对位移、播放速度。原消息框显示/隐藏动画、逐字正文、姓名别名，以及spd速度标签与pc居中标签。
 - 音乐/音效、顶层动画内嵌音频及独立direct总线、音量和播放位置保存。独立Theora影片按音频采样时钟播放。
@@ -96,19 +96,35 @@ L opens the save panel; R opens the load panel. A confirms a selected slot, and 
 Save/load panels use the original resources, 15 pages of eight local slots, and small scene thumbnails. History contains displayed pages and is included with each slot. The settings page supports nine sliders for text speed, text-window opacity, auto-play delay, and six volume controls, plus click-to-stop voice and auto-play voice-wait toggles. Sliders support captured touch drags and controller adjustment, with local persistence and reset confirmation. The original auto-play button controls timed progression and waits for text completion and, when selected, voice completion. Remaining font, display-quality, and character-voice controls are pending; this is not full settings parity. Confirmation dialogs currently use original artwork without the original transition timing. Physical controller/touch and Switch runtime acceptance remain pending.
 
 
-## Vulkan title renderer
+## Vulkan renderer
 
-The Switch title scene uses the GPU through the statically linked Vulkan/NVK
+Switch scenes use the GPU through the statically linked Vulkan/NVK
 backend from [danfromtico/mesa-switch](https://github.com/danfromtico/mesa-switch),
 Mesa 26.2.4, commit `0ff52079ca9e9e837ed27eb95a8d239f439a1864`.
 The authored flower particles, sky mesh, texture sampling, ordered integer
 blending and left-stick/touch viewpoint remain in the same scene graph.
-Compute dispatches write the title frame and a Vulkan fullscreen pass presents it
-directly through the native NWindow swapchain, including the FPS overlay.
+One compute dispatch processes ordered draw lists for 16x16 screen tiles. Each
+invocation owns one pixel, keeps its accumulated color in registers and applies
+the original sampling and integer blend equations in scene order. This replaces
+the old dispatch and global memory barrier after every primitive. A shared
+texture arena retains uploads; each immutable queue checks a source image once
+instead of comparing its complete pixels for every particle or mesh triangle.
+A Vulkan fullscreen pass presents directly through the native NWindow
+swapchain, including the FPS overlay.
 On this path, SDL provides audio/events only; Joy-Con and touchscreen input use
-libnx. SDL does not create a video window or claim the NWindow. Modal
-panels use a readback for the existing CPU UI composition. Other game scenes
-currently retain CPU composition and use the same Vulkan native presentation.
+libnx. SDL does not create a video window or claim the NWindow. The title,
+story layers, message windows, choices, CG/replay/music screens, system panels,
+glyphs, dimming, bitmap masks and scene transitions share this GPU composition
+path without per-frame readback. Movies retain the existing CPU decoder and
+upload its frame directly; overlays are composed on the GPU. Transition/save
+snapshots still use the CPU reference renderer when requested by game logic.
+Save-panel metadata and thumbnails are cached while the panel is open; glyph
+bitmaps are cached separately from their GPU placement.
+
+Native FIFO presentation supplies the console's 60 Hz limit, without a second
+software sleep before swapchain acquisition. The CPU/host presentation path
+keeps its existing software limiter. No resolution, particle-count, animation,
+filter or input reduction is used for this performance candidate.
 
 Dependencies are isolated from the system toolchain:
 
@@ -129,6 +145,8 @@ selected with `WHJ2_RENDERER=vulkan`; `WHJ2_VULKAN_LIBRARY` specifies the
 host library. `WHJ2_RENDERER=cpu` selects the CPU reference renderer on Switch.
 These are diagnostic environment variables, not controller bindings.
 
-Host verification covers 60 real title frames at different horizontal views,
-all nine blend modes, dynamic snapshots and title touch/stick logic. It does not
-establish the frame rate or stability of the Switch build on physical hardware.
+Historical host verification predates the tiled renderer and covers 60 title
+frames, nine blend modes, dynamic snapshots and title touch/stick logic. It does
+not validate this performance candidate. Its shaders are compiled and checked
+with SPIR-V validation; no new game-runtime tests or physical Switch frame-rate
+measurements have been run for this revision.

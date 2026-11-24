@@ -28,6 +28,7 @@ class SceneImages {
 public:
  explicit SceneImages(qlie::Assets&);
  void draw(RenderTarget&)const;
+ void drawScene(RenderTarget&)const;void drawFaces(RenderTarget&)const;void drawMessages(RenderTarget&)const;
  std::set<std::string> takeShownFiles(){std::set<std::string> out;out.swap(shownFiles);return out;}
  // UI slots are transient presentation state owned by title/choice screens.
  void uiSlot(const std::string&layer,unsigned slot,const std::string&asset);

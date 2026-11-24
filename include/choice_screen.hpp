@@ -11,5 +11,6 @@ public:
  bool ready()const{return elapsed>=250;}
  void select(int);int hit(float,float)const;
  void draw(qlie::Bytes&pixels)const{scene.draw(pixels);}
+ void draw(RenderTarget&target)const{scene.draw(target);}
 };
 }

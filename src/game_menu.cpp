@@ -34,19 +34,25 @@ GameMenu::Action GameMenu::tap(float x,float y){if(asking){if(std::abs(y-325)<=2
 }
 void GameMenu::drawAutoButton(qlie::Bytes&pixels,bool enabled){RenderQueue q;put(q,std::string("avg/window/オートプレイ")+(enabled?"_on.png":"_off.png"),1170,700,true);q.draw(pixels,1280,720);}
 void GameMenu::drawSkipButton(qlie::Bytes&pixels,bool enabled){RenderQueue q;put(q,std::string("avg/window/スキップ")+(enabled?"_on.png":"_off.png"),1200,700,true);q.draw(pixels,1280,720);}
-void GameMenu::draw(qlie::Bytes&pixels){RenderQueue q;
+void GameMenu::drawAutoButton(RenderTarget&target,bool enabled){RenderQueue q;put(q,std::string("avg/window/オートプレイ")+(enabled?"_on.png":"_off.png"),1170,700,true);q.draw(target,1280,720);}
+void GameMenu::drawSkipButton(RenderTarget&target,bool enabled){RenderQueue q;put(q,std::string("avg/window/スキップ")+(enabled?"_on.png":"_off.png"),1200,700,true);q.draw(target,1280,720);}
+void GameMenu::draw(qlie::Bytes&pixels){render(&pixels,nullptr);}
+void GameMenu::draw(RenderTarget&target){render(nullptr,&target);}
+void GameMenu::render(qlie::Bytes*pixels,RenderTarget*target){RenderQueue q;
+ auto draw=[&](const RenderQueue&queue){if(target)queue.draw(*target,1280,720);else queue.draw(*pixels,1280,720);};
+ auto dim=[&](unsigned numerator,unsigned denominator){if(target)target->dim(numerator,denominator);else for(size_t i=0;i<pixels->size();i+=4)for(unsigned c=0;c<3;c++)(*pixels)[i+c]=uint8_t(unsigned((*pixels)[i+c])*numerator/denominator);};
  if(panel==Save||panel==Load){std::string dir="script/saveload/";put(q,dir+"背景.png",0,0);put(q,dir+(panel==Save?"アッパーフレーム_セーブ.png":"アッパーフレーム_ロード.png"),0,0);put(q,dir+"アンダーフレーム.png",1,656);
  for(int i=0;i<15;i++){char n[8];std::snprintf(n,sizeof(n),"%02d",i+1);put(q,dir+"ページ_"+n+(i==page?"_on.png":"_off.png"),694+i*40,90,true);}
  for(int i=0;i<8;i++){float x=i<4?323:956,y=182+(i%4)*135;put(q,dir+(focus==i?"セーブファイル_on.png":"セーブファイル_off.png"),x,y,true);put(q,dir+"サムネイル_no_data.png",i<4?27:660,137+(i%4)*135);}
  put(q,dir+"戻る_off.png",1211,695,true);put(q,dir+"タイトルへ戻る_off.png",1080,695,true);put(q,dir+"ゲームの終了_off.png",950,695,true);
- }else if(panel==History){for(size_t i=0;i<pixels.size();i+=4)for(int c=0;c<3;c++)pixels[i+c]=uint8_t(pixels[i+c]*.3);put(q,"script/log/アッパーフレーム.png",0,0);put(q,"script/log/アンダーフレーム.png",0,658);put(q,"script/log/ゲームに戻る_off.png",1208,694,true);
+ }else if(panel==History){dim(3,10);put(q,"script/log/アッパーフレーム.png",0,0);put(q,"script/log/アンダーフレーム.png",0,658);put(q,"script/log/ゲームに戻る_off.png",1208,694,true);
  }else if(panel==Settings){put(q,"script/config/背景.png",0,0);put(q,"script/config/設定フレーム.png",139,89);put(q,"script/config/アッパーフレーム.png",0,0);put(q,"script/config/アンダーフレーム.png",0,656);
  for(int i=0;i<9;i++){const auto&slider=sliders[i];bool active=focus==i+3;auto part=std::to_string(active?1:0);put(q,std::string("script/config/")+((i<2||i==8)?"scroll_bar_s.b#":"scroll_bar.b#")+part,slider.x-((i<2||i==8)?8:10),slider.y-((i<2||i==8)?10:11));put(q,"script/config/scroll_button.b#"+part,slider.x+sliderPosition(settings,i)*slider.width/20,slider.y,true);}
  put(q,std::string("script/config/確認_設定初期化")+(focus==12?"_on.png":"_off.png"),1079,694,true);
  for(int i=0;i<3;i++){const char*yes=i==0?"する":i==1?"待つ":"既読";const char*no=i==0?"しない":i==1?"待たない":"未読";bool value=settings.get(i==0?"ClickVoiceStop":i==1?"AutoPlayVoiceWait":"SkipMode");put(q,std::string("script/config/")+yes+(value?"_on.png":"_off.png"),410,i==0?353:i==1?412:442,true);put(q,std::string("script/config/")+no+(!value?"_on.png":"_off.png"),534,i==0?353:i==1?412:442,true);}
  const char*names[]={"戻る","タイトルへ戻る","ゲームの終了"};const int xs[]={1210,950,820};for(int i=0;i<3;i++)put(q,std::string("script/config/")+names[i]+(focus==i?"_on.png":"_off.png"),xs[i],695,true);
  }
- q.draw(pixels,1280,720);
- if(asking){for(size_t i=0;i<pixels.size();i+=4)for(int c=0;c<3;c++)pixels[i+c]=uint8_t(pixels[i+c]*.375);RenderQueue dialog;put(dialog,"script/config/確認_フレーム.png",640,300,true);put(dialog,std::string("script/config/確認_はい")+(focus==0?"_on.png":"_off.png"),550,325,true);put(dialog,std::string("script/config/確認_いいえ")+(focus==1?"_on.png":"_off.png"),730,325,true);dialog.draw(pixels,1280,720);}
+ draw(q);
+ if(asking){dim(3,8);RenderQueue dialog;put(dialog,"script/config/確認_フレーム.png",640,300,true);put(dialog,std::string("script/config/確認_はい")+(focus==0?"_on.png":"_off.png"),550,325,true);put(dialog,std::string("script/config/確認_いいえ")+(focus==1?"_on.png":"_off.png"),730,325,true);draw(dialog);}
 }
 }

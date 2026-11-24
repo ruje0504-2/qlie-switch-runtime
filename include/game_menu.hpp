@@ -9,6 +9,7 @@ class GameMenu {
  const Image& resource(const std::string&);
  int draggedSlider=-1;
  void put(RenderQueue&,const std::string&,float,float,bool center=false);
+ void render(qlie::Bytes*,RenderTarget*);
 public:
  enum Panel {None,Save,Load,History,Settings};
  enum Action {Nothing,Close,Slot,Quit,Title,Yes,No,SettingsChanged,ResetSettings,SceneReturn};
@@ -26,5 +27,6 @@ public:
  Action tap(float,float);
  bool beginDrag(float,float);bool drag(float,float);void endDrag(){draggedSlider=-1;}
  void draw(qlie::Bytes&);void drawAutoButton(qlie::Bytes&,bool);void drawSkipButton(qlie::Bytes&,bool);
+ void draw(RenderTarget&);void drawAutoButton(RenderTarget&,bool);void drawSkipButton(RenderTarget&,bool);
 };
 }

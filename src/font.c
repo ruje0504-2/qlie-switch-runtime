@@ -175,6 +175,12 @@ static void font_blend_pixel(KImage *dst,int64_t xx,int64_t yy,unsigned alpha,un
 static unsigned font_bitmap_alpha(const FT_Bitmap *bitmap,const uint8_t *source,unsigned col){
     return bitmap->pixel_mode==FT_PIXEL_MODE_MONO?((source[col/8]&(0x80>>(col%8)))?255:0):source[col];
 }
+int kfont_glyph_bounds(KFont *f,uint32_t cp,unsigned width,unsigned height,KFontGlyphBounds *bounds){
+    if(!f||!bounds||width<1||height<1||width>256||height>256)return -1;
+    FT_Bitmap *bitmap=NULL;int64_t left=0,top=0;
+    if(font_load_glyph(f,cp,width,height,&bitmap,&left,&top))return -1;
+    *bounds=(KFontGlyphBounds){(int)left,(int)top,bitmap->width,bitmap->rows};return 0;
+}
 int kfont_draw(KFont *f,KImage *dst,uint32_t cp,int x,int y,unsigned width,unsigned height,unsigned rgb){
     if(!f||!dst||!dst->pixels||dst->stride<(size_t)dst->width*4||width<1||height<1||width>256||height>256)return -1;
     FT_Bitmap *bitmap=NULL;int64_t left=0,top=0;

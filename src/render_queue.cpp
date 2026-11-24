@@ -47,6 +47,7 @@ void RenderQueue::image(const Image&i,const Affine2D&m,float pri,float alpha,uin
  Command c;c.image=&i;c.placement=m;c.priority=pri;c.state.alpha=alpha;c.state.addColor=add;c.state.mulColor=mul;c.state.flags=blend;c.state.textureFilter=filter;commands.push_back(c);if(alpha>0&&i.width&&i.height)visibleImages++;
 }
 const Image& RenderQueue::snapshotImage(const Image&i){snapshots.push_back(i);return snapshots.back();}
+void RenderQueue::maskedImage(const Image&i,const Image&mask,const AnimationSample::Mask&settings,const Affine2D&m,float pri,float alpha,uint32_t add,uint32_t mul,unsigned blend,unsigned filter){image(i,m,pri,alpha,add,mul,blend,filter);commands.back().mask=&mask;commands.back().state.mask=settings;}
 void RenderQueue::snapshot(const Image&i,const Affine2D&m,float pri,float alpha,uint32_t add,uint32_t mul,unsigned blend,unsigned filter){
  image(snapshotImage(i),m,pri,alpha,add,mul,blend,filter);
 }
@@ -145,7 +146,7 @@ void RenderQueue::drawRows(qlie::Bytes&out,unsigned w,unsigned h,unsigned rowBeg
  if(!stack.empty()){const auto&p=stack.back();if(p.flags&0x7f)blend=p.flags&0x7f;float r=p.rotationZ*3.14159265358979323846f/180,co=std::cos(r),si=std::sin(r),sx=p.scaleX/100,sy=p.scaleY/100,cx=w/2.f,cy=h/2.f;
  Affine2D post{sx*co,sx*si,-sy*si,sy*co,cx+sx*(co*(p.x-cx)+si*(p.y-cy)),cy+sy*(-si*(p.x-cx)+co*(p.y-cy))};
  model=affine(post,model);alpha=int(alpha)*int(p.alpha)/255;add=colorAdd(add,p.addColor);mul=colorMultiply(mul,p.mulColor);}
- if(target){if(c->polygon)target->triangle(*c->image,c->triangle,model,alpha,add,mul,blend,s.textureFilter);else target->image(*c->image,model,alpha,add,mul,blend,s.textureFilter);continue;}
+ if(target){if(c->mask)target->maskedImage(*c->image,*c->mask,s.mask,model,alpha,add,mul,blend,s.textureFilter);else if(c->polygon)target->triangle(*c->image,c->triangle,model,alpha,add,mul,blend,s.textureFilter);else target->image(*c->image,model,alpha,add,mul,blend,s.textureFilter);continue;}
  if(c->polygon)triangleRaster(out,w,h,*c->image,c->triangle,model,alpha,add,mul,blend,s.textureFilter,rowBegin,rowEnd);
  else raster(out,w,h,*c->image,model,alpha,add,mul,blend,s.textureFilter,rowBegin,rowEnd);
  }
@@ -181,7 +182,7 @@ public:
  }
 };
 }
-void RenderQueue::draw(RenderTarget&target,unsigned w,unsigned h)const{qlie::Bytes unused;drawRows(unused,w,h,0,h,&target);}
+void RenderQueue::draw(RenderTarget&target,unsigned w,unsigned h)const{qlie::Bytes unused;target.beginBatch();drawRows(unused,w,h,0,h,&target);target.endBatch();}
 void RenderQueue::draw(qlie::Bytes&out,unsigned w,unsigned h)const{
  if(out.size()!=size_t(w)*h*4)throw std::runtime_error("Render canvas size");
  static const bool serial=[] {auto*mode=std::getenv("WHJ2_RENDER_THREADS");return mode&&std::string(mode)=="1";}();

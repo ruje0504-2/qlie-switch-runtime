@@ -17,6 +17,7 @@ public:
  bool takeSettingsChanged(){bool value=dirty;dirty=false;return value;}
  void open();void close();bool visible()const{return opened;}
  void update(double);void draw(qlie::Bytes&out)const{scene.draw(out);}
+ void draw(RenderTarget&out)const{scene.draw(out);}
  void move(int,int);void confirm();bool back();bool tap(float,float);bool drag(float,float);
  int selection()const{return selected;}int playingTrack()const{return playing;}
 };

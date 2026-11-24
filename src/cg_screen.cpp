@@ -21,6 +21,7 @@ void CgScreen::positionView(){auto size=viewScene.dimensions("ui_cg_view");float
 void CgScreen::close(){opened=viewing=false;menuScene.clear();viewScene.clear();}
 void CgScreen::update(double ms){if(!opened)return;elapsed+=std::max(0.,ms);if(viewing)viewScene.update(ms);else menuScene.update(ms);}
 void CgScreen::draw(qlie::Bytes&out)const{if(viewing)viewScene.draw(out);else menuScene.draw(out);}
+void CgScreen::draw(RenderTarget&out)const{if(viewing)viewScene.draw(out);else menuScene.draw(out);}
 void CgScreen::pan(float x,float y){pointerX=std::clamp(x,0.f,1280.f);pointerY=std::clamp(y,0.f,720.f);if(viewing)positionView();}
 void CgScreen::panDelta(float x,float y){pan(pointerX+x,pointerY+y);}
 void CgScreen::toggleZoom(){if(viewing){zoom=zoom==1?2:1;positionView();}}

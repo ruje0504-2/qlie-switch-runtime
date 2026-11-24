@@ -11,6 +11,7 @@
 #include "joycon.hpp"
 #include "voice.hpp"
 #include "upper_menu.hpp"
+#include "game_menu.hpp"
 #include <sstream>
 #include <algorithm>
 extern "C" {
@@ -53,6 +54,9 @@ struct Frontend {
  std::unique_ptr<whj2::Movie>movie;
  std::unique_ptr<whj2::VoiceResolver>voices;
  std::unique_ptr<whj2::UpperMenu>upperMenu;
+ whj2::GameMenu gameMenu{assets};
+ std::vector<std::pair<std::string,std::string>>history;
+ bool fastForward=false;unsigned selectedSlot=1;unsigned skipStart=0;
  bool fingerActive=false;SDL_FingerID fingerId=0;float fingerX=0,fingerY=0;qlie::Bytes gestureStory;
  bool movieOnly=false,movieCaptured=false,touchOnlyTest=false;
  qlie::Bytes touchSavedStory;std::string touchSavedText;
@@ -177,6 +181,7 @@ struct Frontend {
  text=body;
  messageText->start(text);refreshMessage(true);
  name=speaker;
+ history.emplace_back(name,text);
  images->selectFace(speaker,voiceId);
  playVoice(voiceId);
  sentenceWait.page(true,audio->playing(3));
@@ -219,59 +224,63 @@ struct Frontend {
  }throw std::runtime_error("Unhandled frontend event "+e.type);
  }throw std::runtime_error("Frontend event budget");
  }
- void save(){if(menu||movie->playing())return;
+ std::string slotPrefix(unsigned slot=1)const{char number[16];std::snprintf(number,sizeof(number),"/slot%02u",slot);return saveDir+number;}
+ void save(unsigned slot=1){if(menu||movie->playing())return;
+ qlie::Bytes scene(1280*720*4,0);images->drawScene(scene);transition->blend(scene);if(!hidden){images->drawMessages(scene);images->drawFaces(scene);}qlie::Bytes thumb(160*90*4);for(unsigned y=0;y<90;y++)for(unsigned x=0;x<160;x++)for(unsigned c=0;c<4;c++)thumb[(y*160+x)*4+c]=scene[((y*8)*1280+x*8)*4+c];qlie::write_file(slotPrefix(slot)+".thumbnail",thumb);
  auto b=story.save();
- qlie::write_file(saveDir+"/slot01.story",b);
+ qlie::write_file(slotPrefix(slot)+".story",b);
  qlie::Bytes t(text.begin(),text.end());
- qlie::write_file(saveDir+"/slot01.text",t);
+ qlie::write_file(slotPrefix(slot)+".text",t);
  qlie::Bytes n(name.begin(),name.end());
- qlie::write_file(saveDir+"/slot01.name",n);
- qlie::write_file(saveDir+"/slot01.images",images->save());
- qlie::write_file(saveDir+"/slot01.transition",transition->save());
- whj2::StateWriter flow;flow.str("WHJ2-flow-1");auto waitState=sentenceWait.save();flow.str(std::string(waitState.begin(),waitState.end()));flow.str(pendingBody);flow.str(pendingSpeaker);flow.str(pendingVoice);qlie::write_file(saveDir+"/slot01.flow",flow.bytes);
- qlie::write_file(saveDir+"/slot01.message",messageText->save());
- qlie::write_file(saveDir+"/slot01.audio",audio->save());
+ qlie::write_file(slotPrefix(slot)+".name",n);
+ qlie::write_file(slotPrefix(slot)+".images",images->save());
+ qlie::write_file(slotPrefix(slot)+".transition",transition->save());
+ whj2::StateWriter flow;flow.str("WHJ2-flow-1");auto waitState=sentenceWait.save();flow.str(std::string(waitState.begin(),waitState.end()));flow.str(pendingBody);flow.str(pendingSpeaker);flow.str(pendingVoice);qlie::write_file(slotPrefix(slot)+".flow",flow.bytes);
+ qlie::write_file(slotPrefix(slot)+".message",messageText->save());
+ qlie::write_file(slotPrefix(slot)+".audio",audio->save());
  whj2::StateWriter settings;
  settings.str("WHJ2-mixer-1");
  for(unsigned i=0;i<3;i++){settings.f(volumes[i]);
  settings.n(loops[i]);
  settings.n(audioTimes[i]);
- }qlie::write_file(saveDir+"/slot01.mixer",settings.bytes);
+ }qlie::write_file(slotPrefix(slot)+".mixer",settings.bytes);
+ whj2::StateWriter log;log.str("WHJ2-history-1");log.n(history.size());for(auto&entry:history){log.str(entry.first);log.str(entry.second);}qlie::write_file(slotPrefix(slot)+".history",log.bytes);
  status="現在の状態を保存しました。";
  }
- void load(){if(movie->playing())return;
- if(!std::filesystem::exists(saveDir+"/slot01.story")){status="保存データがありません。";
+ void load(unsigned slot=1){if(movie->playing())return;
+ if(!std::filesystem::exists(slotPrefix(slot)+".story")){status="保存データがありません。";
  return;
- }story.restore(qlie::file(saveDir+"/slot01.story"));
- auto t=qlie::file(saveDir+"/slot01.text"),n=qlie::file(saveDir+"/slot01.name");
+ }story.restore(qlie::file(slotPrefix(slot)+".story"));
+ auto t=qlie::file(slotPrefix(slot)+".text"),n=qlie::file(slotPrefix(slot)+".name");
  text.assign(t.begin(),t.end());
  name.assign(n.begin(),n.end());
- images->restore(qlie::file(saveDir+"/slot01.images"));
- if(std::filesystem::exists(saveDir+"/slot01.transition"))transition->restore(qlie::file(saveDir+"/slot01.transition"));else transition->reset();
- audio->restore(qlie::file(saveDir+"/slot01.audio"),assets);
- auto b=qlie::file(saveDir+"/slot01.mixer");
+ images->restore(qlie::file(slotPrefix(slot)+".images"));
+ if(std::filesystem::exists(slotPrefix(slot)+".transition"))transition->restore(qlie::file(slotPrefix(slot)+".transition"));else transition->reset();
+ audio->restore(qlie::file(slotPrefix(slot)+".audio"),assets);
+ auto b=qlie::file(slotPrefix(slot)+".mixer");
  whj2::StateReader settings{b};
  if(settings.str()!="WHJ2-mixer-1")throw std::runtime_error("Mixer version");
  for(unsigned i=0;i<3;i++){volumes[i]=settings.f();
  loops[i]=settings.n()!=0;
  audioTimes[i]=unsigned(settings.n());
  }settings.end();
- if(std::filesystem::exists(saveDir+"/slot01.flow")){auto flowBytes=qlie::file(saveDir+"/slot01.flow");whj2::StateReader flow{flowBytes};if(flow.str()!="WHJ2-flow-1")throw std::runtime_error("Flow state version");auto state=flow.str();sentenceWait.restore(qlie::Bytes(state.begin(),state.end()));pendingBody=flow.str();pendingSpeaker=flow.str();pendingVoice=flow.str();flow.end();}
+ if(std::filesystem::exists(slotPrefix(slot)+".flow")){auto flowBytes=qlie::file(slotPrefix(slot)+".flow");whj2::StateReader flow{flowBytes};if(flow.str()!="WHJ2-flow-1")throw std::runtime_error("Flow state version");auto state=flow.str();sentenceWait.restore(qlie::Bytes(state.begin(),state.end()));pendingBody=flow.str();pendingSpeaker=flow.str();pendingVoice=flow.str();flow.end();}
  else {sentenceWait=whj2::SentenceWait{};sentenceWait.page();pendingBody=text;pendingSpeaker=name;pendingVoice.clear();}
- if(std::filesystem::exists(saveDir+"/slot01.message"))messageText->restore(qlie::file(saveDir+"/slot01.message"));else {messageText->start(text);messageText->reveal();}refreshMessage();
- menu=false;
+ if(std::filesystem::exists(slotPrefix(slot)+".message"))messageText->restore(qlie::file(slotPrefix(slot)+".message"));else {messageText->start(text);messageText->reveal();}refreshMessage();
+ history.clear();if(std::filesystem::exists(slotPrefix(slot)+".history")){auto bytes=qlie::file(slotPrefix(slot)+".history");whj2::StateReader log{bytes};if(log.str()!="WHJ2-history-1")throw std::runtime_error("History version");auto count=log.n();for(uint64_t i=0;i<count;i++){auto who=log.str();auto words=log.str();history.emplace_back(who,words);}log.end();}
+ menu=false;hidden=false;
  focus=0;
  status="静止画・音声位置を含む状態を読み込みました。";
  }
- void activate(){if(movie->playing()){movie->stop();
+ void activate(){if(!menu&&hidden){hidden=false;return;}if(movie->playing()){movie->stop();
  if(movieOnly)done=true;
  else next();
  return;
- }if(menu){if(focus==0){story.start();
+ }if(menu){if(focus==0){history.clear();story.start();
  menu=false;
  name="";
  next();
- }else if(focus==1)load();
+ }else if(focus==1)gameMenu.open(whj2::GameMenu::Load);
  else done=true;
  }else if(story.state.awaiting){story.choose(unsigned(focus));
  next();
@@ -279,13 +288,37 @@ struct Frontend {
  if(messageText->reveal()){auto action=sentenceWait.prewaiting()?sentenceWait.confirm():whj2::SentenceWait::None;refreshMessage();if(action==whj2::SentenceWait::Next)next();else if(action==whj2::SentenceWait::Resume)next(true);return;}
  auto action=sentenceWait.confirm();if(action==whj2::SentenceWait::Next)next();else if(action==whj2::SentenceWait::Resume)next(true);}
  }
+ void performUi(whj2::GameMenu::Action action){using UI=whj2::GameMenu;
+ if(action==UI::Nothing)return;
+ if(action==UI::No){gameMenu.asking=false;return;}
+ if(action==UI::Yes){action=gameMenu.requested;gameMenu.asking=false;
+ if(action==UI::Slot){save(selectedSlot);gameMenu.close();return;}
+ if(action==UI::Quit){done=true;return;}
+ if(action==UI::Title){if(movie->playing())movie->stop();audio->stopAll();gameMenu.close();menu=true;focus=0;return;}}
+ if(action==UI::Close){gameMenu.close();return;}
+ if(action==UI::Quit||action==UI::Title){gameMenu.ask(action);return;}
+ if(action==UI::Slot){selectedSlot=unsigned(gameMenu.slot());
+ if(gameMenu.panel==UI::Save){if(std::filesystem::exists(slotPrefix(selectedSlot)+".story")){gameMenu.ask(UI::Slot);return;}save(selectedSlot);gameMenu.close();}
+ else if(gameMenu.panel==UI::Load){if(std::filesystem::exists(slotPrefix(selectedSlot)+".story")){load(selectedSlot);gameMenu.close();}else status="保存データがありません。";}
+ }
+ }
+ void openPanel(whj2::GameMenu::Panel panel){if(movie->playing())return;if(panel==whj2::GameMenu::Save&&menu)return;upperMenu->close();status.clear();gameMenu.open(panel);}
  void upperAction(whj2::UpperMenu::Action action){if(action==whj2::UpperMenu::None)return;upperMenu->close();
- if(action==whj2::UpperMenu::Quit){done=true;return;}
- if(action==whj2::UpperMenu::Title){if(movie->playing())movie->stop();audio->stopAll();menu=true;focus=0;return;}
+ if(action==whj2::UpperMenu::Quit){performUi(whj2::GameMenu::Quit);return;}
+ if(action==whj2::UpperMenu::Title){performUi(whj2::GameMenu::Title);return;}
  if(action==whj2::UpperMenu::Screen){auto flags=SDL_GetWindowFlags(window);if(SDL_SetWindowFullscreen(window,(flags&SDL_WINDOW_FULLSCREEN_DESKTOP)?0:SDL_WINDOW_FULLSCREEN_DESKTOP))std::cerr<<"PENDING-UPPERMENU screen mode: "<<SDL_GetError()<<"\n";}
  }
+ void back(){if(gameMenu.asking){performUi(whj2::GameMenu::No);return;}if(gameMenu.visible()){gameMenu.close();return;}if(upperMenu->visible()){upperMenu->close();return;}if(!menu)hidden=!hidden;}
+ void drawPanel(){using UI=whj2::GameMenu;gameMenu.draw(pixels);
+ if(gameMenu.asking){auto prompt=gameMenu.requested==UI::Quit?"ゲームを終了しますか？":gameMenu.requested==UI::Title?"タイトルに戻りますか？":"上書きしてよろしいですか？";line(prompt,440,275,28);return;}
+ if(gameMenu.panel==UI::Save||gameMenu.panel==UI::Load){for(int i=0;i<8;i++){unsigned slot=unsigned(gameMenu.page*8+i+1);int x=i<4?198:834,y=136+(i%4)*135;line("No."+std::to_string(slot),x,y,16,0xff5555);bool exists=std::filesystem::exists(slotPrefix(slot)+".story");if(exists){if(std::filesystem::exists(slotPrefix(slot)+".thumbnail")){whj2::Image thumbnail{160,90,qlie::file(slotPrefix(slot)+".thumbnail")};if(thumbnail.pixels.size()!=160*90*4)throw std::runtime_error("Thumbnail size");whj2::RenderQueue queue;queue.image(thumbnail,whj2::imagePlacement(i<4?27:660,137+(i%4)*135,1,1,0,0,0,160,90),0,255,0,0xffffff);queue.draw(pixels,1280,720);}auto content=qlie::file(slotPrefix(slot)+".text");std::string excerpt(content.begin(),content.end());auto chars=utf8(excerpt);int px=x;for(size_t n=0;n<chars.size()&&n<23;n++){kfont_draw(font,newImage(),chars[n],px,y+22,18,18,0xffffff);px+=chars[n]<128?9:18;}}else line("NO DATA",x,y+24,18,0x999999);}
+ if(!status.empty())line(status,30,677,18);}
+ if(gameMenu.panel==UI::History){size_t offset=std::min(size_t(gameMenu.historyOffset),history.size());for(size_t row=0;row<4&&row+offset<history.size();row++){auto&entry=history[history.size()-1-offset-row];int y=64+int(3-row)*149;line(whj2::messageDisplayName(entry.first),230,y,24);int x=230,cy=y+30;for(auto cp:utf8(entry.second)){int width=cp<128?12:24;if(cp==10||x+width>1140){x=230;cy+=30;if(cp==10)continue;}if(cy>=y+140)break;kfont_draw(font,newImage(),cp,x,cy,width,24,0xffffff);x+=width;}}}
+ }
+ KImage*newImage(){static KImage dst;dst={0,0,1280,720,1280*4,pixels.data()};return &dst;}
  void draw(){if(movie->playing()){pixels=movie->image().pixels;
  upperMenu->draw(pixels);
+ if(gameMenu.visible())drawPanel();
  SDL_UpdateTexture(texture,nullptr,pixels.data(),1280*4);
  SDL_RenderClear(renderer);
  SDL_RenderCopy(renderer,texture,nullptr,nullptr);
@@ -300,11 +333,13 @@ struct Frontend {
  line(status,45,90,20,0xffd58b);
  }if(menu){std::vector<std::string>items={"はじめから","ロード","終了"};
  for(int i=0;i<3;i++)line((focus==i?"▶ ":"　 ")+items[size_t(i)],100,210+i*70,30,focus==i?0xffd58b:0xffffff);
- }else if(!hidden){images->drawMessages(pixels);
+ }else if(!hidden&&gameMenu.panel!=whj2::GameMenu::History){images->drawMessages(pixels);
  if(images->messageVisible())line(whj2::messageDisplayName(name),200,570,26,0xffffff);
  if(story.state.awaiting)for(size_t i=0;i<story.state.choices.size();i++)line((focus==int(i)?"▶ ":"　 ")+story.state.choices[i],80,220+int(i)*50,26,focus==int(i)?0xffd58b:0xffffff);
- }if(!menu&&!hidden)images->drawFaces(pixels);
+ }if(!menu&&!hidden&&gameMenu.panel!=whj2::GameMenu::History)images->drawFaces(pixels);
  if(!menu)upperMenu->draw(pixels);
+ if(gameMenu.visible())drawPanel();
+ if(gameMenu.visible())drawPanel();
  SDL_UpdateTexture(texture,nullptr,pixels.data(),1280*4);
  SDL_RenderClear(renderer);
  SDL_RenderCopy(renderer,texture,nullptr,nullptr);
@@ -317,6 +352,7 @@ struct Frontend {
  }
  void pointer(int px,int py){float x,y;
  SDL_RenderWindowToLogical(renderer,px,py,&x,&y);
+ if(gameMenu.visible()){performUi(gameMenu.tap(x,y));return;}
  if(upperMenu->visible()){upperAction(upperMenu->tap(x,y));return;}
  if(menu){if(y<210||y>=420)return;
  focus=int((y-210)/70);
@@ -332,15 +368,18 @@ struct Frontend {
  else controllers[id]=c;
  std::cerr<<"INPUT controller connected id="<<id<<"\n";
  }
- void controllerKey(Uint8 button){if(button==SDL_CONTROLLER_BUTTON_Y&&!menu){upperMenu->toggle();return;}
- if(upperMenu->visible()){if(button==SDL_CONTROLLER_BUTTON_A)upperAction(upperMenu->confirm());else if(button==SDL_CONTROLLER_BUTTON_B)upperMenu->close();else if(button==SDL_CONTROLLER_BUTTON_DPAD_UP||button==SDL_CONTROLLER_BUTTON_DPAD_LEFT)upperMenu->move(-1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_DOWN||button==SDL_CONTROLLER_BUTTON_DPAD_RIGHT)upperMenu->move(1);return;}
- int count=menu?3:int(story.state.choices.size());
+ void controllerKey(Uint8 button){using UI=whj2::GameMenu;
+ if(gameMenu.visible()){if(button==SDL_CONTROLLER_BUTTON_B)back();else if(button==SDL_CONTROLLER_BUTTON_A)performUi(gameMenu.confirm());else if(button==SDL_CONTROLLER_BUTTON_DPAD_UP)gameMenu.move(0,-1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_DOWN)gameMenu.move(0,1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_LEFT)gameMenu.move(-1,0);else if(button==SDL_CONTROLLER_BUTTON_DPAD_RIGHT)gameMenu.move(1,0);else if(button==SDL_CONTROLLER_BUTTON_LEFTSHOULDER&&(gameMenu.panel==UI::Save||gameMenu.panel==UI::Load))gameMenu.page=(gameMenu.page+14)%15;else if(button==SDL_CONTROLLER_BUTTON_RIGHTSHOULDER&&(gameMenu.panel==UI::Save||gameMenu.panel==UI::Load))gameMenu.page=(gameMenu.page+1)%15;return;}
+ if(button==SDL_CONTROLLER_BUTTON_Y&&!menu){upperMenu->toggle();return;}
+ if(upperMenu->visible()){if(button==SDL_CONTROLLER_BUTTON_A)upperAction(upperMenu->confirm());else if(button==SDL_CONTROLLER_BUTTON_B)back();else if(button==SDL_CONTROLLER_BUTTON_DPAD_UP||button==SDL_CONTROLLER_BUTTON_DPAD_LEFT)upperMenu->move(-1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_DOWN||button==SDL_CONTROLLER_BUTTON_DPAD_RIGHT)upperMenu->move(1);return;}
  switch(button){case SDL_CONTROLLER_BUTTON_A:activate();break;
- case SDL_CONTROLLER_BUTTON_B:if(movie->playing())movie->stop();menu=true;focus=0;if(movieOnly)done=true;break;
- case SDL_CONTROLLER_BUTTON_DPAD_UP:if(count)focus=(focus+count-1)%count;break;
- case SDL_CONTROLLER_BUTTON_DPAD_DOWN:if(count)focus=(focus+1)%count;break;
- case SDL_CONTROLLER_BUTTON_X:save();break;
-
+ case SDL_CONTROLLER_BUTTON_B:back();break;
+ case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:openPanel(UI::Save);break;
+ case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:openPanel(UI::Load);break;
+ case SDL_CONTROLLER_BUTTON_X:openPanel(UI::Settings);break;
+ case SDL_CONTROLLER_BUTTON_DPAD_UP:if(!menu)openPanel(UI::History);else focus=(focus+2)%3;break;
+ case SDL_CONTROLLER_BUTTON_DPAD_DOWN:{int count=menu?3:int(story.state.choices.size());if(count)focus=(focus+1)%count;break;}
+ case SDL_CONTROLLER_BUTTON_DPAD_LEFT:case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:if(story.state.awaiting&&!story.state.choices.empty()){int count=int(story.state.choices.size());focus=(focus+count+(button==SDL_CONTROLLER_BUTTON_DPAD_LEFT?-1:1))%count;}break;
  default:break;
  }}
  int run(unsigned smoke){
@@ -353,7 +392,7 @@ struct Frontend {
  unsigned frames=0;
  uint64_t lastUpdate=SDL_GetTicks64();
  while(!done){auto now=SDL_GetTicks64();
- if(!menu&&!movie->playing()){
+ if(!menu&&!movie->playing()&&!gameMenu.visible()&&!upperMenu->visible()){
  images->update(double(now-lastUpdate));
  messageText->update(double(now-lastUpdate));if(messageText->visible()!=lastMessageVisible)refreshMessage();
  transition->update(double(now-lastUpdate));
@@ -369,19 +408,16 @@ struct Frontend {
  if(!appletMainLoop()){done=true;
  break;
  }auto pad=joycon.poll(now);
- if(pad.upperMenu&&!menu)upperMenu->toggle();
- if(upperMenu->visible()){if(pad.direction)upperMenu->move(pad.direction);if(pad.confirm)upperAction(upperMenu->confirm());else if(pad.back||pad.menu)upperMenu->close();}
- else {
- int count=menu?3:int(story.state.choices.size());
- if(count&&pad.direction)focus=(focus+count+pad.direction)%count;
- if(pad.menu||pad.back){if(movie->playing())movie->stop();
- menu=true;
- focus=0;
- }else if(pad.confirm)activate();
- if(pad.save)save();
- if(pad.load)load();
- if(pad.hide)hidden=!hidden;
- }
+ fastForward=pad.fastForward;
+ if(pad.upperMenu)controllerKey(SDL_CONTROLLER_BUTTON_Y);
+ if(pad.confirm)controllerKey(SDL_CONTROLLER_BUTTON_A);
+ if(pad.back)controllerKey(SDL_CONTROLLER_BUTTON_B);
+ if(pad.menu)controllerKey(SDL_CONTROLLER_BUTTON_X);
+ if(pad.save)controllerKey(SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+ if(pad.load)controllerKey(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
+ if(pad.horizontal)controllerKey(pad.horizontal<0?SDL_CONTROLLER_BUTTON_DPAD_LEFT:SDL_CONTROLLER_BUTTON_DPAD_RIGHT);
+ if(pad.direction)controllerKey(pad.direction<0?SDL_CONTROLLER_BUTTON_DPAD_UP:SDL_CONTROLLER_BUTTON_DPAD_DOWN);
+
 #endif
  if(movie->playing()){movie->update();
  if(!movie->playing()){if(movieOnly){done=true;
@@ -389,30 +425,12 @@ struct Frontend {
  }next();
  }}SDL_Event e;
  while(SDL_PollEvent(&e)){if(e.type==SDL_QUIT)done=true;
-#ifndef __SWITCH__
-else if(e.type==SDL_KEYDOWN&&!e.key.repeat){auto k=e.key.keysym.sym;
- std::cerr<<"INPUT key="<<k<<"\n";
- int count=menu?3:int(story.state.choices.size());
- if(k==SDLK_UP&&count)focus=(focus+count-1)%count;
- else if(k==SDLK_DOWN&&count)focus=(focus+1)%count;
- else if(k==SDLK_RETURN||k==SDLK_SPACE)activate();
- else if(k==SDLK_F5)save();
- else if(k==SDLK_F9)load();
- else if(k==SDLK_ESCAPE){if(movie->playing())movie->stop();
- menu=true;
- focus=0;
- if(movieOnly)done=true;
- }else if(k==SDLK_h)hidden=!hidden;
- }else if(e.type==SDL_MOUSEBUTTONDOWN&&e.button.button==SDL_BUTTON_LEFT&&e.button.which!=SDL_TOUCH_MOUSEID){std::cerr<<"INPUT mouse\n";
- pointer(e.button.x,e.button.y);
- }
-#endif
 else if(e.type==SDL_FINGERDOWN){if(!fingerActive){fingerActive=true;fingerId=e.tfinger.fingerId;fingerX=e.tfinger.x;fingerY=e.tfinger.y;}}
  else if(e.type==SDL_FINGERUP&&fingerActive&&e.tfinger.fingerId==fingerId){fingerActive=false;
  float dx=(e.tfinger.x-fingerX)*1280,dy=(e.tfinger.y-fingerY)*720;
- if(!menu&&upperMenu->swipe(dx,dy)){std::cerr<<"INPUT downward swipe upper menu\n";}
+ if(!menu&&!gameMenu.visible()&&upperMenu->swipe(dx,dy)){std::cerr<<"INPUT downward swipe upper menu\n";}
  else if(std::abs(dx)<24&&std::abs(dy)<24){int w,h;SDL_GetWindowSize(window,&w,&h);std::cerr<<"INPUT touch\n";pointer(int(e.tfinger.x*w),int(e.tfinger.y*h));}
- }else if(e.type==SDL_CONTROLLERDEVICEADDED)controllerAdded(e.cdevice.which);
+ }else if(e.type==SDL_CONTROLLERAXISMOTION&&e.caxis.axis==SDL_CONTROLLER_AXIS_TRIGGERRIGHT){fastForward=e.caxis.value>16000;}else if(e.type==SDL_CONTROLLERDEVICEADDED)controllerAdded(e.cdevice.which);
  else if(e.type==SDL_CONTROLLERDEVICEREMOVED){auto i=controllers.find(e.cdevice.which);
  if(i!=controllers.end()){SDL_GameControllerClose(i->second);
  controllers.erase(i);
@@ -420,48 +438,46 @@ else if(e.type==SDL_FINGERDOWN){if(!fingerActive){fingerActive=true;fingerId=e.t
 #ifndef __SWITCH__
 controllerKey(e.cbutton.button);
 #endif
-}}draw();
+}}if(fastForward&&!menu&&!gameMenu.visible()&&!upperMenu->visible()&&!movie->playing()&&!story.state.awaiting){hidden=false;messageText->reveal();refreshMessage();auto action=sentenceWait.force();if(action==whj2::SentenceWait::Next)next();else if(action==whj2::SentenceWait::Resume)next(true);}
+ draw();
  if(movieOnly&&!movieCaptured&&movie->elapsedMs()>=1000){snapshot("movie.bmp");
  movieCaptured=true;
  std::cerr<<"MOVIE screenshot audio_clock_ms="<<movie->elapsedMs()<<"\n";
  }if(smoke){if(touchOnlyTest){
  auto touch=[](float x,float y){SDL_Event ev{};ev.type=SDL_FINGERDOWN;ev.tfinger.x=x;ev.tfinger.y=y;if(SDL_PushEvent(&ev)<0)throw std::runtime_error(SDL_GetError());ev.type=SDL_FINGERUP;if(SDL_PushEvent(&ev)<0)throw std::runtime_error(SDL_GetError());};
  auto controller=[](Uint8 button){SDL_Event ev{};ev.type=SDL_CONTROLLERBUTTONDOWN;ev.cbutton.button=button;if(SDL_PushEvent(&ev)<0)throw std::runtime_error(SDL_GetError());};
- if(frames==1)touch(0.2f,0.44f);
- if(frames==3&&(!menu||std::filesystem::exists(saveDir+"/slot01.story")))throw std::runtime_error("Empty touch load changed state");
- if(frames==5||frames==60)touch(0.2f,0.34f);
- if(frames==12||frames==36)touch(0.5f,0.5f);
- if(frames==14)touch(0.76f,0.04f);
- if(frames==16&&(menu||std::filesystem::exists(saveDir+"/slot01.story")))throw std::runtime_error("Removed HUD hotspot is still active");
- if(frames==24)controller(SDL_CONTROLLER_BUTTON_X);
- if(frames==26){touchSavedStory=qlie::file(saveDir+"/slot01.story");touchSavedText=text;}
- if(frames==18){gestureStory=story.save();controller(SDL_CONTROLLER_BUTTON_Y);}
- if(frames==20){if(!upperMenu->visible()||story.save()!=gestureStory)throw std::runtime_error("Y menu changed story");controller(SDL_CONTROLLER_BUTTON_Y);}
- if(frames==38)load();
- if(frames==42){gestureStory=story.save();SDL_Event ev{};ev.type=SDL_FINGERDOWN;ev.tfinger.x=.5f;ev.tfinger.y=.2f;SDL_PushEvent(&ev);ev.type=SDL_FINGERUP;ev.tfinger.y=.5f;SDL_PushEvent(&ev);}
- if(frames==44){if(!upperMenu->visible()||story.save()!=gestureStory)throw std::runtime_error("Swipe menu changed story");snapshot("upper-menu.bmp");controller(SDL_CONTROLLER_BUTTON_Y);}
- if(frames==40&&(story.save()!=touchSavedStory||text!=touchSavedText))throw std::runtime_error("Touch load mismatch");
- if(frames==48)controller(SDL_CONTROLLER_BUTTON_B);
- if(frames==50&&!menu)throw std::runtime_error("Touch menu did not open");
- if(frames==62&&menu)throw std::runtime_error("Touch new game did not activate");
- if(++frames>=smoke){snapshot("touch.bmp");std::cerr<<"TARGET INPUT PASS touch / Y and swipe upper menu / save-load methods / new-game\n";done=true;}continue;
- }if(frames==1 || (frames>=12 && frames%12==0)){SDL_Event input{};
- switch((frames/12)%4){case 0:input.type=SDL_KEYDOWN;
- input.key.keysym.sym=SDLK_RETURN;
- break;
- case 1:input.type=SDL_MOUSEBUTTONDOWN;
- input.button.button=SDL_BUTTON_LEFT;
- input.button.x=640;
- input.button.y=360;
- break;
- case 2:input.type=SDL_FINGERDOWN;
- input.tfinger.x=0.5f;
- input.tfinger.y=0.5f;
- break;
- case 3:input.type=SDL_CONTROLLERBUTTONDOWN;
- input.cbutton.button=SDL_CONTROLLER_BUTTON_A;
- break;
- }if(SDL_PushEvent(&input)<0)throw std::runtime_error(SDL_GetError());
+ if(frames==1)controller(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
+ if(frames==3){if(gameMenu.panel!=whj2::GameMenu::Load)throw std::runtime_error("R did not open load panel");controller(SDL_CONTROLLER_BUTTON_A);}
+ if(frames==5){if(gameMenu.panel!=whj2::GameMenu::Load||std::filesystem::exists(slotPrefix()+".story"))throw std::runtime_error("Empty slot load changed state");controller(SDL_CONTROLLER_BUTTON_B);}
+ if(frames==7)controller(SDL_CONTROLLER_BUTTON_A);
+ if(frames==14){gestureStory=story.save();controller(SDL_CONTROLLER_BUTTON_B);}
+ if(frames==16){if(!hidden||story.save()!=gestureStory||menu)throw std::runtime_error("B did not hide text in place");controller(SDL_CONTROLLER_BUTTON_A);}
+ if(frames==18){if(hidden||story.save()!=gestureStory)throw std::runtime_error("A did not restore text in place");controller(SDL_CONTROLLER_BUTTON_LEFTSHOULDER);}
+ if(frames==20){if(gameMenu.panel!=whj2::GameMenu::Save||std::filesystem::exists(slotPrefix()+".story"))throw std::runtime_error("L saved without slot confirmation");snapshot("save-menu.bmp");touch(.25f,.25f);}
+ if(frames==22){touchSavedStory=qlie::file(slotPrefix()+".story");touchSavedText=text;controller(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);}
+ if(frames==24){if(gameMenu.panel!=whj2::GameMenu::Load)throw std::runtime_error("R did not open load");snapshot("load-menu.bmp");controller(SDL_CONTROLLER_BUTTON_A);}
+ if(frames==26){if(gameMenu.visible()||story.save()!=touchSavedStory||text!=touchSavedText)throw std::runtime_error("Selected slot load mismatch");controller(SDL_CONTROLLER_BUTTON_X);}
+ if(frames==28){if(gameMenu.panel!=whj2::GameMenu::Settings)throw std::runtime_error("X did not open settings");snapshot("settings-menu.bmp");controller(SDL_CONTROLLER_BUTTON_B);}
+ if(frames==30)controller(SDL_CONTROLLER_BUTTON_DPAD_UP);
+ if(frames==32){if(gameMenu.panel!=whj2::GameMenu::History||history.empty())throw std::runtime_error("Up did not open populated history");snapshot("history-menu.bmp");controller(SDL_CONTROLLER_BUTTON_B);}
+ if(frames==34){gestureStory=story.save();controller(SDL_CONTROLLER_BUTTON_Y);}
+ if(frames==36){if(!upperMenu->visible()||story.save()!=gestureStory)throw std::runtime_error("Y changed story");controller(SDL_CONTROLLER_BUTTON_Y);}
+ if(frames==38){gestureStory=story.save();SDL_Event ev{};ev.type=SDL_FINGERDOWN;ev.tfinger.x=.5f;ev.tfinger.y=.2f;SDL_PushEvent(&ev);ev.type=SDL_FINGERUP;ev.tfinger.y=.5f;SDL_PushEvent(&ev);}
+ if(frames==40){if(!upperMenu->visible()||story.save()!=gestureStory)throw std::runtime_error("Swipe changed story");snapshot("upper-menu.bmp");controller(SDL_CONTROLLER_BUTTON_Y);}
+ if(frames==42){skipStart=advances;SDL_Event ev{};ev.type=SDL_CONTROLLERAXISMOTION;ev.caxis.axis=SDL_CONTROLLER_AXIS_TRIGGERRIGHT;ev.caxis.value=32767;SDL_PushEvent(&ev);}
+ if(frames==48){if(advances<=skipStart)throw std::runtime_error("ZR did not force advance");SDL_Event ev{};ev.type=SDL_CONTROLLERAXISMOTION;ev.caxis.axis=SDL_CONTROLLER_AXIS_TRIGGERRIGHT;ev.caxis.value=0;SDL_PushEvent(&ev);}
+ if(frames==50){if(fastForward)throw std::runtime_error("ZR release did not stop");controller(SDL_CONTROLLER_BUTTON_LEFTSHOULDER);}
+ if(frames==52)controller(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
+ if(frames==54){if(gameMenu.page!=1)throw std::runtime_error("Save page navigation");controller(SDL_CONTROLLER_BUTTON_A);}
+ if(frames==56){if(!std::filesystem::exists(slotPrefix(9)+".story"))throw std::runtime_error("Slot 9 missing");controller(SDL_CONTROLLER_BUTTON_Y);}
+ if(frames==58)controller(SDL_CONTROLLER_BUTTON_A);
+ if(frames==60){if(!gameMenu.asking||done)throw std::runtime_error("Quit bypassed confirmation");snapshot("confirmation.bmp");controller(SDL_CONTROLLER_BUTTON_B);}
+ if(frames==62){if(gameMenu.visible())throw std::runtime_error("B did not cancel dialog");controller(SDL_CONTROLLER_BUTTON_DPAD_UP);}
+ if(frames==64){if(history.size()<4||gameMenu.panel!=whj2::GameMenu::History)throw std::runtime_error("History lost previous pages");snapshot("history-menu.bmp");controller(SDL_CONTROLLER_BUTTON_DPAD_UP);}
+ if(frames==66){if(gameMenu.historyOffset!=1)throw std::runtime_error("History navigation");controller(SDL_CONTROLLER_BUTTON_B);}
+ if(frames==68&&gameMenu.visible())throw std::runtime_error("History cancel");
+ if(++frames>=smoke){snapshot("touch.bmp");std::cerr<<"TARGET INPUT PASS L/R panels and slots / X settings / history / B text visibility / A confirm / Y and swipe / ZR hold-release / cancel dialog\n";done=true;}continue;
+ }if(frames==1 || (frames>=12 && frames%12==0)){SDL_Event input{};input.type=SDL_CONTROLLERBUTTONDOWN;input.cbutton.button=SDL_CONTROLLER_BUTTON_A;if(SDL_PushEvent(&input)<0)throw std::runtime_error(SDL_GetError());
  }if(frames==4)save();
  if(frames==5){auto before=story.save();
  std::string expected=text;

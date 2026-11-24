@@ -23,6 +23,7 @@ SentenceWait::Action SentenceWait::tick(double ms,bool voicePlaying){if(stage==S
  remaining=std::max(0.,remaining-std::max(0.,ms));if(voiceBound&&!voicePlaying)remaining=0;if(remaining==0)return Action(finishDelay());return None;
 }
 SentenceWait::Action SentenceWait::confirm(){if(stage==Stage::Delay){if(!interruptible)return None;remaining=0;return Action(finishDelay());}if(stage==Stage::Message){cancel();return Next;}if(stage==Stage::Ready)return Action(finishDelay());return None;}
+SentenceWait::Action SentenceWait::force(){if(stage==Stage::Idle)return None;auto result=continuation?Resume:Next;cancel();return result;}
 qlie::Bytes SentenceWait::save()const{StateWriter w;w.str("WHJ2-wait-1");w.str(mode);w.f(float(duration));w.f(float(remaining));w.n(unsigned(stage));w.n(automatic);w.n(interruptible);w.n(message);w.n(continuation);w.n(voiceBound);return w.bytes;}
 void SentenceWait::restore(const qlie::Bytes&b){StateReader r{b};if(r.str()!="WHJ2-wait-1")throw std::runtime_error("Wait state version");mode=r.str();duration=r.f();remaining=r.f();auto value=r.n();if(value>3)throw std::runtime_error("Wait stage");stage=Stage(value);automatic=r.n()!=0;interruptible=r.n()!=0;message=r.n()!=0;continuation=r.n()!=0;voiceBound=r.n()!=0;r.end();}
 }

@@ -25,8 +25,7 @@ Switch需要devkitPro、devkitA64、libnx和Switch portlibs：
 
 ## 输入
 
-目标输入为Joy-Con与触摸。A确认/推进，B或＋/－返回菜单，上下方向/摇杆选择，X保存、Y调出顶部栏；单侧Joy-Con另有SL确认、SR返回、L/R保存、ZL/ZR读档。触摸支持推进、菜单项和分支选择。游戏画面不显示自制按键说明。下滑或Y可调出原版顶部栏，再按Y或B可收起；顶部栏使用原版退出、回标题与屏幕切换按钮。ZL/ZR保留读档入口。
-
+目标输入为Joy-Con与触摸。L打开存档界面，R打开读档界面，A点击/确认，B取消；正文中B隐藏/显示文字框。X打开菜单页面，十字键上打开历史文字，按住ZR强制快进、松开停止，选项处不自动选择。Y或屏幕下滑调出原版顶部栏，再按Y/B收起。存读档界面中方向键选择槽位，L/R翻页。游戏画面不显示自制按键说明或常驻触摸按钮。
 这些入口已接线，但仍缺实际Joy-Con和Switch触摸验收。SDL注入事件仅验证输入处理和状态流程。
 
 ## 实现范围
@@ -35,7 +34,7 @@ Switch需要devkitPro、devkitA64、libnx和Switch portlibs：
 - 全局二维图元排序、包含零图元控制层的变换栈、原版定点混合、矩形、部分周期/随机轨道、上下文尺寸、位图粒子和嵌套动画时钟。
 - 双纹理位图遮罩、蓝通道阈值。动态遮罩和影片帧保有队列内快照，静态图片继续共享。
 - 角色基础动作与独立立绘替换槽、命名/数字动作、直接后向关键帧循环。显式与自动头像选择、逐页/持续显隐、前景层。
-- 图层位置/颜色渐变、相对位移、播放速度。原消息框显示/隐藏动画、、逐字正文、姓名别名，以及spd速度标签与pc居中标签。
+- 图层位置/颜色渐变、相对位移、播放速度。原消息框显示/隐藏动画、逐字正文、姓名别名，以及spd速度标签与pc居中标签。
 - 音乐/音效、顶层动画内嵌音频及独立direct总线、音量和播放位置保存。独立Theora影片按音频采样时钟播放。
 - 场景交叠/cut/catch、点击/固定/正文等待和原生等待续行。图像、音轨、过渡、逐字及等待状态可以保存和恢复。
 
@@ -69,3 +68,9 @@ build/whj2-runtime /absolute/path/to/game /absolute/path/to/empty-test-saves --t
 参考kisaku-switch-runtime固定提交`95d71d9bcaee9dc7ab48b4bda8d3139a817e6cc7`。本作QLIE与参考项目AI6WIN不同，没有复用其VM；适用字体、媒体和构建基础的来源见THIRD_PARTY.md。
 
 源码遵循GPL-2.0-or-later。原版游戏数据不在源码许可范围内。
+
+### Controller and touch navigation
+
+L opens the save panel; R opens the load panel. A confirms a selected slot, and B cancels a panel. X opens the settings page, Up opens text history, and held ZR forces text advance until released or a choice is reached. During dialogue B hides or restores the text box; A first restores hidden text without advancing. Y or a downward swipe opens the original upper menu. No controller legend or permanent touch overlay is drawn.
+
+Save/load panels use the original resources, 15 pages of eight local slots, and small scene thumbnails. History contains displayed pages and is included with each slot. The settings page layout is available, but its configuration widgets are still pending; opening the page is not full settings parity. Confirmation dialogs currently use original artwork without the original transition timing. Physical controller/touch and Switch runtime acceptance remain pending.

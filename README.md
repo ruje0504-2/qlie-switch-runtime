@@ -34,7 +34,7 @@ Mac和Switch运行循环统一限制为最高60 FPS，保留垂直同步；输�
 
 ## 输入
 
-目标输入为Joy-Con与触摸。L打开存档界面，R打开读档界面，A点击/确认，B取消；正文中B隐藏/显示文字框。X打开菜单页面，十字键上打开历史文字，ZL切换自动播放，ZR切换仅已读快进，再按一次关闭，遇到未读或选项停止。Y或屏幕下滑调出原版顶部栏，再按Y/B收起。存读档界面中方向键选择槽位，L/R翻页。游戏画面不显示自制按键说明或常驻触摸按钮。−键切换左下角FPS显示，默认隐藏；采用biko3参考的浅蓝黑影像素字，显示实际每秒提交帧率，60FPS上限始终独立生效。
+目标输入为Joy-Con与触摸。L打开存档界面，R打开读档界面，A点击/确认，B取消；正文中B隐藏/显示文字框。X打开菜单页面，十字键上打开历史文字，ZL切换自动播放，ZR按设置切换快进，再按一次关闭；仅已读模式遇未读停止，全部模式包含未读，两种模式均在选项停止。Y或屏幕下滑调出原版顶部栏，再按Y/B收起。存读档界面中方向键选择槽位，L/R翻页。游戏画面不显示自制按键说明或常驻触摸按钮。−键切换左下角FPS显示，默认隐藏；采用biko3参考的浅蓝黑影像素字，显示实际每秒提交帧率，60FPS上限始终独立生效。
 标题花海的左右视角跟随触摸按下与拖动；左摇杆左右调整视角，松开后保留角度。十字键独立控制菜单选项。
 这些入口已接线，但仍缺实际Joy-Con和Switch触摸验收。SDL注入事件仅验证输入处理和状态流程。
 
@@ -53,7 +53,7 @@ Mac和Switch运行循环统一限制为最高60 FPS，保留垂直同步；输�
 CG目录支持原33组784个差分资源，按已显示资源解锁整组；支持原按钮分页、图片/动画差分、放大和平移，以及CG/回想/音乐页面互跳。显示与已读记录保存在进度v3，旧进度v1/v2可读取，缺失的已读记录保持未读。动画CG按原关键帧时间循环；34个影片资源中24个音轨解码后为全零PCM，10个无音轨。完整原UI转场仍待接线。
 剧情图像的rep替换按原脚本顺序应用，支持遮罩/粒子位图引用、实例隔离和存读档恢复；更换基础文件会清除旧替换。
 回想播放时，X打开的菜单提供独立返回回想目录操作；取消菜单继续播放，返回标题保持原义。
-ZL切换自动播放，ZR按下切换仅已读快进且始终停止在未读或选项处。原位置的触摸跳过按钮继续遵守设置中的仅已读/含未读模式。已读页面独立持久化，flow2保存当前页标识并兼容flow1。
+ZL切换自动播放，ZR与原位置的触摸跳过按钮共用设置中的仅已读/含未读模式，并在选项处停止。已读页面独立持久化，flow2保存当前页标识并兼容flow1。
 
 回想目录使用原版两页缩略图和按钮，按实际经过的剧情标签解锁；回放保留原选项并在结束后返回目录，回放期间禁用存读档。当前仅完成目录和播放/返回接线，尚未完成所有回想段落的视听验收。
 
@@ -94,7 +94,7 @@ build/whj2-runtime /absolute/path/to/game /absolute/path/to/empty-test-saves --t
 
 ### Controller and touch navigation
 
-L opens the save panel; R opens the load panel. A confirms a selected slot, and B cancels a panel. X opens the settings page, Up opens text history, ZL toggles auto-play, and ZR toggles read-only skipping, stopping at an unread page or a choice. During dialogue B hides or restores the text box; A first restores hidden text without advancing. Y or a downward swipe opens the original upper menu. No controller legend or permanent touch overlay is drawn.
+L opens the save panel; R opens the load panel. A confirms a selected slot, and B cancels a panel. X opens the settings page, Up opens text history, ZL toggles auto-play, and ZR toggles skip according to the configured read/unread modeping, stopping at an unread page or a choice. During dialogue B hides or restores the text box; A first restores hidden text without advancing. Y or a downward swipe opens the original upper menu. No controller legend or permanent touch overlay is drawn.
 
 Save/load panels use the original resources, 15 pages of eight local slots, and small scene thumbnails. History contains displayed pages and is included with each slot. The settings page supports nine sliders for text speed, text-window opacity, auto-play delay, and six volume controls, plus click-to-stop voice and auto-play voice-wait toggles. Sliders support captured touch drags and controller adjustment, with local persistence and reset confirmation. The original auto-play button controls timed progression and waits for text completion and, when selected, voice completion. Remaining font, display-quality, and character-voice controls are pending; this is not full settings parity. Confirmation dialogs currently use original artwork without the original transition timing. Physical controller/touch and Switch runtime acceptance remain pending.
 

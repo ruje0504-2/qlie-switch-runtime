@@ -361,7 +361,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  void refreshMessage(bool show=false){images->setMessageImage(messageText->render(font,images->messageStyle()),show);lastMessageVisible=messageText->visible();}
  void recordCurrentRead(){if(!menu&&!hidden&&!gameMenu.visible()&&!movie->playing()&&images->messageVisible()&&!currentPageKey.empty()&&messageText->finished()&&progress.markRead(currentPageKey))qlie::write_file(saveDir+"/system.progress",progress.save());}
  void toggleAuto(){if(menu||movie->playing()||gameMenu.visible()||upperMenu->visible()||story.state.awaiting)return;autoPlay.enabled=!autoPlay.enabled;normalSkip=false;hidden=false;uiSound("Sys_OnClick");}
- void toggleSkip(bool onlyRead=false){if(menu||movie->playing()||gameMenu.visible()||upperMenu->visible()||story.state.awaiting)return;if(normalSkip){normalSkip=false;return;}autoPlay.enabled=false;skipReadOnly=onlyRead||settings.get("SkipMode")==1;normalSkip=!skipReadOnly||progress.wasRead(currentPageKey);if(normalSkip){autoPlay.enabled=false;hidden=false;}}
+ void toggleSkip(){if(menu||movie->playing()||gameMenu.visible()||upperMenu->visible()||story.state.awaiting)return;if(normalSkip){normalSkip=false;return;}autoPlay.enabled=false;skipReadOnly=settings.get("SkipMode")==1;normalSkip=!skipReadOnly||progress.wasRead(currentPageKey);if(normalSkip){autoPlay.enabled=false;hidden=false;}}
 
  void next(bool resume=false){if(menu||story.state.finished)return;
   using LoadClock=std::chrono::steady_clock;
@@ -819,7 +819,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }if(!window)pollNativeTouch();auto pad=joycon.poll(now);
  titleAxis=pad.viewAxis;titleAxisY=pad.viewAxisY;
  if(pad.autoToggle)toggleAuto();
- if(pad.skipToggle)toggleSkip(true);
+ if(pad.skipToggle)toggleSkip();
  if(pad.fps)controllerKey(SDL_CONTROLLER_BUTTON_BACK);
  if(pad.upperMenu)controllerKey(SDL_CONTROLLER_BUTTON_Y);
  if(pad.confirm)controllerKey(SDL_CONTROLLER_BUTTON_A);
@@ -846,7 +846,7 @@ else if(e.type==SDL_FINGERDOWN){if(!fingerActive){fingerActive=true;fingerId=e.t
  if(fingerUiDrag){touchDrag(e.tfinger.x,e.tfinger.y,false);gameMenu.endDrag();fingerUiDrag=false;if(gameMenu.panel==whj2::GameMenu::Settings)applySettings();}
  else if(!menu&&!gameMenu.visible()&&upperMenu->swipe(dx,dy)){std::cerr<<"INPUT downward swipe upper menu\n";}
  else if(std::abs(dx)<24&&std::abs(dy)<24){int w,h;windowSize(&w,&h);std::cerr<<"INPUT touch\n";pointer(int(e.tfinger.x*w),int(e.tfinger.y*h));}
- }else if(e.type==SDL_CONTROLLERAXISMOTION&&e.caxis.axis==SDL_CONTROLLER_AXIS_LEFTY){titleAxisY=std::abs(e.caxis.value)>6000?e.caxis.value/32767.f:0;}else if(e.type==SDL_CONTROLLERAXISMOTION&&e.caxis.axis==SDL_CONTROLLER_AXIS_LEFTX){titleAxis=std::abs(e.caxis.value)>6000?e.caxis.value/32767.f:0;}else if(e.type==SDL_CONTROLLERAXISMOTION&&e.caxis.axis==SDL_CONTROLLER_AXIS_TRIGGERLEFT){bool held=e.caxis.value>16000;if(held&&!leftTrigger)toggleAuto();leftTrigger=held;}else if(e.type==SDL_CONTROLLERAXISMOTION&&e.caxis.axis==SDL_CONTROLLER_AXIS_TRIGGERRIGHT){bool held=e.caxis.value>16000;if(held&&!rightTrigger)toggleSkip(true);rightTrigger=held;}else if(e.type==SDL_CONTROLLERDEVICEADDED)controllerAdded(e.cdevice.which);
+ }else if(e.type==SDL_CONTROLLERAXISMOTION&&e.caxis.axis==SDL_CONTROLLER_AXIS_LEFTY){titleAxisY=std::abs(e.caxis.value)>6000?e.caxis.value/32767.f:0;}else if(e.type==SDL_CONTROLLERAXISMOTION&&e.caxis.axis==SDL_CONTROLLER_AXIS_LEFTX){titleAxis=std::abs(e.caxis.value)>6000?e.caxis.value/32767.f:0;}else if(e.type==SDL_CONTROLLERAXISMOTION&&e.caxis.axis==SDL_CONTROLLER_AXIS_TRIGGERLEFT){bool held=e.caxis.value>16000;if(held&&!leftTrigger)toggleAuto();leftTrigger=held;}else if(e.type==SDL_CONTROLLERAXISMOTION&&e.caxis.axis==SDL_CONTROLLER_AXIS_TRIGGERRIGHT){bool held=e.caxis.value>16000;if(held&&!rightTrigger)toggleSkip();rightTrigger=held;}else if(e.type==SDL_CONTROLLERDEVICEADDED)controllerAdded(e.cdevice.which);
  else if(e.type==SDL_CONTROLLERDEVICEREMOVED){auto i=controllers.find(e.cdevice.which);
  if(i!=controllers.end()){SDL_GameControllerClose(i->second);
  controllers.erase(i);

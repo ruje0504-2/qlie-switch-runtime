@@ -866,7 +866,10 @@ else if(e.type==SDL_FINGERDOWN){if(!fingerActive){fingerActive=true;fingerId=e.t
  if(i!=controllers.end()){SDL_GameControllerClose(i->second);
  controllers.erase(i);
  }}else if(e.type==SDL_CONTROLLERBUTTONDOWN){std::cerr<<"INPUT controller button="<<unsigned(e.cbutton.button)<<"\n";
-#ifndef __SWITCH__
+#ifdef __SWITCH__
+// Only explicit diagnostics inject SDL button events on the native input path.
+if(smoke)controllerKey(e.cbutton.button);
+#else
 controllerKey(e.cbutton.button);
 #endif
 }}recordCurrentRead();if(normalSkip&&!menu&&!gameMenu.visible()&&!upperMenu->visible()&&!movie->playing()&&!story.state.awaiting){hidden=false;messageText->reveal();refreshMessage();auto action=sentenceWait.force();if(action==whj2::SentenceWait::Next)next();else if(action==whj2::SentenceWait::Resume)next(true);}

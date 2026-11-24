@@ -1,45 +1,49 @@
-# QLIE Switch 运行时
+# QLIE Switch Runtime
 
-[![GPL-2.0-or-later](https://img.shields.io/badge/GPL--2.0--or--later-blue)](LICENSE)
+[![GPL-2.0-or-later](https://img.shields.io/badge/license-GPL--2.0--or--later-blue)](LICENSE)
 
-面向 Nintendo Switch/Horizon 的原生 QLIE 运行时，也可在 Mac 上构建和验证。目前仅适配《美少女万华镜2》日文版，尚未完成全部实机验收。
+面向 Nintendo Switch/Horizon 的原生 QLIE 运行时，也可在 Mac 上运行。当前适配《美少女万華鏡2》日文原版。开发版 NRO `bc2e4ec` 已通过 Switch 实机使用验收。本次公开更新范围为文档，NSP 的 HOME 启动单独验收。
 
-- 通用引擎：`libqlie-runtime.a`
-- 游戏适配：`games/whj2/`
-- 仓库不包含游戏资源、图标、密钥、存档或安装包。
+[优化手册](docs/optimization/README.md)记录 deko3d 渲染、影片硬解、资源预读、音频和界面的实现及测量范围。
 
-[优化手册](docs/optimization/README.md)记录图形、影片、资源调度和界面的实现与测量结果。
+## 引擎与适配
+
+`libqlie-runtime.a` 可独立构建，包含 FilePackVer3.0 资源读取、脚本解析、图像、音频和影片。WHJ2 的入口、菜单和配置在 `games/whj2/`。FilePackVer3.1 尚未支持。
+
+正式开发版默认使用 deko3d，最高 60 FPS。Joy-Con 和触摸可控制剧情、存读档、设置和历史。存读档与设置使用原版窗口动画，CG、回想和音乐使用原版鉴赏进退场。
 
 ## 构建
 
-Mac 需要 C/C++17、SDL2、FreeType、libpng、libjpeg 和 FFmpeg：
+Mac 需要 C/C++17、Python 3、SDL2、FreeType、libpng、libjpeg 和 FFmpeg 开发库。
 
 ```sh
-./build-host.sh --runtime-only
-build/qlie-switch-runtime /path/to/game /path/to/saves
+./build-host.sh
+build/qlie-switch-runtime /absolute/path/to/game /absolute/path/to/independent-saves
 ```
 
-Switch 需要 devkitPro、devkitA64、libnx 及对应依赖，版本见 [构建依赖配置](config/graphics-dependencies.json)：
+Switch 需要 devkitPro、devkitA64、libnx 和 Switch portlibs。
 
 ```sh
 python3 tools/fetch_graphics_sdk.py
 ./build-switch.sh
 ```
 
-输出为 `build-switch/qlie-switch-runtime.nro`。只构建通用引擎时，两种构建脚本均可使用 `--engine-only`。
+产物为 `build-switch/qlie-switch-runtime.nro`。NRO 默认从 `sdmc:/switch/whj2/game` 读游戏数据，存档写入 `sdmc:/switch/whj2/saves`。使用本地原版七个封包、`DLL/key.fkey` 和 256 字节的 `DLL/icon.key`。独立密钥可用 `tools/extract_icon_key.py` 从本地原版提取。两平台的构建脚本均支持 `--engine-only`。
 
-## Switch 运行
+## 本地直装包
 
-将 NRO 放入 `sdmc:/switch/whj2/`，游戏数据放入其 `game/` 子目录，存档保存在 `saves/`。运行时不执行 Windows EXE；所需 `DLL/key.fkey` 和 `DLL/icon.key` 应从自己的游戏副本准备，提取工具见 [extract_icon_key.py](tools/extract_icon_key.py)。
+打包还需要 FFmpeg、hacbrewpack、hactool 和本地 Switch keyset。
 
-默认使用 deko3d。支持 Joy-Con 和触摸：A 确认、B 取消，L/R 存读档，X 设置，十字键上查看历史，ZL 自动播放，ZR 切换快进。
+```sh
+./build-switch.sh --elf-only
+python3 tools/package_nsp.py \
+  --game /absolute/path/to/game \
+  --icon /absolute/path/to/icon.jpg \
+  --output /absolute/path/to/whj2.nsp
+```
 
-## 当前范围
-
-已接入剧情、图像动画、音视频、存读档及鉴赏界面。Mac 验证和 Switch 构建结果不代表完整实机验收。
-
-当前支持 `FilePackVer3.0`。《罪と罰の少女》的 `3.1` 格式仅完成差异调查，尚未适配。
+WHJ2 直装配置为 Title ID `01007F8E5C120000`、版本 `1.0.1`。包内游戏数据通过 RomFS 读取，直装启动要求成功挂载系统 SaveData。
 
 ## 许可
 
-源码采用 [GPL 第 2 版或任何后续版本](LICENSE)。第三方来源与许可见 [THIRD_PARTY.md](THIRD_PARTY.md)。游戏资源不属于本项目源码许可范围。
+项目采用 GPL v2 或更高版本。见 [LICENSE](LICENSE) 和[第三方许可](THIRD_PARTY.md)。游戏资源、图标、密钥、存档和安装包在本地准备。

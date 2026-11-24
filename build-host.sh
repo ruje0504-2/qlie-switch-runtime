@@ -14,7 +14,7 @@ $cxx -std=c++17 $common $($pc --cflags libpng libjpeg) src/qlie.cpp src/image.cp
 
 $cxx -std=c++17 $common $($pc --cflags libpng libjpeg) src/qlie.cpp src/image.cpp src/animation.cpp src/particles.cpp tools/animation_probe.cpp $($pc --libs libpng libjpeg) -o build/animation-probe
 
-$cxx -std=c++17 $common $($pc --cflags sdl2 freetype2 libpng libjpeg) src/qlie.cpp src/story.cpp src/audio.cpp src/image.cpp src/animation.cpp src/particles.cpp src/scene_images.cpp src/gradient_mask.cpp src/render_queue.cpp src/voice.cpp src/movie.cpp src/mac_runtime.cpp build/font.o build/video.o $($pc --libs sdl2 freetype2 libavformat libavcodec libswscale libswresample libavutil libpng libjpeg) -o build/whj2-runtime
+$cxx -std=c++17 $common $($pc --cflags sdl2 freetype2 libpng libjpeg) src/qlie.cpp src/story.cpp src/audio.cpp src/image.cpp src/animation.cpp src/particles.cpp src/scene_images.cpp src/gradient_mask.cpp src/render_queue.cpp src/voice.cpp src/movie.cpp src/scene_transition.cpp src/mac_runtime.cpp build/font.o build/video.o $($pc --libs sdl2 freetype2 libavformat libavcodec libswscale libswresample libavutil libpng libjpeg) -o build/whj2-runtime
 
 $cxx -std=c++17 $common $($pc --cflags libpng libjpeg) src/qlie.cpp src/story.cpp src/image.cpp src/animation.cpp src/particles.cpp src/scene_images.cpp src/gradient_mask.cpp src/render_queue.cpp tools/presentation_probe.cpp build/video.o $($pc --libs libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -o build/presentation-probe
 
@@ -27,3 +27,5 @@ $cxx -std=c++17 $common src/render_queue.cpp tools/render_queue_probe.cpp -o bui
 $cxx -std=c++17 $common src/qlie.cpp src/image.cpp src/animation.cpp src/particles.cpp tools/particle_probe.cpp $($pc --cflags --libs libpng libjpeg) -o build/particle-probe
 
 $cxx -std=c++17 $common $($pc --cflags sdl2 libpng libjpeg) src/qlie.cpp src/story.cpp src/image.cpp src/animation.cpp src/particles.cpp src/scene_images.cpp src/gradient_mask.cpp src/render_queue.cpp src/audio.cpp tools/embedded_audio_probe.cpp build/video.o $($pc --libs sdl2 libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -o build/embedded-audio-probe
+
+$cxx -std=c++17 $common $($pc --cflags libpng libjpeg) src/qlie.cpp src/story.cpp src/image.cpp src/animation.cpp src/particles.cpp src/scene_images.cpp src/scene_transition.cpp src/gradient_mask.cpp src/render_queue.cpp tools/transition_probe.cpp build/video.o $($pc --libs libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -o build/transition-probe

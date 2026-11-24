@@ -65,3 +65,7 @@ Top-level animation sound events decode embedded ABMP members on 16 direct-sound
 Image commands support timed position/scale/rotation/priority and per-channel color/opacity transitions, axial offsets, and animation playback speed. Retargeting starts from the displayed value. Active transitions survive saves. Step, linear, outquart and inquart easing are implemented; additional easing modes remain reported as incomplete.
 
 Character base animations use a per-layer portrait in image slot 0 without modifying shared animation resources. Named and numeric motions are supported. Direct backward key jumps preserve their elapsed remainder; conditional key jumps remain incomplete. Empty portrait slots stay empty, and portrait replacements survive saves.
+
+Sentence transitions support captured-scene overlaps, cuts and template durations. Captures and transition progress survive saves; interrupted overlaps start from the currently displayed scene. Rule masks, mosaic and animation transition modes, sentence wait policies and automatic face portraits remain incomplete and reported.
+
+Queued gradient masks and decoded video frames retain an immutable per-queue snapshot until drawing completes, so repeated animated assets cannot overwrite another instance’s pending frame. Static textures continue to use shared references.

@@ -3,6 +3,7 @@
 #include "story.hpp"
 #include "audio.hpp"
 #include "scene_images.hpp"
+#include "scene_transition.hpp"
 #include "state_io.hpp"
 #include "movie.hpp"
 #include "joycon.hpp"
@@ -40,6 +41,7 @@ struct Frontend {
  whj2::Story story;
  std::unique_ptr<whj2::Audio>audio;
  std::unique_ptr<whj2::SceneImages>images;
+ std::unique_ptr<whj2::SceneTransition>transition;
  std::unique_ptr<whj2::Movie>movie;
  std::unique_ptr<whj2::VoiceResolver>voices;
  bool movieOnly=false,movieCaptured=false,touchOnlyTest=false;
@@ -75,6 +77,7 @@ struct Frontend {
  std::filesystem::create_directories(saveDir);
  audio=std::make_unique<whj2::Audio>();
  images=std::make_unique<whj2::SceneImages>(assets);
+ transition=std::make_unique<whj2::SceneTransition>(assets);
  movie=std::make_unique<whj2::Movie>(assets,*audio);
  voices=std::make_unique<whj2::VoiceResolver>(assets);
  for(auto type:{"music","sound"}){std::istringstream in(qlie::cp932(assets.read(std::string("avg/imoscripter_template_")+type+".txt")));
@@ -149,11 +152,12 @@ struct Frontend {
  void next(){if(menu||story.state.finished)return;
  std::string body,speaker,voiceId;
  for(unsigned guard=0;guard<10000;guard++){auto e=story.next();
- if(e.type=="choice"){focus=0;
+ if(e.type=="choice"){transition->present();focus=0;
  text=body.empty()?"選択してください":body;
  name=speaker;
  return;
  }if(e.type=="page"){if(body.empty())continue;
+ transition->present();
  text=body;
  name=speaker;
  playVoice(voiceId);
@@ -180,9 +184,11 @@ struct Frontend {
  text="";
  name="";
  return;
+ }if(e.type=="command"&&e.value.rfind("^sentence",0)==0){qlie::Bytes scene(1280*720*4);for(size_t i=0;i<scene.size();i+=4){scene[i]=35;scene[i+1]=25;scene[i+2]=20;scene[i+3]=255;}images->draw(scene);transition->blend(scene);transition->command(e.value,scene);continue;
  }if(e.type=="command"&&(audioCommand(e.value)||images->command(e.value)))continue;
  if(e.type=="create"||e.type=="free"){audio->stopAll();
  images->clear();
+ transition->reset();
  }if(e.type=="command"||e.type=="create"||e.type=="free"||e.type=="wait"||e.type=="audio-clear"||e.type=="audio-volume"){
   // Preserve every unrendered event in the frontend trace; these are explicitly
   // pending rendering work, never counted as multimedia acceptance.
@@ -199,6 +205,7 @@ struct Frontend {
  qlie::Bytes n(name.begin(),name.end());
  qlie::write_file(saveDir+"/slot01.name",n);
  qlie::write_file(saveDir+"/slot01.images",images->save());
+ qlie::write_file(saveDir+"/slot01.transition",transition->save());
  qlie::write_file(saveDir+"/slot01.audio",audio->save());
  whj2::StateWriter settings;
  settings.str("WHJ2-mixer-1");
@@ -216,6 +223,7 @@ struct Frontend {
  text.assign(t.begin(),t.end());
  name.assign(n.begin(),n.end());
  images->restore(qlie::file(saveDir+"/slot01.images"));
+ if(std::filesystem::exists(saveDir+"/slot01.transition"))transition->restore(qlie::file(saveDir+"/slot01.transition"));else transition->reset();
  audio->restore(qlie::file(saveDir+"/slot01.audio"),assets);
  auto b=qlie::file(saveDir+"/slot01.mixer");
  whj2::StateReader settings{b};
@@ -252,7 +260,7 @@ struct Frontend {
  pixels[i+1]=25;
  pixels[i+2]=20;
  pixels[i+3]=255;
- }if(!menu)images->draw(pixels);
+ }if(!menu){images->draw(pixels);transition->blend(pixels);}
  if(menu){line("美少女万華鏡２　日本語版 開発版",45,30,32);
  line(status,45,90,20,0xffd58b);
  }else {for(int hy=0;hy<64;hy++){for(int hx=920;hx<1280;hx++){auto*pixel=pixels.data()+(size_t(hy)*1280+hx)*4;for(int c=0;c<3;c++){pixel[c]=uint8_t(unsigned(pixel[c])*60/255);}}}
@@ -332,6 +340,7 @@ struct Frontend {
  while(!done){auto now=SDL_GetTicks64();
  if(!menu&&!movie->playing()){
  images->update(double(now-lastUpdate));
+ transition->update(double(now-lastUpdate));
  for(auto&event:images->takeSoundEvents()){
   if(event.stop)audio->volume(event.channel,0,0,true);
   else audio->play(event.channel,event.bytes,event.loop,event.gain,0,event.source);

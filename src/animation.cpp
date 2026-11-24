@@ -159,7 +159,16 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
    int phase=int(radians*512.f/3.14159265f)+(cosine?256:0);
    return float(std::sin((phase&1023)*2.0*3.14159265358979323846/1024));
   };
-  if(op==2||op==3)value=trig(p[0]*3.14159265f/180,op==3)*p[1];
+  if(op==5){
+   // PE f0f90: table index uses the time quotient, not the remainder.
+   static const auto randomTable=particleRandomTable();
+   int period=int(std::round(p[2]));int elapsed=int(ms-keyU32(a,0));
+   uint32_t index=context.randomSeed+uint32_t(period>1?elapsed/period:1);
+   float fraction=float(double(randomTable[index&1023]&0xffffff)/16777215.);
+   float spread=float(static_cast<long double>(p[1]-p[0])*fraction);
+   value=p[0]+spread;
+  }
+  else if(op==2||op==3)value=trig(p[0]*3.14159265f/180,op==3)*p[1];
   else if(op==4)value=p[0];
   else if(op>=7&&op<=10){
    int period=int(std::round(p[2]));

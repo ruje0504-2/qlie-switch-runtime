@@ -15,6 +15,15 @@ AnimationLayer layer(unsigned mode,int x,int sx,unsigned kind=4){
 int main(){try{
  auto zero=layer(0,0,100,1);zero.keys[0][0x1c]=0xd7;zero.keys[0][0x1d]=0x7f;zero.keys[0][0x1e]=0xd8;zero.keys[0][0x1f]=0x7f;
  auto zeroSample=sampleAnimation(zero,0,AnimationContext{0,0,0,0});check(zeroSample.scaleX==0&&zeroSample.scaleY==0&&zeroSample.unsupported.empty(),"zero-sized context is a value");
+ auto randomLayer=layer(0,0,100);auto&rk=randomLayer.keys[0];
+ rk[0x51]=5;rk[0x52]=13;rk[0x55]=0xf9;rk[0x56]=0xff;rk[0x57]=9;rk[0x59]=10;
+ AnimationContext randomContext;randomContext.randomSeed=1023;
+ auto randomAt0=sampleAnimation(randomLayer,0,randomContext),randomAt9=sampleAnimation(randomLayer,9,randomContext),randomAt10=sampleAnimation(randomLayer,10,randomContext);
+ auto table=particleRandomTable();
+ float expected=-7+16*float(double(table[1023]&0xffffff)/16777215.);
+ check(std::abs(randomAt0.x-expected)<.0001f&&randomAt0.x==randomAt9.x,"random5 stable within quotient interval");
+ expected=-7+16*float(double(table[0]&0xffffff)/16777215.);
+ check(std::abs(randomAt10.x-expected)<.0001f&&randomAt10.unsupported.empty(),"random5 quotient and table wrapping");
  Animation looping;looping.bounds={1280,720,1000,200};
  check(nestedAnimationTime(looping,1000)==200&&nestedAnimationTime(looping,1500)==700,"child loop wrapping");
  check(nestedAnimationTime(looping,100)==100&&nestedAnimationTime(looping,200)==200,"child loop intro");

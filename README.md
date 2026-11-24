@@ -55,3 +55,5 @@ build/whj2-runtime /absolute/path/to/game /absolute/path/to/test-saves --movie m
 Bitmap particles (primitive 20) now use the native deterministic random table and viewport-centered depth projection. Scene state version 3 preserves generated resource identities across saves and clears stale future caches when restoring; version 2 scene saves remain readable. Nested/video particles, spherical particles, and particles with 3D rotation remain incomplete.
 
 Nested bitmap animations select their child motion and interpolate the child timeline from the parent key. Child loop bounds are respected. Zero-sized logical subcanvases are supported; missing dimension context remains reported. Symbolic child timeline inputs and embedded audio are still incomplete.
+
+Procedural function 5 uses the native time-quotient random-table lookup and restored per-scene identity seed. Other random functions and primitive 10 texture composition remain incomplete.

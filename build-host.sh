@@ -14,4 +14,6 @@ $cxx -std=c++17 $common $($pc --cflags libpng libjpeg) src/qlie.cpp src/image.cp
 
 $cxx -std=c++17 $common $($pc --cflags libpng libjpeg) src/qlie.cpp src/image.cpp src/animation.cpp tools/animation_probe.cpp $($pc --libs libpng libjpeg) -o build/animation-probe
 
-$cxx -std=c++17 $common $($pc --cflags sdl2 freetype2) src/qlie.cpp src/story.cpp src/audio.cpp src/mac_runtime.cpp build/font.o build/video.o $($pc --libs sdl2 freetype2 libavformat libavcodec libswscale libswresample libavutil) -o build/whj2-runtime
+$cxx -std=c++17 $common $($pc --cflags sdl2 freetype2 libpng libjpeg) src/qlie.cpp src/story.cpp src/audio.cpp src/image.cpp src/scene_images.cpp src/mac_runtime.cpp build/font.o build/video.o $($pc --libs sdl2 freetype2 libavformat libavcodec libswscale libswresample libavutil libpng libjpeg) -o build/whj2-runtime
+
+$cxx -std=c++17 $common $($pc --cflags libpng libjpeg) src/qlie.cpp src/story.cpp src/image.cpp src/scene_images.cpp tools/presentation_probe.cpp $($pc --libs libpng libjpeg) -o build/presentation-probe

@@ -10,10 +10,29 @@ extern "C" {
 #include <stdexcept>
 #include <iostream>
 namespace whj2 {
-MessageText::MessageText(qlie::Assets&assets){std::istringstream in(qlie::cp932(assets.read("script/config/default.txt")));std::string line;while(std::getline(in,line)){auto p=line.find('=');if(p!=line.npos&&trim(line.substr(0,p))=="TextSpeed")speed=std::stod(trim(line.substr(p+1)));}}
+static std::vector<uint32_t> codepoints(const std::string&value){
+ std::vector<uint32_t> result;
+ for(size_t p=0;p<value.size();){uint32_t cp=uint8_t(value[p++]);unsigned tail=0;if(cp>=240){cp&=7;tail=3;}else if(cp>=224){cp&=15;tail=2;}else if(cp>=192){cp&=31;tail=1;}if(p+tail>value.size())throw std::runtime_error("Invalid message UTF8");while(tail--)cp=(cp<<6)|(uint8_t(value[p++])&63);result.push_back(cp);}
+ return result;
+}
+MessageText::MessageText(qlie::Assets&assets){
+ std::istringstream in(qlie::cp932(assets.read("script/config/default.txt")));std::string line;
+ while(std::getline(in,line)){auto p=line.find('=');if(p!=line.npos&&trim(line.substr(0,p))=="TextSpeed")speed=std::stod(trim(line.substr(p+1)));}
+ std::istringstream rules(qlie::cp932(assets.read("misc/value.s")));
+ while(std::getline(rules,line)){
+  auto p=line.find('=');if(p==line.npos)continue;
+  auto key=trim(line.substr(0,p)),value=trim(line.substr(p+1));
+  if(key=="\\cal,#KinsokuWordLength")lineReserve=unsigned(std::stoul(value));
+  else if(key=="\\cal,#GyoutouKinsokuWord"||key=="\\cal,#GyoumatuKinsokuWord"){
+   if(value.size()<2||value.front()!='"'||value.back()!='"')throw std::runtime_error("Invalid line breaking configuration");
+   auto chars=codepoints(value.substr(1,value.size()-2));
+   (key=="\\cal,#GyoutouKinsokuWord"?lineStartForbidden:lineEndForbidden)=std::move(chars);
+  }
+ }
+}
 std::string messageDisplayName(const std::string&raw){if(raw.empty())return {};auto name=raw;if(name.rfind("【",0)==0){name.erase(0,3);auto end=name.find("】");if(end!=name.npos)name.resize(end);}auto alias=name.find("＠");if(alias!=name.npos)name=name.substr(alias+3);return "【"+name+"】";}
 void MessageText::index(){glyphs.clear();double time=0,currentSpeed=speed;
- auto append=[&](const std::string&value,bool center){size_t begin=glyphs.size();for(size_t p=0;p<value.size();){uint32_t cp=uint8_t(value[p++]);unsigned tail=0;if(cp>=240){cp&=7;tail=3;}else if(cp>=224){cp&=15;tail=2;}else if(cp>=192){cp&=31;tail=1;}if(p+tail>value.size())throw std::runtime_error("Invalid message UTF8");while(tail--)cp=(cp<<6)|(uint8_t(value[p++])&63);time+=std::max(0.,currentSpeed);glyphs.push_back({cp,time,0});}if(center&&glyphs.size()>begin)glyphs[begin].centeredRun=glyphs.size()-begin;};
+ auto append=[&](const std::string&value,bool center){size_t begin=glyphs.size();for(auto cp:codepoints(value)){time+=std::max(0.,currentSpeed);glyphs.push_back({cp,time,0});}if(center&&glyphs.size()>begin)glyphs[begin].centeredRun=glyphs.size()-begin;};
  for(size_t pos=0;pos<text.size();){
   if(text[pos]=='['){auto end=text.find(']',pos+1);if(end!=text.npos){auto token=text.substr(pos+1,end-pos-1);auto comma=token.find(',');auto command=token.substr(0,comma);
    if(command=="spd"){currentSpeed=comma==token.npos?speed:std::stod(token.substr(comma+1));if(currentSpeed<0)currentSpeed=speed;pos=end+1;continue;}
@@ -33,7 +52,11 @@ Image MessageText::render(KFont*font,const MessageStyle&style)const{if(!style.wi
  for(size_t i=0;i<count;++i){uint32_t cp=glyphs[i].codepoint;
   if(glyphs[i].centeredRun){unsigned width=0;for(size_t j=i;j<i+glyphs[i].centeredRun;++j)width+=glyphs[j].codepoint<128?std::max(1u,style.fontWidth/2):style.fontWidth;x=style.width>width?(style.width-width)/2:0;}
   unsigned width=cp<128?std::max(1u,style.fontWidth/2):style.fontWidth;
-  if(cp=='\n'||x+width>style.width){x=0;y+=style.fontHeight;if(cp=='\n')continue;}
+  const bool startForbidden=std::find(lineStartForbidden.begin(),lineStartForbidden.end(),cp)!=lineStartForbidden.end();
+  const bool endForbidden=std::find(lineEndForbidden.begin(),lineEndForbidden.end(),cp)!=lineEndForbidden.end();
+  const unsigned remaining=(style.width-std::min(x,style.width))/std::max(1u,style.fontWidth);
+  const bool earlyWrap=!startForbidden&&remaining<=lineReserve+unsigned(endForbidden);
+  if(cp=='\n'||x+width>style.width||(x&&earlyWrap)){x=0;y+=style.fontHeight;if(cp=='\n')continue;}
   if(y+style.fontHeight>style.height)break;
   kfont_draw_outline(font,&dst,cp,int(x),int(y),width,style.fontHeight,style.color);x+=width;
  }return out;

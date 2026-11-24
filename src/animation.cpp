@@ -79,6 +79,11 @@ float sampleValue(float a,float b,unsigned mode,float power,double t,std::vector
  break;
  case 4:q=std::pow(t,1+1.4*power);
  break;
+ case 8:{
+  const double exponent=1+1.4*power;
+  q=t<.5?.5*std::pow(t*2,exponent):1-.5*std::pow((1-t)*2,exponent);
+  break;
+ }
  default:warnings.push_back("easing="+std::to_string(mode));
  return a;
  }

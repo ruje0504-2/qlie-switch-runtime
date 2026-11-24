@@ -8,6 +8,8 @@ class MessageText {
  struct Glyph {uint32_t codepoint;double deadline;size_t centeredRun=0;};
  std::string text;std::vector<Glyph> glyphs;
  double elapsed=0,speed=10;
+ std::vector<uint32_t> lineStartForbidden,lineEndForbidden;
+ unsigned lineReserve=1;
  void index();
 public:
  explicit MessageText(qlie::Assets&);

@@ -8,15 +8,15 @@ from pathlib import Path
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--game', required=True, type=Path)
 parser.add_argument('--saves', required=True, type=Path)
-parser.add_argument('--binary', type=Path, default=Path('build/whj2-runtime'))
-parser.add_argument('--output', type=Path, default=Path('build/WHJ2-Mac.app'))
+parser.add_argument('--binary', type=Path, default=Path('build/qlie-switch-runtime'))
+parser.add_argument('--output', type=Path, default=Path('build/QLIE-Switch-Runtime.app'))
 args = parser.parse_args()
 binary = args.binary.resolve(strict=True)
 game = args.game.resolve(strict=True)
 saves = args.saves.resolve()
 saves.mkdir(parents=True, exist_ok=True)
 contents = args.output.resolve() / 'Contents'
-executable = contents / 'MacOS' / 'whj2-runtime'
+executable = contents / 'MacOS' / 'qlie-switch-runtime'
 executable.parent.mkdir(parents=True, exist_ok=True)
 if executable.exists():
     if not os.path.samefile(binary, executable):
@@ -24,10 +24,10 @@ if executable.exists():
 else:
     os.link(binary, executable)
 info = {
-    'CFBundleIdentifier': 'local.whj2.runtime',
-    'CFBundleName': 'WHJ2 Mac',
-    'CFBundleDisplayName': 'WHJ2 Mac',
-    'CFBundleExecutable': 'whj2-runtime',
+    'CFBundleIdentifier': 'local.qlie.switch-runtime',
+    'CFBundleName': 'QLIE Switch Runtime',
+    'CFBundleDisplayName': 'QLIE Switch Runtime',
+    'CFBundleExecutable': 'qlie-switch-runtime',
     'CFBundlePackageType': 'APPL',
     'CFBundleVersion': '3',
     'NSHighResolutionCapable': True,

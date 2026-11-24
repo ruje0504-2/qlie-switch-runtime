@@ -7,6 +7,7 @@
 #include <cstring>
 #include <cstdio>
 #include <filesystem>
+#include <string_view>
 #include "cp932.inc"
 namespace qlie {
 static uint64_t rd(const Bytes& b,size_t p,unsigned n){if(p>b.size()||n>b.size()-p)throw std::runtime_error("Truncated QLIE data");uint64_t v=0;for(unsigned i=0;i<n;i++)v|=uint64_t(b[p+i])<<(8*i);return v;}
@@ -25,7 +26,7 @@ std::string cp932(const Bytes&b){std::string out;for(size_t p=0;p<b.size();p++){
 std::string canonical(std::string s){for(auto&c:s){if(c==92)c=47;else if(c>=65&&c<=90)c+=32;}while(s.compare(0,2,"./")==0)s.erase(0,2);return s;}
 Bytes file(const std::string&p){std::ifstream f(p,std::ios::binary);if(!f)throw std::runtime_error("Cannot open "+p);f.seekg(0,std::ios::end);auto n=f.tellg();if(n<0)throw std::runtime_error("Cannot size "+p);f.seekg(0);Bytes b(static_cast<size_t>(n));if(!b.empty()&&!f.read(reinterpret_cast<char*>(b.data()),b.size()))throw std::runtime_error("Cannot read "+p);return b;}
 void write_file(const std::string&p,const Bytes&b){std::ofstream f(p,std::ios::binary|std::ios::trunc);if(!f||!f.write(reinterpret_cast<const char*>(b.data()),b.size()))throw std::runtime_error("Cannot write "+p);f.close();if(!f)throw std::runtime_error("Cannot close "+p);whj2::commitSavePath(p);}
-Pack::Pack(const std::string&path,const Bytes&a,const Bytes&b):fp(path,std::ios::binary),k1(a),k2(b){if(!fp)throw std::runtime_error("Cannot open "+path);fp.seekg(0,std::ios::end);uint64_t n=uint64_t(fp.tellg());if(n<0x41c)throw std::runtime_error("Archive too short");Bytes tail(28),kd(256);fp.seekg(n-28);fp.read(reinterpret_cast<char*>(tail.data()),28);if(std::memcmp(tail.data(),"FilePackVer3.0",13))throw std::runtime_error("Unsupported QLIE version");unsigned count=unsigned(rd(tail,16,4));uint64_t offset=rd(tail,20,8);if(count>100000||offset>n-28)throw std::runtime_error("Invalid archive index");fp.seekg(n-0x41c);fp.read(reinterpret_cast<char*>(kd.data()),256);key=hash(kd)&0xfffffff;fp.seekg(offset);Bytes toc(n-28-offset);fp.read(reinterpret_cast<char*>(toc.data()),toc.size());size_t p=0;for(unsigned i=0;i<count;i++){size_t len=rd(toc,p,2);p+=2;if(len>256||p+len+28>toc.size())throw std::runtime_error("Invalid entry name");Bytes name(toc.begin()+p,toc.begin()+p+len);unsigned nk=unsigned(len)+(key^0x3e);for(unsigned j=0;j<len;j++)name[j]^=uint8_t(((j+1)^nk)+j+1);p+=len;Entry e{cp932(name),std::string(name.begin(),name.end()),rd(toc,p,8),uint32_t(rd(toc,p+8,4)),uint32_t(rd(toc,p+12,4)),uint32_t(rd(toc,p+16,4)),uint32_t(rd(toc,p+20,4)),uint32_t(rd(toc,p+24,4))};p+=28;if(e.offset+e.size>offset)throw std::runtime_error("Invalid entry range");entries.push_back(e);}for(const auto&e:entries)if(e.name.find("pack_keyfile")!=std::string::npos){key_entry=read(e);k1=key_entry;key_ready=true;break;}}
+Pack::Pack(const std::string&path,const Bytes&a,const Bytes&b,PackVersion expected):fp(path,std::ios::binary),k1(a),k2(b){if(!fp)throw std::runtime_error("Cannot open "+path);fp.seekg(0,std::ios::end);uint64_t n=uint64_t(fp.tellg());if(n<0x41c)throw std::runtime_error("Archive too short");Bytes tail(28),kd(256);fp.seekg(n-28);fp.read(reinterpret_cast<char*>(tail.data()),28);constexpr std::string_view pack30="FilePackVer3.0",pack31="FilePackVer3.1";std::string_view signature(reinterpret_cast<const char*>(tail.data()),pack30.size());if(signature==pack31)throw std::runtime_error("QLIE FilePackVer3.1 is not supported: "+path);if(signature!=pack30)throw std::runtime_error("Unknown QLIE archive version: "+path);if(expected!=PackVersion::v30)throw std::runtime_error("Resource pack version differs from game profile: "+path);unsigned count=unsigned(rd(tail,16,4));uint64_t offset=rd(tail,20,8);if(count>100000||offset>n-28)throw std::runtime_error("Invalid archive index");fp.seekg(n-0x41c);fp.read(reinterpret_cast<char*>(kd.data()),256);key=hash(kd)&0xfffffff;fp.seekg(offset);Bytes toc(n-28-offset);fp.read(reinterpret_cast<char*>(toc.data()),toc.size());size_t p=0;for(unsigned i=0;i<count;i++){size_t len=rd(toc,p,2);p+=2;if(len>256||p+len+28>toc.size())throw std::runtime_error("Invalid entry name");Bytes name(toc.begin()+p,toc.begin()+p+len);unsigned nk=unsigned(len)+(key^0x3e);for(unsigned j=0;j<len;j++)name[j]^=uint8_t(((j+1)^nk)+j+1);p+=len;Entry e{cp932(name),std::string(name.begin(),name.end()),rd(toc,p,8),uint32_t(rd(toc,p+8,4)),uint32_t(rd(toc,p+12,4)),uint32_t(rd(toc,p+16,4)),uint32_t(rd(toc,p+20,4)),uint32_t(rd(toc,p+24,4))};p+=28;if(e.offset+e.size>offset)throw std::runtime_error("Invalid entry range");entries.push_back(e);}for(const auto&e:entries)if(e.name.find("pack_keyfile")!=std::string::npos){key_entry=read(e);k1=key_entry;key_ready=true;break;}}
 Bytes Pack::read(const Entry&e){
  if(key_ready&&e.name.find("pack_keyfile")!=std::string::npos)return key_entry;
  Bytes b(e.size);
@@ -44,22 +45,23 @@ Bytes Pack::read(const Entry&e){
  if(b.size()!=e.unpacked)throw std::runtime_error("Entry size mismatch: "+e.name);
  return b;
 }
-std::pair<Bytes,Bytes> game_keys(const std::string&root){
- Bytes k1=file(root+"/DLL/key.fkey");
- auto icon=root+"/DLL/icon.key";
+std::pair<Bytes,Bytes> game_keys(const std::string&root,const ArchiveLayout&layout){
+ Bytes k1=file(root+"/"+layout.fileKey);
+ auto icon=root+"/"+layout.iconKey;
  if(std::filesystem::is_regular_file(icon)){auto k2=file(icon);if(k2.size()!=256)throw std::runtime_error("icon.key must contain exactly 256 bytes");return {k1,k2};}
 #ifdef __SWITCH__
- throw std::runtime_error("Missing DLL/icon.key in game directory");
+ throw std::runtime_error("Missing "+layout.iconKey+" in game directory");
 #else
- auto exe=file(root+"/美少女万華鏡２.exe");std::string pat="\x05TIcon";size_t at=std::string(reinterpret_cast<char*>(exe.data()),exe.size()).rfind(pat);if(at==std::string::npos||at+262>exe.size())throw std::runtime_error("Missing QLIE icon key");Bytes k2(exe.begin()+at+6,exe.begin()+at+262);return {k1,k2};
+ if(layout.hostExecutable.empty())throw std::runtime_error("Missing "+layout.iconKey+" in game directory");
+ auto exe=file(root+"/"+layout.hostExecutable);std::string pat="\x05TIcon";size_t at=std::string(reinterpret_cast<char*>(exe.data()),exe.size()).rfind(pat);if(at==std::string::npos||at+262>exe.size())throw std::runtime_error("Missing QLIE icon key");Bytes k2(exe.begin()+at+6,exe.begin()+at+262);return {k1,k2};
 #endif
 }
 namespace {
-std::optional<std::string> looseAudioPath(const std::string&root,const std::string&name){
+std::optional<std::string> looseAudioPath(const std::string&root,const std::string&name,const std::string&voicePrefix){
  auto extension=std::filesystem::path(name).extension().string();
  // Native FileIO checks loose files before package slots. Keep this addition
  // to the audio paths required by the player; script-file rules are separate.
- if(extension!=".ogg"&&extension!=".wav"&&extension!=".ogv"&&name.rfind("voice/",0)!=0)return {};
+ if(extension!=".ogg"&&extension!=".wav"&&extension!=".ogv"&&(voicePrefix.empty()||name.rfind(voicePrefix,0)!=0))return {};
  auto relative=std::filesystem::path(name).lexically_normal();
  if(relative.is_absolute())return {};
  for(const auto&part:relative)if(part=="..")return {};
@@ -77,12 +79,12 @@ std::optional<std::string> looseAudioPath(const std::string&root,const std::stri
  return path.string();
 }
 }
-Assets::Assets(const std::string&directory):root(directory){
- auto keys=game_keys(root);
- for(int slot=0;slot<16;slot++){
-  auto path=root+"/GameData/data"+std::to_string(slot)+".pack";
+Assets::Assets(const std::string&directory,const ArchiveLayout&layout):root(directory),looseVoicePrefix(layout.looseVoicePrefix){
+ auto keys=game_keys(root,layout);
+ for(unsigned slot=0;slot<layout.slotCount;slot++){
+  auto path=root+"/"+layout.archivePrefix+std::to_string(slot)+".pack";
   if(!std::filesystem::is_regular_file(path))continue;
-  auto pack=std::make_unique<Pack>(path,keys.first,keys.second);
+  auto pack=std::make_unique<Pack>(path,keys.first,keys.second,layout.version);
   for(const auto&e:pack->entries)if(e.name.find("pack_keyfile")==std::string::npos){auto key=canonical(e.name);index[key]={pack.get(),e};sources[key]={key,path,e.offset,e.size,false};}
   packs.push_back(std::move(pack));
  }
@@ -90,7 +92,7 @@ Assets::Assets(const std::string&directory):root(directory){
 }
 std::optional<ResourceLocation> Assets::locate(const std::string&name)const{
  auto key=canonical(name);
- if(auto path=looseAudioPath(root,key))return ResourceLocation{key,*path,0,std::filesystem::file_size(*path),true};
+ if(auto path=looseAudioPath(root,key,looseVoicePrefix))return ResourceLocation{key,*path,0,std::filesystem::file_size(*path),true};
  auto it=sources.find(key);
  if(it!=sources.end())return it->second;
  return {};

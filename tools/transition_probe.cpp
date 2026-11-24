@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+#include "whj2/profile.hpp"
 #include "scene_transition.hpp"
 #include "scene_images.hpp"
 #include "state_io.hpp"
 #include <iostream>
 #include <stdexcept>
-int main(int argc,char**argv){try{if(argc!=2)return 2;qlie::Assets assets(argv[1]);whj2::SceneImages scene(assets);whj2::SceneTransition fade(assets);
+int main(int argc,char**argv){try{if(argc!=2)return 2;qlie::Assets assets(argv[1],whj2::profile::archives);whj2::SceneImages scene(assets);whj2::SceneTransition fade(assets);
  qlie::Bytes before(1280*720*4),after(before.size());scene.command("^bg01,file:cut/c_青空1");scene.draw(before);scene.command("^bg01,file:bg/color_白");scene.draw(after);
  if(before==after)throw std::runtime_error("Distinct original scenes required");
  if(!fade.command("^sentence,$overlap_long",before))throw std::runtime_error("Template command not consumed");

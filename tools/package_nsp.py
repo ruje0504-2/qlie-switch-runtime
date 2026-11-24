@@ -69,9 +69,9 @@ def pfs_entries(path):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--game', required=True, type=Path)
-    ap.add_argument('--elf', type=Path, default=ROOT/'build-switch/whj2-runtime.elf')
+    ap.add_argument('--elf', type=Path, default=ROOT/'build-switch/qlie-switch-runtime.elf')
     ap.add_argument('--runtime-revision', help='Fixed source commit embedded in an existing ELF')
-    ap.add_argument('--config', type=Path, default=ROOT/'config/nsp.json')
+    ap.add_argument('--config', type=Path, default=ROOT/'games/whj2/nsp.json')
     ap.add_argument('--output', type=Path)
     ap.add_argument('--icon', required=True, type=Path)
     ap.add_argument('--keyset', type=Path, default=Path.home()/'.switch/prod.keys')
@@ -111,7 +111,7 @@ def main():
                 return subprocess.run([str(x) for x in cmd], cwd=work, stdout=log, stderr=subprocess.STDOUT, check=True)
             run(['/opt/devkitpro/devkitA64/bin/aarch64-none-elf-strip', elf, '-o', work/'main.elf'])
             run(['/opt/devkitpro/tools/bin/elf2nso', work/'main.elf', work/'exefs/main'])
-            npdm = json.loads((ROOT/'config/nsp-npdm.json').read_text())
+            npdm = json.loads((ROOT/'games/whj2/nsp-npdm.json').read_text())
             for field in ('title_id', 'title_id_range_min', 'program_id', 'program_id_range_min'):
                 npdm[field] = '0x'+title_id
             (work/'npdm.json').write_text(json.dumps(npdm, indent=2))

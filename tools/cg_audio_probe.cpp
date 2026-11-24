@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+#include "whj2/profile.hpp"
 #include "cg_catalog.hpp"
 #include "image.hpp"
 extern "C" {
@@ -8,7 +9,7 @@ extern "C" {
 #include <cstdlib>
 #include <iostream>
 #include <set>
-int main(int argc,char**argv){try{if(argc<2)return 2;qlie::Assets assets(argv[1]);whj2::CgCatalog catalog(assets);std::set<std::string> seen;unsigned clips=0,silent=0,absent=0,audible=0;
+int main(int argc,char**argv){try{if(argc<2)return 2;qlie::Assets assets(argv[1],whj2::profile::archives);whj2::CgCatalog catalog(assets);std::set<std::string> seen;unsigned clips=0,silent=0,absent=0,audible=0;
  std::vector<std::string> files;if(argc==2){for(auto&group:catalog.items())for(auto&file:group.files)files.push_back(file);}else for(int i=2;i<argc;i++)files.push_back(argv[i]);
  for(auto&file:files){if(file.size()>2&&file.substr(file.size()-2)==".b"&&seen.insert(file).second){
  for(auto&m:whj2::abmp(assets.read(file)))if(m.type.rfind("abimg",0)==0&&m.data.size()>4&&std::equal(m.data.begin(),m.data.begin()+4,"OggS")){

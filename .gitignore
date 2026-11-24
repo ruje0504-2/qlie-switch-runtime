@@ -10,3 +10,10 @@ OPERATIONS.md
 DELIVERY.md
 tools/record_op.py
 .DS_Store
+
+# Game artwork and local package keys
+/icon.png
+/icon.jpg
+/icon.jpeg
+/jp-icon.jpg
+icon.key

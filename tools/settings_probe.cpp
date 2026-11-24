@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+#include "whj2/profile.hpp"
 #include "settings.hpp"
 #include "game_menu.hpp"
 #include <iostream>
 #include <algorithm>
 #include <stdexcept>
-int main(int argc,char**argv){try{if(argc!=2)return 2;qlie::Assets assets(argv[1]);whj2::Settings settings(assets);
+int main(int argc,char**argv){try{if(argc!=2)return 2;qlie::Assets assets(argv[1],whj2::profile::archives);whj2::Settings settings(assets);
  if(settings.get("WindowAlpha")!=210||settings.get("TextSpeed")!=10||settings.get("BGMVolume")!=60)throw std::runtime_error("Original defaults");
  auto gains=settings.gains();if(gains[0]!=153.f/256||gains[3]!=128.f/256||gains[4]!=204.f/256)throw std::runtime_error("Original category quantization");
  settings.set("MasterVolume",33);if(settings.gains()[0]!=48.f/256)throw std::runtime_error("Master/category integer order");

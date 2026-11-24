@@ -7,21 +7,23 @@ cc="$dkp/devkitA64/bin/aarch64-none-elf-gcc"
 export PKG_CONFIG_LIBDIR="$dkp/portlibs/switch/lib/pkgconfig"
 pc="$dkp/tools/bin/pkg-config"
 mkdir -p build-switch
+. ./engine/sources.sh
 flags="-O2 -Wall -Wextra -Werror -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE -D__SWITCH__ -Iinclude -Isrc -isystem $dkp/libnx/include"
 revision=$(git rev-parse --verify HEAD 2>/dev/null || printf unversioned)
-if [ "$revision" != unversioned ] && ! git diff --quiet HEAD -- src include shaders build-host.sh build-switch.sh; then revision="$revision-dirty"; fi
+if [ "$revision" != unversioned ] && ! git diff --quiet HEAD -- src include engine games shaders build-host.sh build-switch.sh; then revision="$revision-dirty"; fi
 flags="$flags -DWHJ2_BUILD_REV=\"$revision\""
-if [ "${1:-}" = "--diagnostic" ]; then
-  $cxx -std=c++17 $flags -L"$dkp/libnx/lib" -specs="$dkp/libnx/switch.specs" src/qlie.cpp src/story.cpp src/switch_diagnostic.cpp -lpthread -lnx -o build-switch/whj2-diagnostic.elf
-  "$dkp/tools/bin/nacptool" --create "WHJ2 Resource Diagnostic" "WHJ2 port contributors" "0.0.1" build-switch/whj2-diagnostic.nacp
-  "$dkp/tools/bin/elf2nro" build-switch/whj2-diagnostic.elf build-switch/whj2-diagnostic.nro --nacp=build-switch/whj2-diagnostic.nacp
+codec_flags=$($pc --cflags sdl2 freetype2 libpng libjpeg libavformat libavcodec libswscale libswresample libavutil)
+build_qlie_archive build-switch "$cxx" "$cc" "$dkp/devkitA64/bin/aarch64-none-elf-ar" "$flags $codec_flags" "$flags $codec_flags -ffp-contract=off"
+if [ "${1:-}" = --engine-only ]; then
   exit 0
 fi
-if [ ! -f build-switch/font.o ] || [ src/font.c -nt build-switch/font.o ] || [ src/font.h -nt build-switch/font.o ] || [ src/rmt.h -nt build-switch/font.o ]; then
-  $cc -std=c11 $flags $($pc --cflags freetype2) -c src/font.c -o build-switch/font.o
-fi
-if [ ! -f build-switch/video.o ] || [ src/video.c -nt build-switch/video.o ] || [ src/video.h -nt build-switch/video.o ] || [ src/rmt.h -nt build-switch/video.o ]; then
-  $cc -std=c11 $flags $($pc --cflags libavformat libavcodec libswscale libswresample libavutil) -c src/video.c -o build-switch/video.o
+. ./games/whj2/sources.sh
+flags="$flags -Igames -Igames/whj2"
+if [ "${1:-}" = --diagnostic ]; then
+  $cxx -std=c++17 $flags -L"$dkp/libnx/lib" -specs="$dkp/libnx/switch.specs" games/whj2/diagnostic.cpp build-switch/libqlie-runtime.a -lpthread -lnx -o build-switch/qlie-runtime-diagnostic.elf
+  "$dkp/tools/bin/nacptool" --create "QLIE Runtime Diagnostic" "QLIE Switch Runtime contributors" "0.0.1" build-switch/qlie-runtime-diagnostic.nacp
+  "$dkp/tools/bin/elf2nro" build-switch/qlie-runtime-diagnostic.elf build-switch/qlie-runtime-diagnostic.nro --nacp=build-switch/qlie-runtime-diagnostic.nacp
+  exit 0
 fi
 # Graphical runtime candidate; hardware acceptance remains separate.
 mesa=${WHJ2_MESA_SDK:-$PWD/local/mesa-sdk/opt/devkitpro/portlibs/switch}
@@ -39,10 +41,10 @@ $cxx -std=c++17 $flags -ffp-contract=off -Ibuild-switch -c src/deko3d_raster.cpp
 $cc -std=c11 $flags -c src/switch_stdio.c -o build-switch/switch_stdio.o
 flags="$flags -ffp-contract=off -DWHJ2_WITH_VULKAN -DWHJ2_WITH_DEKO3D"
 
-$cxx -std=c++17 $flags $($pc --cflags sdl2 freetype2 libpng libjpeg) -L"$dkp/libnx/lib" -specs="$dkp/libnx/switch.specs" src/qlie.cpp src/story.cpp src/audio.cpp src/image.cpp src/animation.cpp src/particles.cpp src/scene_images.cpp src/model.cpp src/gradient_mask.cpp src/render_queue.cpp src/voice.cpp src/movie.cpp src/message_text.cpp src/scene_transition.cpp src/sentence_wait.cpp src/joycon.cpp src/upper_menu.cpp src/game_menu.cpp src/settings.cpp src/auto_play.cpp src/fps_overlay.cpp src/title_screen.cpp src/choice_screen.cpp src/progress.cpp src/music_screen.cpp src/replay_catalog.cpp src/replay_screen.cpp src/cg_catalog.cpp src/cg_screen.cpp src/mac_runtime.cpp build-switch/font.o build-switch/video.o build-switch/gpu_raster.o build-switch/deko3d_raster.o build-switch/vulkan_raster.o build-switch/switch_stdio.o build-switch/switch_nak_cache.o build-switch/mesa-scoped-nak.o -Wl,--wrap=nak_debug_flags -L"$mesa/lib" -Wl,--start-group "$mesa/lib/libvulkan.a" "$rust"/*.rlib $($pc --libs sdl2 freetype2 libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -lexpat -lzstd -ldeko3d -lpthread -lnx -Wl,--end-group -o build-switch/whj2-runtime.elf
+$cxx -std=c++17 $flags $($pc --cflags sdl2 freetype2 libpng libjpeg) -L"$dkp/libnx/lib" -specs="$dkp/libnx/switch.specs" $whj2_scene_sources games/whj2/joycon.cpp games/whj2/main.cpp build-switch/gpu_raster.o build-switch/deko3d_raster.o build-switch/vulkan_raster.o build-switch/switch_stdio.o build-switch/switch_nak_cache.o build-switch/mesa-scoped-nak.o build-switch/libqlie-runtime.a -Wl,--wrap=nak_debug_flags -L"$mesa/lib" -Wl,--start-group "$mesa/lib/libvulkan.a" "$rust"/*.rlib $($pc --libs sdl2 freetype2 libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -lexpat -lzstd -ldeko3d -lpthread -lnx -Wl,--end-group -o build-switch/qlie-switch-runtime.elf
 # Installed packages consume the ELF directly.
 if [ "${1:-}" = "--elf-only" ]; then
   exit 0
 fi
-"$dkp/tools/bin/nacptool" --create "WHJ2 Runtime (Development)" "WHJ2 port contributors" "0.0.2" build-switch/whj2-runtime.nacp
-"$dkp/tools/bin/elf2nro" build-switch/whj2-runtime.elf build-switch/whj2-runtime.nro --nacp=build-switch/whj2-runtime.nacp
+"$dkp/tools/bin/nacptool" --create "QLIE Switch Runtime (Development)" "QLIE Switch Runtime contributors" "0.0.2" build-switch/qlie-switch-runtime.nacp
+"$dkp/tools/bin/elf2nro" build-switch/qlie-switch-runtime.elf build-switch/qlie-switch-runtime.nro --nacp=build-switch/qlie-switch-runtime.nacp

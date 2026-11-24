@@ -13,6 +13,7 @@
 #endif
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Incremental native frontend: graphics/audio integration remains in progress.
+#include "whj2/profile.hpp"
 #include "story.hpp"
 #ifdef WHJ2_MAC_GAME_PICKER
 #include "mac_game_access.h"
@@ -61,7 +62,7 @@ static std::string selectedRenderer(){
  if(const char* mode=std::getenv("WHJ2_RENDERER");mode&&*mode)return mode;
 #ifdef __SWITCH__
  std::string name;
- if(std::ifstream file{"sdmc:/switch/whj2/renderer.cfg"};file>>name)return name;
+ if(std::ifstream file{whj2::profile::sdRenderer};file>>name)return name;
  return "deko3d";
 #else
  return "cpu";
@@ -149,7 +150,7 @@ struct Frontend {
  whj2::FramePacer framePacer;
  whj2::FpsOverlay fpsDisplay;
  std::map<SDL_JoystickID,SDL_GameController*>controllers;
- Frontend(const std::string&game,const std::string&saves):assets(game),story(assets),pixels(1280*720*4),saveDir(saves),gameDir(game){unsigned subsystems=SDL_INIT_AUDIO|SDL_INIT_EVENTS;
+ Frontend(const std::string&game,const std::string&saves):assets(game,whj2::profile::archives),story(assets,whj2::profile::story),pixels(1280*720*4),saveDir(saves),gameDir(game){unsigned subsystems=SDL_INIT_AUDIO|SDL_INIT_EVENTS;
  bool nativeRequested=false;
 #ifdef WHJ2_WITH_GPU
  const std::string gpuMode=selectedRenderer();
@@ -162,7 +163,7 @@ struct Frontend {
  subsystems|=SDL_INIT_GAMECONTROLLER;
 #endif
  if(SDL_Init(subsystems))throw std::runtime_error(SDL_GetError());
- if(!nativeRequested){window=SDL_CreateWindow("美少女万華鏡２",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,1280,720,SDL_WINDOW_RESIZABLE);if(!window)throw std::runtime_error(SDL_GetError());}
+ if(!nativeRequested){window=SDL_CreateWindow(whj2::profile::gameName,SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,1280,720,SDL_WINDOW_RESIZABLE);if(!window)throw std::runtime_error(SDL_GetError());}
 #ifdef WHJ2_WITH_DEKO3D
  if(nativeRequested&&gpuMode!="vulkan"){
   if(gpuMode!="deko3d")std::fprintf(stderr,"Unknown renderer '%s', selecting deko3d\n",gpuMode.c_str());
@@ -850,7 +851,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  std::cerr<<"INPUT physical joysticks="<<SDL_NumJoysticks()<<"\n";
  for(int i=0;i<SDL_NumJoysticks();i++)controllerAdded(i);
 #endif
- unsigned frames=0;skipTitleExitForTest=smoke&&!startTransitionTest;
+ unsigned frames=0,touchSkipWaitFrames=0;skipTitleExitForTest=smoke&&!startTransitionTest;
  if(smoke&&!openingTest&&!movieOnly){if(opening)showTitle();if(!titleTest)title->skipIntro();}
  uint64_t lastUpdate=SDL_GetTicks64();
  while(!done){auto now=SDL_GetTicks64();
@@ -1088,7 +1089,12 @@ controllerKey(e.cbutton.button);
  if(frames==38){gestureStory=story.save();SDL_Event ev{};ev.type=SDL_FINGERDOWN;ev.tfinger.x=.5f;ev.tfinger.y=.2f;SDL_PushEvent(&ev);ev.type=SDL_FINGERUP;ev.tfinger.y=.5f;SDL_PushEvent(&ev);}
  if(frames==40){if(!upperMenu->visible()||story.save()!=gestureStory)throw std::runtime_error("Swipe changed story");snapshot("upper-menu.bmp");controller(SDL_CONTROLLER_BUTTON_Y);}
  if(frames==42){messageText->reveal();recordCurrentRead();skipStart=advances;SDL_Event ev{};ev.type=SDL_CONTROLLERAXISMOTION;ev.caxis.axis=SDL_CONTROLLER_AXIS_TRIGGERRIGHT;ev.caxis.value=32767;SDL_PushEvent(&ev);}
- if(frames==48){if(advances<=skipStart)throw std::runtime_error("ZR did not advance read page");SDL_Event ev{};ev.type=SDL_CONTROLLERAXISMOTION;ev.caxis.axis=SDL_CONTROLLER_AXIS_TRIGGERRIGHT;ev.caxis.value=0;SDL_PushEvent(&ev);}
+ if(frames==48){
+  if(advances<=skipStart){
+   if(!normalSkip||++touchSkipWaitFrames>360)throw std::runtime_error("ZR did not advance read page after its script wait");
+   continue;
+  }
+  SDL_Event ev{};ev.type=SDL_CONTROLLERAXISMOTION;ev.caxis.axis=SDL_CONTROLLER_AXIS_TRIGGERRIGHT;ev.caxis.value=0;SDL_PushEvent(&ev);}
  if(frames==50){if(normalSkip)throw std::runtime_error("ZR did not stop at unread page");controller(SDL_CONTROLLER_BUTTON_LEFTSHOULDER);}
  if(frames==52)controller(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
  if(frames==54){if(gameMenu.page!=1)throw std::runtime_error("Save page navigation");controller(SDL_CONTROLLER_BUTTON_A);}
@@ -1138,18 +1144,18 @@ controllerKey(e.cbutton.button);
 #endif
 int main(int argc,char**argv){
 #ifdef __SWITCH__
- whj2::prepareSwitchLogDirectory();
- const char*logPath=std::getenv("WHJ2_LOG");if(!logPath)logPath="sdmc:/switch/whj2/runtime.log";
+ whj2::prepareSwitchLogDirectory(whj2::profile::sdRoot);
+ const char*logPath=std::getenv("WHJ2_LOG");if(!logPath)logPath=whj2::profile::sdLog;
  if(!std::freopen(logPath,"a",stderr))return 2;
  std::setvbuf(stderr,nullptr,_IONBF,0);
- std::cerr<<"START WHJ2 runtime argc="<<argc<<"\n";
+ std::cerr<<"START QLIE runtime profile=whj2 argc="<<argc<<"\n";
 #endif
 try{whj2::SwitchStorage storage;
 std::string game=argc>1?argv[1]:(std::getenv("WHJ2_GAME")?std::getenv("WHJ2_GAME"):"");
 #ifdef __SWITCH__
-if(game.empty())game="sdmc:/switch/whj2/game";
+if(game.empty())game=whj2::profile::sdGame;
 #endif
-if(game.empty()){std::cerr<<"usage: whj2-runtime GAME [SAVE_DIR] [--smoke-frames N]\n";
+if(game.empty()){std::cerr<<"usage: qlie-switch-runtime GAME [SAVE_DIR] [--smoke-frames N]\n";
  return 2;
  }if(argc<2&&std::getenv("WHJ2_LOG")){auto*log=std::freopen(std::getenv("WHJ2_LOG"),"a",stderr);
  if(!log)return 2;
@@ -1157,7 +1163,7 @@ if(game.empty()){std::cerr<<"usage: whj2-runtime GAME [SAVE_DIR] [--smoke-frames
  std::string saves=argc>2?argv[2]:(std::getenv("WHJ2_SAVES")?std::getenv("WHJ2_SAVES"):"local/saves");
  if(argc>4&&std::string(argv[3])=="--smoke-frames")smoke=unsigned(std::stoul(argv[4]));
 #ifdef __SWITCH__
-if(argc<3)saves="sdmc:/switch/whj2/saves";
+if(argc<3)saves=whj2::profile::sdSaves;
 #endif
 storage.mount(game,saves);
 #ifdef WHJ2_MAC_GAME_PICKER

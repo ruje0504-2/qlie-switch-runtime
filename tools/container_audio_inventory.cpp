@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+#include "whj2/profile.hpp"
 #include "image.hpp"
 #include <iostream>
 #include <iomanip>
@@ -18,7 +19,7 @@ struct Inventory {
   }
  }
 };
-int main(int argc,char**argv){try{if(argc!=2)return 2;qlie::Assets assets(argv[1]);Inventory inventory;unsigned files=0;
+int main(int argc,char**argv){try{if(argc!=2)return 2;qlie::Assets assets(argv[1],whj2::profile::archives);Inventory inventory;unsigned files=0;
  for(const auto&name:assets.names())if(name.size()>2&&name.substr(name.size()-2)==".b"){
   files++;try{inventory.scan(assets.read(name),name);}catch(const std::exception&e){inventory.errors++;std::cerr<<"ERROR "<<std::quoted(name)<<" "<<e.what()<<"\n";}
  }

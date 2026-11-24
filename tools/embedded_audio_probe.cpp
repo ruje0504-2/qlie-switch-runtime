@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+#include "whj2/profile.hpp"
 #include "scene_images.hpp"
 #include "audio.hpp"
 #include "state_io.hpp"
@@ -6,7 +7,7 @@
 #include <stdexcept>
 int main(int argc,char**argv){try{if(argc!=2)return 2;
  if(SDL_Init(SDL_INIT_AUDIO))throw std::runtime_error(SDL_GetError());
- {qlie::Assets assets(argv[1]);whj2::SceneImages images(assets);whj2::Audio audio;
+ {qlie::Assets assets(argv[1],whj2::profile::archives);whj2::SceneImages images(assets);whj2::Audio audio;
  images.command("^bg01,file:cut/踏切点灯");auto events=images.takeSoundEvents();
  if(events.size()!=1||events[0].category!=2||events[0].channel!=8||!events[0].loop||events[0].gain!=1)throw std::runtime_error("Original crossing sound event fields");
  if(!images.takeSoundEvents().empty())throw std::runtime_error("Duplicate embedded start");

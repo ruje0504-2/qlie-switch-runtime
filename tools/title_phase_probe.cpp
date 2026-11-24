@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+#include "whj2/profile.hpp"
 #include "animation.hpp"
 #include "image.hpp"
 #include <cmath>
 #include <iostream>
-int main(int argc,char**argv){try{if(argc!=2)return 2;qlie::Assets assets(argv[1]);
+int main(int argc,char**argv){try{if(argc!=2)return 2;qlie::Assets assets(argv[1],whj2::profile::archives);
  for(auto&m:whj2::abmp(assets.read("script/title/title_back01.b")))if(m.type=="abdata13"){
  auto a=whj2::animation(m.type,m.data);auto&mo=a.motions.front();unsigned count=0;
  for(double t:{1000.,2750.,4625.,6500.,10500.}){auto samples=whj2::sampleMotion(mo,t);unsigned particle=0;

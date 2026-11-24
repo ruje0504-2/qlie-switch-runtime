@@ -1,3 +1,4 @@
+#include "whj2/profile.hpp"
 #include "animation.hpp"
 #include "image.hpp"
 #include <iostream>
@@ -10,7 +11,7 @@ void check(const qlie::Bytes&b,const std::string&name){if(b.size()<5||!std::equa
  if(v.flags==0&&std::abs(v.scaleX)<32700&&std::abs(v.scaleY)<32700)
  std::cout<<"RECT "<<name<<" motion="<<mo.name<<" t="<<ms<<" xy="<<v.x<<","<<v.y<<" size="<<v.scaleX<<","<<v.scaleY<<" alpha="<<v.alpha<<" mul="<<v.mulColor<<"\n";
 }}}}catch(const std::exception&e){throw std::runtime_error(name+": "+e.what());}}else if(m.type.rfind("abimg",0)==0)check(m.data,name+"#"+m.name);}}
-int main(int argc,char**argv){try{if(argc<2)return 2;qlie::Assets a(argv[1]);
+int main(int argc,char**argv){try{if(argc<2)return 2;qlie::Assets a(argv[1],whj2::profile::archives);
 if(argc==4&&std::string(argv[2])=="--inspect"){
  for(auto&part:whj2::abmp(a.read(argv[3]))){std::cout<<"MEMBER "<<part.type<<" name="<<part.name<<" bytes="<<part.data.size()<<"\n";
  if(part.type.rfind("abdata",0)!=0)continue;auto data=whj2::animation(part.type,part.data);

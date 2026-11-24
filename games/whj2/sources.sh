@@ -1,0 +1,2 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+whj2_scene_sources="games/whj2/scene_images.cpp games/whj2/voice.cpp games/whj2/message_text.cpp games/whj2/scene_transition.cpp games/whj2/upper_menu.cpp games/whj2/game_menu.cpp games/whj2/settings.cpp games/whj2/title_screen.cpp games/whj2/choice_screen.cpp games/whj2/progress.cpp games/whj2/music_screen.cpp games/whj2/replay_catalog.cpp games/whj2/replay_screen.cpp games/whj2/cg_catalog.cpp games/whj2/cg_screen.cpp"

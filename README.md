@@ -1,10 +1,18 @@
-# WHJ2-Switch
+# QLIE Switch Runtime
 
 [![GPL-2.0-or-later](https://img.shields.io/badge/license-GPL--2.0--or--later-blue)](LICENSE)
 
-《美少女万華鏡2》日文原版的原生QLIE运行时移植，目标为Nintendo Switch/Horizon NRO，使用Mac作为开发验证平台。**当前是开发候选，尚非完整可玩版本，未通过Switch实机验收。**
+面向 Nintendo Switch/Horizon 的原生 QLIE 运行时，可在 Mac 上构建和验证。当前唯一接入的游戏是《美少女万華鏡2》日文原版。项目仍处于开发阶段，尚未通过 Switch 实机验收。
 
-仓库只包含技术源码、构建脚本和许可。原版游戏资源、EXE、密钥及存档不属于本仓库；游戏数据只读，移植存档单独保存。
+仓库包含技术源码、构建脚本和许可。游戏图标、原版资源、EXE、密钥、存档和生成的安装包留在本地。游戏数据只读，移植存档单独保存。
+
+## 引擎与游戏适配
+
+`libqlie-runtime.a` 独立构建封包读取、已支持的 Imoscripter 脚本语义、图像和动画、渲染图元、音频、影片及播放计时。该库可在没有游戏数据的环境构建。
+
+`games/whj2/` 提供游戏配置、程序入口、菜单和资源约定。WHJ2 保留原 SD 目录和存档格式。本地打包的 NSP Title ID 为 `01007F8E5C120000`，与旧 Title ID 使用各自的系统存档空间。
+
+资源读取目前支持 FilePackVer3.0。《罪と罰の少女》仅纳入差异调查，当前未接入。其 FilePackVer3.1 使用 UTF-16LE 索引名，密钥资料与 WHJ2 不同，并出现新的回看、场景跳转及镜头相关脚本路径。共享路径和相同的音视频 DLL 为后续调查提供线索，暂未验证脚本正文及运行行为。
 
 ## 构建和运行
 
@@ -12,7 +20,7 @@ Mac需要C/C++17编译器、Python3、SDL2、FreeType、libpng、libjpeg与FFmpe
 
 ```sh
 ./build-host.sh
-build/whj2-runtime /absolute/path/to/game /absolute/path/to/independent-saves
+build/qlie-switch-runtime /absolute/path/to/game /absolute/path/to/independent-saves
 ```
 
 Mac应用入口可在构建后生成，复用同一运行时文件：
@@ -21,15 +29,22 @@ Mac应用入口可在构建后生成，复用同一运行时文件：
 python3 tools/package_mac_app.py --game /absolute/path/to/game --saves /absolute/path/to/independent-saves
 ```
 
-输出`build/WHJ2-Mac.app`。目录读取被系统拒绝时，使用标准目录选择框授权游戏目录。
+输出`build/QLIE-Switch-Runtime.app`。目录读取被系统拒绝时，使用标准目录选择框授权游戏目录。
 
-Switch需要devkitPro、devkitA64、libnx和Switch portlibs：
+只构建引擎库时使用 `--engine-only`，分别输出到 `build/` 和 `build-switch/`。
+
+```sh
+./build-host.sh --engine-only
+./build-switch.sh --engine-only
+```
+
+Switch 应用构建使用 devkitPro、devkitA64、libnx 和对应的 Switch portlibs。
 
 ```sh
 ./build-switch.sh
 ```
 
-产物为`build-switch/whj2-runtime.nro`。默认从`sdmc:/switch/whj2/game`读取原版文件，在`sdmc:/switch/whj2/saves`保存状态。部署目录只需原版GameData、DLL/key.fkey和独立DLL/icon.key。Switch运行时不读取或执行EXE，也不需要Windows DLL。可从自己的本地原版副本准备icon.key：
+产物为`build-switch/qlie-switch-runtime.nro`。默认从`sdmc:/switch/whj2/game`读取原版文件，在`sdmc:/switch/whj2/saves`保存状态。部署目录只需原版GameData、DLL/key.fkey和独立DLL/icon.key。Switch运行时不读取或执行EXE，也不需要Windows DLL。可从自己的本地原版副本准备icon.key：
 
 ```sh
 python3 tools/extract_icon_key.py /absolute/path/to/original.exe /absolute/path/to/deployment/game/DLL/icon.key
@@ -91,7 +106,7 @@ build/cg-loop-probe /absolute/path/to/game
 build/transition-probe /absolute/path/to/game
 build/wait-probe /absolute/path/to/game
 build/message-probe /absolute/path/to/game
-build/whj2-runtime /absolute/path/to/game /absolute/path/to/empty-test-saves --touch-smoke 120
+build/qlie-switch-runtime /absolute/path/to/game /absolute/path/to/empty-test-saves --touch-smoke 120
 ```
 
 资源、逻辑和像素探针仅证明各自覆盖的路径。实际硬件、完整剧情和交互体验需要独立验证。

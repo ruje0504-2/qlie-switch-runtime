@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+#include "whj2/profile.hpp"
 #include "animation.hpp"
 #include "image.hpp"
 #include <iostream>
@@ -27,7 +28,7 @@ int main(int argc,char**argv){try{
  p.count=0;if(!whj2::particlePoints(p,9).empty())throw std::runtime_error("Disabled particles");
  std::cout<<"PASS fractional/integer/disabled counts, coordinates, child time and deterministic resampling\n";
  if(argc<2)return 0;
- qlie::Assets assets(argv[1]);
+ qlie::Assets assets(argv[1],whj2::profile::archives);
  for(const auto&name:assets.names()){
   if(name.size()<2||name.substr(name.size()-2)!=".b")continue;
   for(auto&part:whj2::abmp(assets.read(name))){

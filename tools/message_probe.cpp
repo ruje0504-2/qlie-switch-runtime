@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+#include "whj2/profile.hpp"
 #include "message_text.hpp"
 #include "scene_images.hpp"
 #include "render_queue.hpp"
@@ -7,7 +8,7 @@ extern "C" {
 }
 #include <iostream>
 #include <algorithm>
-int main(int argc,char**argv){KFont*font=nullptr;try{if(argc!=2)return 2;qlie::Assets assets(argv[1]);whj2::MessageText text(assets,true);font=kfont_open(nullptr,0);if(!font)throw std::runtime_error("Font open");
+int main(int argc,char**argv){KFont*font=nullptr;try{if(argc!=2)return 2;qlie::Assets assets(argv[1],whj2::profile::archives);whj2::MessageText text(assets,true);font=kfont_open(nullptr,0);if(!font)throw std::runtime_error("Font open");
  whj2::SceneImages scene(assets);scene.command("^message,$window01");auto style=scene.messageStyle();if(style.width!=920||style.height!=300||style.fontWidth!=26||style.fontHeight!=26)throw std::runtime_error("Original message template style");
  text.start("文字テストABC");if(text.visible()!=0)throw std::runtime_error("Initial reveal");text.update(10);if(text.visible()!=1)throw std::runtime_error("First UTF8 glyph boundary");auto state=text.save();whj2::MessageText restored(assets,true);restored.restore(state);if(restored.render(font,style).pixels!=text.render(font,style).pixels)throw std::runtime_error("Message restore pixels");
  text.update(20);restored.update(20);if(restored.visible()!=text.visible()||restored.render(font,style).pixels!=text.render(font,style).pixels)throw std::runtime_error("Message continuation");

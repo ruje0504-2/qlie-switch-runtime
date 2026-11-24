@@ -38,9 +38,11 @@ public:
 #endif
  }
 };
-inline void prepareSwitchLogDirectory(){
+inline void prepareSwitchLogDirectory(const char*root){
 #ifdef __SWITCH__
- fsdevMountSdmc();mkdir("sdmc:/switch",0755);mkdir("sdmc:/switch/whj2",0755);
+ fsdevMountSdmc();mkdir("sdmc:/switch",0755);mkdir(root,0755);
+#else
+ (void)root;
 #endif
 }
 inline void commitSavePath(const std::string&path){

@@ -13,10 +13,16 @@ struct StoryState {
  bool awaiting=false,finished=false,replay=false;
  std::vector<std::string> choices;std::deque<Event> pending;
 };
+struct StoryProfile {
+ std::string root,selection,includeDirectory,header,replayHeader,footer,saveSignature;
+ std::set<std::string> sceneCommands;
+};
 class Story {
  struct Op {std::string text;unsigned line;int end=-1,otherwise=-1;};
  struct Script {std::vector<Op> ops;std::map<std::string,size_t> labels;std::map<size_t,std::vector<std::string>> labelsAt;};
- qlie::Assets&assets;std::map<std::string,Script> scripts;
+ qlie::Assets&assets;
+ const StoryProfile profile;
+ std::map<std::string,Script> scripts;
  Script&script(const std::string&);
  std::string value(std::string)const;
  bool condition(const std::string&)const;
@@ -27,7 +33,7 @@ class Story {
  Event event(std::string,std::string,unsigned=0)const;
 public:
  StoryState state;uint64_t operations=0;std::set<std::string> visited;
- explicit Story(qlie::Assets&a):assets(a){}
+ Story(qlie::Assets&a,const StoryProfile&settings):assets(a),profile(settings){}
  void start();void startReplay(const std::string&script);
  Event next();
  std::vector<std::string> upcomingAssetCommands(bool opening=false);

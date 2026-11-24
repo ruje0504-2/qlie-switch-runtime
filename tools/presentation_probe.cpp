@@ -1,3 +1,4 @@
+#include "whj2/profile.hpp"
 #include "story.hpp"
 #include "scene_images.hpp"
 #include "animation.hpp"
@@ -5,7 +6,7 @@
 #include <fstream>
 #include <iostream>
 #include <algorithm>
-int main(int argc,char**argv){try{if(argc<2)return 2;qlie::Assets a(argv[1]);
+int main(int argc,char**argv){try{if(argc<2)return 2;qlie::Assets a(argv[1],whj2::profile::archives);
 if(argc==3&&std::string(argv[2])=="--face-render"){
  whj2::SceneImages scene(a);const std::string file="めぐみ/めぐみ_小_制服_1_05通常05";
  scene.command("^face,$base,file:"+file);qlie::Bytes actual(1280*720*4),expected(actual.size()),background(actual.size());scene.draw(actual);scene.drawScene(background);
@@ -177,4 +178,4 @@ if(argc==4&&std::string(argv[2])=="--flash-render"){
  if(mismatch)throw std::runtime_error("Flash pixels differ from original MMX");
  std::cout<<"PASS original flash whole-frame blend\n";return 0;
 }
-whj2::Story s(a);whj2::SceneImages images(a);s.start();std::string bits=argc>2?argv[2]:"000100";unsigned decisions=0,commands=0;for(unsigned n=0;n<2000000;n++){auto e=s.next();try{if(e.type=="choice")s.choose(decisions<bits.size()?unsigned(bits[decisions++]-48):0);else if(e.type=="create"||e.type=="free")images.clear();else if(e.type=="command"&&images.command(e.value))commands++;else if(e.type=="finish"||e.type=="finished"){std::cout<<"PASS static image bindings commands="<<commands<<" (animation/property warnings remain unimplemented)\n";return 0;}}catch(const std::exception&x){throw std::runtime_error(e.file+":"+std::to_string(e.line)+" "+e.value+": "+x.what());}}throw std::runtime_error("No ending");}catch(const std::exception&e){std::cerr<<"FAIL "<<e.what()<<"\n";return 1;}}
+whj2::Story s(a,whj2::profile::story);whj2::SceneImages images(a);s.start();std::string bits=argc>2?argv[2]:"000100";unsigned decisions=0,commands=0;for(unsigned n=0;n<2000000;n++){auto e=s.next();try{if(e.type=="choice")s.choose(decisions<bits.size()?unsigned(bits[decisions++]-48):0);else if(e.type=="create"||e.type=="free")images.clear();else if(e.type=="command"&&images.command(e.value))commands++;else if(e.type=="finish"||e.type=="finished"){std::cout<<"PASS static image bindings commands="<<commands<<" (animation/property warnings remain unimplemented)\n";return 0;}}catch(const std::exception&x){throw std::runtime_error(e.file+":"+std::to_string(e.line)+" "+e.value+": "+x.what());}}throw std::runtime_error("No ending");}catch(const std::exception&e){std::cerr<<"FAIL "<<e.what()<<"\n";return 1;}}

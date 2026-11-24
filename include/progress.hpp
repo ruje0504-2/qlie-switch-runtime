@@ -5,9 +5,11 @@
 namespace whj2 {
 class Progress {
  std::array<bool,4> cleared{};
- std::set<std::string> labels;
+ std::set<std::string> labels,files;
 public:
  bool capture(const Story&);
+ bool captureFiles(const std::set<std::string>&);
+ bool seenFile(const std::string&path)const{return files.count(qlie::canonical(path))!=0;}
  void apply(Story&)const;
  bool extras()const{return cleared[0]||cleared[1]||cleared[2];}
  bool clearedRoute(unsigned route)const{return route<cleared.size()&&cleared[route];}

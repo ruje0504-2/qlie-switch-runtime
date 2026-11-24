@@ -10,6 +10,9 @@ class MusicScreen {
  bool opened=false,loop=false,audible=false,dirty=false;int selected=0,playing=-1,volumeValue=100;std::string caption;
  void highlight();void play(int);void text(const std::string&,unsigned,const std::string&,unsigned,unsigned,unsigned);void refresh();
 public:
+ enum Destination {NoDestination,CG,Replay};
+ Destination destination=NoDestination;
+ Destination takeDestination(){auto value=destination;destination=NoDestination;return value;}
  MusicScreen(qlie::Assets&,Audio&,Settings&,KFont*);
  bool takeSettingsChanged(){bool value=dirty;dirty=false;return value;}
  void open();void close();bool visible()const{return opened;}

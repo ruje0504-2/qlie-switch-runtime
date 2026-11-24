@@ -13,8 +13,9 @@ struct TextureVertex {float x=0,y=0,depth=1000,u=0,v=0;};
 class RenderQueue {
  struct Command {const Image*image=nullptr;Affine2D placement;AnimationSample state;float priority=0;std::array<TextureVertex,3> triangle{};bool polygon=false;};
  std::vector<Command> commands;
- std::deque<Image> snapshots;
+ std::deque<Image> snapshots;size_t visibleImages=0;
 public:
+ size_t imageCount()const{return visibleImages;}
  void image(const Image&,const Affine2D&,float priority,float alpha,uint32_t add,uint32_t mul,unsigned blend=0,unsigned filter=0);
  const Image& snapshotImage(const Image&);
  void snapshot(const Image&,const Affine2D&,float priority,float alpha,uint32_t add,uint32_t mul,unsigned blend=0,unsigned filter=0);

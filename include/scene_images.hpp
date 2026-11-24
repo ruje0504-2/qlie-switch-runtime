@@ -4,6 +4,7 @@
 #include "message_text.hpp"
 #include <map>
 #include <memory>
+#include <set>
 namespace whj2 {
 struct Composite;
 struct SceneSoundEvent {bool stop=false,loop=false;unsigned channel=0,category=2;float gain=1;std::string source;qlie::Bytes bytes;};
@@ -13,6 +14,7 @@ class SceneImages {
  unsigned windowAlpha=255;
  uint32_t particleState=particleIdentityInitialState();
  mutable bool faceWarning=false;
+ mutable std::set<std::string> shownFiles;
  std::map<std::string,std::string> faceRepId,faceRepFile;
  unsigned faceType=0;std::string faceDefaultFile;
  qlie::Assets&assets;std::map<std::string,Layer>layers;std::map<std::string,std::map<std::string,std::string>>templates;std::map<std::string,std::shared_ptr<Image>>cache;
@@ -23,10 +25,12 @@ class SceneImages {
  std::string expand(std::string,const std::string&);
 public:
  explicit SceneImages(qlie::Assets&);
+ std::set<std::string> takeShownFiles(){std::set<std::string> out;out.swap(shownFiles);return out;}
  // UI slots are transient presentation state owned by title/choice screens.
  void uiSlot(const std::string&layer,unsigned slot,const std::string&asset);
  void uiSlot(const std::string&layer,unsigned slot,const Image&);
  bool uiHit(const std::string&layer,float x,float y)const;
+ std::pair<unsigned,unsigned> dimensions(const std::string&layer)const;
  void uiExternal(const std::string&layer,unsigned index,float value);
  qlie::Bytes save()const;void restore(const qlie::Bytes&);
  std::vector<SceneSoundEvent> takeSoundEvents();

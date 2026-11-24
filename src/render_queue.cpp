@@ -34,7 +34,7 @@ uint8_t blendChannel(unsigned mode,uint8_t source,uint8_t destination,uint8_t al
  return uint8_t(std::clamp(value,0,255));
 }
 void RenderQueue::image(const Image&i,const Affine2D&m,float pri,float alpha,uint32_t add,uint32_t mul,unsigned blend,unsigned filter){
- Command c;c.image=&i;c.placement=m;c.priority=pri;c.state.alpha=alpha;c.state.addColor=add;c.state.mulColor=mul;c.state.flags=blend;c.state.textureFilter=filter;commands.push_back(c);
+ Command c;c.image=&i;c.placement=m;c.priority=pri;c.state.alpha=alpha;c.state.addColor=add;c.state.mulColor=mul;c.state.flags=blend;c.state.textureFilter=filter;commands.push_back(c);if(alpha>0&&i.width&&i.height)visibleImages++;
 }
 const Image& RenderQueue::snapshotImage(const Image&i){snapshots.push_back(i);return snapshots.back();}
 void RenderQueue::snapshot(const Image&i,const Affine2D&m,float pri,float alpha,uint32_t add,uint32_t mul,unsigned blend,unsigned filter){
@@ -46,7 +46,7 @@ void RenderQueue::triangle(const Image&i,const std::array<TextureVertex,3>&verti
   if(ai)clipped.push_back(a);
   if(ai!=bi){float t=(10-a.depth)/(b.depth-a.depth);clipped.push_back({a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t,10,a.u+(b.u-a.u)*t,a.v+(b.v-a.v)*t});}
  }
- for(size_t n=1;n+1<clipped.size();n++){Command c;c.image=&i;c.triangle={clipped[0],clipped[n],clipped[n+1]};c.polygon=true;c.priority=pri;c.state.alpha=alpha;c.state.addColor=add;c.state.mulColor=mul;c.state.flags=blend;c.state.textureFilter=filter;commands.push_back(c);}
+ for(size_t n=1;n+1<clipped.size();n++){Command c;c.image=&i;c.triangle={clipped[0],clipped[n],clipped[n+1]};c.polygon=true;c.priority=pri;c.state.alpha=alpha;c.state.addColor=add;c.state.mulColor=mul;c.state.flags=blend;c.state.textureFilter=filter;commands.push_back(c);if(alpha>0&&i.width&&i.height)visibleImages++;}
 }
 void RenderQueue::control(const AnimationSample&s,float pri){Command c;c.state=s;c.priority=pri;commands.push_back(c);}
 namespace {

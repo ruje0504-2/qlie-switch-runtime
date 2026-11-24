@@ -13,6 +13,8 @@ public:
  bool property(const std::vector<std::string>&);
  void fromFade(double);void page(bool hasText=true,bool voicePlaying=false);void native(bool clickable,double milliseconds);
  Action tick(double milliseconds,bool voicePlaying=false);Action confirm();void cancel();
+ bool blocksClick()const{return stage==Stage::Delay&&!interruptible;}
+ bool prewaiting()const{return stage==Stage::Delay;}
  qlie::Bytes save()const;void restore(const qlie::Bytes&);
 };
 }

@@ -1,6 +1,7 @@
 #pragma once
 #include "image.hpp"
 #include "particles.hpp"
+#include "message_text.hpp"
 #include <map>
 #include <memory>
 namespace whj2 {
@@ -23,6 +24,7 @@ public:
  explicit SceneImages(qlie::Assets&);
  qlie::Bytes save()const;void restore(const qlie::Bytes&);
  std::vector<SceneSoundEvent> takeSoundEvents();
- void update(double milliseconds);bool command(const std::string&);void clear();void beginPage();void selectFace(const std::string&speaker,const std::string&voice);void draw(qlie::Bytes&)const;void drawScene(qlie::Bytes&)const;void drawFaces(qlie::Bytes&)const;
+ void update(double milliseconds);bool command(const std::string&);void clear();void beginPage();void selectFace(const std::string&speaker,const std::string&voice);void draw(qlie::Bytes&)const;void drawScene(qlie::Bytes&)const;void drawFaces(qlie::Bytes&)const;void drawMessages(qlie::Bytes&)const;
+ MessageStyle messageStyle()const;void setMessageImage(const Image&,bool show=false);
 };
 }

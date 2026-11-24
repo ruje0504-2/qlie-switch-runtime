@@ -3,6 +3,7 @@
 #include "story.hpp"
 #include "audio.hpp"
 #include "scene_images.hpp"
+#include "message_text.hpp"
 #include "scene_transition.hpp"
 #include "sentence_wait.hpp"
 #include "state_io.hpp"
@@ -44,6 +45,8 @@ struct Frontend {
  std::unique_ptr<whj2::SceneImages>images;
  std::unique_ptr<whj2::SceneTransition>transition;
  whj2::SentenceWait sentenceWait;
+ std::unique_ptr<whj2::MessageText>messageText;
+ size_t lastMessageVisible=SIZE_MAX;
  std::string pendingBody,pendingSpeaker,pendingVoice;
  std::unique_ptr<whj2::Movie>movie;
  std::unique_ptr<whj2::VoiceResolver>voices;
@@ -80,6 +83,7 @@ struct Frontend {
  std::filesystem::create_directories(saveDir);
  audio=std::make_unique<whj2::Audio>();
  images=std::make_unique<whj2::SceneImages>(assets);
+ messageText=std::make_unique<whj2::MessageText>(assets);
  transition=std::make_unique<whj2::SceneTransition>(assets);
  movie=std::make_unique<whj2::Movie>(assets,*audio);
  voices=std::make_unique<whj2::VoiceResolver>(assets);
@@ -152,18 +156,21 @@ struct Frontend {
  auto bytes=assets.read(match->request);audio->play(3,bytes,false,voices->gain,0,match->request);
  std::cerr<<"VOICE playing id="<<id<<" source="<<match->source.path<<" offset="<<match->source.offset<<" bytes="<<bytes.size()<<" loose="<<match->source.loose<<"\n";
  }
+ void refreshMessage(bool show=false){images->setMessageImage(messageText->render(font,images->messageStyle()),show);lastMessageVisible=messageText->visible();}
  void next(bool resume=false){if(menu||story.state.finished)return;
  if(!resume){images->beginPage();pendingBody.clear();pendingSpeaker.clear();pendingVoice.clear();}
  auto&body=pendingBody;auto&speaker=pendingSpeaker;auto&voiceId=pendingVoice;
  for(unsigned guard=0;guard<10000;guard++){auto e=story.next();
  if(e.type=="choice"){sentenceWait.cancel();transition->present();focus=0;
  text=body.empty()?"選択してください":body;
+ messageText->start(text);messageText->reveal();refreshMessage(true);
  name=speaker;
  images->selectFace(speaker,voiceId);
  return;
  }if(e.type=="page"){if(body.empty())continue;
  transition->present();
  text=body;
+ messageText->start(text);refreshMessage(true);
  name=speaker;
  images->selectFace(speaker,voiceId);
  playVoice(voiceId);
@@ -198,6 +205,7 @@ struct Frontend {
  images->clear();
  transition->reset();
  sentenceWait=whj2::SentenceWait{};
+ messageText->start("");
  }if(e.type=="command"||e.type=="create"||e.type=="free"||e.type=="wait"||e.type=="audio-clear"||e.type=="audio-volume"){
   // Preserve every unrendered event in the frontend trace; these are explicitly
   // pending rendering work, never counted as multimedia acceptance.
@@ -216,6 +224,7 @@ struct Frontend {
  qlie::write_file(saveDir+"/slot01.images",images->save());
  qlie::write_file(saveDir+"/slot01.transition",transition->save());
  whj2::StateWriter flow;flow.str("WHJ2-flow-1");auto waitState=sentenceWait.save();flow.str(std::string(waitState.begin(),waitState.end()));flow.str(pendingBody);flow.str(pendingSpeaker);flow.str(pendingVoice);qlie::write_file(saveDir+"/slot01.flow",flow.bytes);
+ qlie::write_file(saveDir+"/slot01.message",messageText->save());
  qlie::write_file(saveDir+"/slot01.audio",audio->save());
  whj2::StateWriter settings;
  settings.str("WHJ2-mixer-1");
@@ -244,6 +253,7 @@ struct Frontend {
  }settings.end();
  if(std::filesystem::exists(saveDir+"/slot01.flow")){auto flowBytes=qlie::file(saveDir+"/slot01.flow");whj2::StateReader flow{flowBytes};if(flow.str()!="WHJ2-flow-1")throw std::runtime_error("Flow state version");auto state=flow.str();sentenceWait.restore(qlie::Bytes(state.begin(),state.end()));pendingBody=flow.str();pendingSpeaker=flow.str();pendingVoice=flow.str();flow.end();}
  else {sentenceWait=whj2::SentenceWait{};sentenceWait.page();pendingBody=text;pendingSpeaker=name;pendingVoice.clear();}
+ if(std::filesystem::exists(saveDir+"/slot01.message"))messageText->restore(qlie::file(saveDir+"/slot01.message"));else {messageText->start(text);messageText->reveal();}refreshMessage();
  menu=false;
  focus=0;
  status="静止画・音声位置を含む状態を読み込みました。";
@@ -260,7 +270,9 @@ struct Frontend {
  else done=true;
  }else if(story.state.awaiting){story.choose(unsigned(focus));
  next();
- }else {auto action=sentenceWait.confirm();if(action==whj2::SentenceWait::Next)next();else if(action==whj2::SentenceWait::Resume)next(true);}
+ }else {if(sentenceWait.blocksClick())return;
+ if(messageText->reveal()){auto action=sentenceWait.prewaiting()?sentenceWait.confirm():whj2::SentenceWait::None;refreshMessage();if(action==whj2::SentenceWait::Next)next();else if(action==whj2::SentenceWait::Resume)next(true);return;}
+ auto action=sentenceWait.confirm();if(action==whj2::SentenceWait::Next)next();else if(action==whj2::SentenceWait::Resume)next(true);}
  }
  void draw(){if(movie->playing()){pixels=movie->image().pixels;
  SDL_UpdateTexture(texture,nullptr,pixels.data(),1280*4);
@@ -282,11 +294,8 @@ struct Frontend {
  line("メニュー",1150,20,22);
  }if(menu){std::vector<std::string>items={"はじめから","ロード","終了"};
  for(int i=0;i<3;i++)line((focus==i?"▶ ":"　 ")+items[size_t(i)],100,210+i*70,30,focus==i?0xffd58b:0xffffff);
- }else if(!hidden){for(int y=475;y<670;y++){for(int x=30;x<1250;x++){auto*d=pixels.data()+(size_t(y)*1280+x)*4;
- for(int c=0;c<3;c++)d[c]=uint8_t(unsigned(d[c])*50/255);
- }}
- line(name,55,490,26,0xffddbb);
- line(text,55,535,26);
+ }else if(!hidden){images->drawMessages(pixels);
+ line(name,200,570,26,0xffffff);
  if(story.state.awaiting)for(size_t i=0;i<story.state.choices.size();i++)line((focus==int(i)?"▶ ":"　 ")+story.state.choices[i],80,220+int(i)*50,26,focus==int(i)?0xffd58b:0xffffff);
  }if(!menu&&!hidden)images->drawFaces(pixels);
  line("A: 次へ　B / ＋: メニュー　上下: 選択　X: 保存　Y: 読込　タッチ操作対応",45,675,19,0xb0becf);
@@ -353,6 +362,7 @@ struct Frontend {
  while(!done){auto now=SDL_GetTicks64();
  if(!menu&&!movie->playing()){
  images->update(double(now-lastUpdate));
+ messageText->update(double(now-lastUpdate));if(messageText->visible()!=lastMessageVisible)refreshMessage();
  transition->update(double(now-lastUpdate));
  auto waitAction=sentenceWait.tick(double(now-lastUpdate),audio->playing(3));
  if(waitAction==whj2::SentenceWait::Next)next();else if(waitAction==whj2::SentenceWait::Resume)next(true);

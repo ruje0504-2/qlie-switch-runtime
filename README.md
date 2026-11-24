@@ -72,4 +72,6 @@ Queued gradient masks and decoded video frames retain an immutable per-queue sna
 
 Face portraits support explicit files, per-page or persistent display, show/clear controls, and foreground rendering above the text panel. Automatic selection follows project FaceType, name aliases, character IDs and the original replacement tables, with configured fallback filenames. Missing candidates remain reported.
 
-Sentence timing supports fixed waits, interruptible click waits, message waits, automatic fade-duration waits and wait-only continuation. Native script wait and click-wait events suspend parsing without blocking rendering. Remaining wait time and in-progress page assembly survive saves; skip-mode timing, typewriter text and voice-seek behavior remain incomplete.
+Sentence timing supports fixed waits, interruptible click waits, message waits, automatic fade-duration waits and wait-only continuation. Native script wait and click-wait events suspend parsing without blocking rendering. Remaining wait time and in-progress page assembly survive saves; skip-mode timing and voice-seek behavior remain incomplete.
+
+Dialogue uses the original message-frame container and text slot, with configured text area, font size and color. UTF-8 typewriter progress survives saves; confirming unfinished text reveals it before a later confirmation advances. Original rich-text controls, detailed line-breaking rules and exact native font/timing parity remain incomplete.

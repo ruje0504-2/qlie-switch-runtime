@@ -99,7 +99,7 @@ struct Composite {
  void restoreIdentity(StateReader&r){identity=uint32_t(r.n());auto count=r.n();if(count!=motionIdentities.size())throw std::runtime_error("Composite identity motion count");for(auto&v:motionIdentities)v=uint32_t(r.n());for(auto&e:members)if(e.nested)e.nested->restoreIdentity(r);}
  void warn(const std::string&s)const{if(warnings.insert(s).second)std::cerr<<"PENDING-ANIMATION "<<path<<" "<<s<<"\n";
  }
- void enqueue(RenderQueue&queue,double ms,const std::string&motionName,const Affine2D&parent,float depth,float opacity,uint32_t parentAdd,uint32_t parentMul,unsigned parentBlend=0,const Image*replacement=nullptr)const{
+ void enqueue(RenderQueue&queue,double ms,const std::string&motionName,const Affine2D&parent,float depth,float opacity,uint32_t parentAdd,uint32_t parentMul,unsigned parentBlend=0,const Image*replacement=nullptr,const Image*messageSurface=nullptr)const{
   if(definition.bounds[0]<0||definition.bounds[1]<0||definition.bounds[0]>4096||definition.bounds[1]>4096)throw std::runtime_error("Composite bounds "+path);
   const Motion*motion=findMotion(definition,motionName);
  if(!motion)throw std::runtime_error("Missing motion "+motionName+" in "+path);
@@ -162,8 +162,9 @@ struct Composite {
  if(k.kind!=4)continue;
  if(k.resource>=members.size())throw std::runtime_error("Composite image index "+path);
    auto&e=members[k.resource];
- const Image*source=replacement&&k.resource==0?replacement:e.image.get();bool dynamic=false;
-   if(replacement&&k.resource==0){
+ const Image*slot=k.resource==0?replacement:k.resource==1?messageSurface:nullptr;
+ const Image*source=slot?slot:e.image.get();bool dynamic=false;
+   if(slot){
     queue.image(*source,affine(parent,imagePlacement(k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,source->width,source->height)),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);continue;
    }
    if(e.nested){
@@ -188,7 +189,7 @@ struct Composite {
   }
  }
 };
-SceneImages::SceneImages(qlie::Assets&a):assets(a){for(auto type:{"image","chara","face"}){std::istringstream in(qlie::cp932(a.read(std::string("avg/imoscripter_template_")+type+".txt")));
+SceneImages::SceneImages(qlie::Assets&a):assets(a){for(auto type:{"image","chara","face","message"}){std::istringstream in(qlie::cp932(a.read(std::string("avg/imoscripter_template_")+type+".txt")));
  std::string s;
  while(std::getline(in,s)){auto p=s.find(61);
  if(p!=s.npos)templates[type][trim(s.substr(0,p))]=trim(s.substr(p+1));
@@ -264,14 +265,15 @@ void SceneImages::update(double ms){for(auto&entry:layers){auto&layer=entry.seco
  }}
 bool SceneImages::command(const std::string&line){auto p=line.find(44);
  auto cmd=line.substr(1,p-1);
- bool chara=cmd.rfind("chara",0)==0,face=cmd=="face";
- if(!chara&&!face&&cmd.rfind("bg",0)!=0&&cmd!="effect"&&cmd!="env")return false;
+ bool chara=cmd.rfind("chara",0)==0,face=cmd=="face",message=cmd=="message";
+ if(!chara&&!face&&!message&&cmd.rfind("bg",0)!=0&&cmd!="effect"&&cmd!="env")return false;
  auto&l=layers[cmd];
  const std::map<std::string,std::string> faceDefaults{{"mode","auto"},{"disp","once"},{"show","false"},{"x","0"},{"y","0"},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri","0"},{"align","left:top"},{"@face-active","false"}};
  if(face&&l.params.empty())l.params=faceDefaults;
+ if(message&&l.params.empty())l.params={{"mode","cls"},{"show","false"},{"x","0"},{"y","720"},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri","1100"},{"align","left:top"},{"textarea","920:300"},{"fontsize","26:26"},{"fontcolor","$FFFFFF"}};
  if(l.params.empty())l.params={{"x","640"},{"y",chara?"720":"360"},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri",chara?"500":"0"},{"show","true"},{"align",chara?"center:bottom":cmd=="effect"?"left:top":"center:center"}};
  if(chara){auto motion=l.params.find("motion");if(motion!=l.params.end()&&motion->second!="def"&&motion->second!="0"&&motion->second.find('+')==std::string::npos){motion->second="def";l.milliseconds=0;l.audioMilliseconds=-1;}}
- auto args=split(expand(p==line.npos?"":line.substr(p+1),chara?"chara":face?"face":"image"),44);
+ auto args=split(expand(p==line.npos?"":line.substr(p+1),chara?"chara":face?"face":message?"message":"image"),44);
  Layer before=l;bool file=false,baseChanged=false,position=false,color=false;
  for(auto&s:args){if(s.empty())continue;
  auto c=s.find(58);
@@ -290,7 +292,7 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  if(key=="alpha"||key=="mulcolor"||key=="addcolor")color=true;
  if(key=="vol"&&std::stof(v)==0)l.audioStopPending=true;
  if(key=="motion"){l.milliseconds=0;l.audioMilliseconds=-1;}
- if(key!="id"&&key!="mode"&&key!="disp"&&key!="base"&&key!="time"&&key!="speed"&&key!="move"&&key!="movepow"&&key!="ax"&&key!="ay"&&key!="vol"&&key!="dchannel"&&key!="motion"&&key!="file"&&key!="x"&&key!="y"&&key!="scalex"&&key!="scaley"&&key!="alpha"&&key!="show"&&key!="pri"&&key!="align"&&key!="texfilter"&&key!="rotz"&&key!="mulcolor"&&key!="addcolor")std::cerr<<"PENDING-IMAGE-PROPERTY "<<cmd<<" "<<key<<"="<<v<<"\n";
+ if(key!="textarea"&&key!="fontsize"&&key!="fontcolor"&&key!="fontno"&&key!="trans"&&key!="id"&&key!="mode"&&key!="disp"&&key!="base"&&key!="time"&&key!="speed"&&key!="move"&&key!="movepow"&&key!="ax"&&key!="ay"&&key!="vol"&&key!="dchannel"&&key!="motion"&&key!="file"&&key!="x"&&key!="y"&&key!="scalex"&&key!="scaley"&&key!="alpha"&&key!="show"&&key!="pri"&&key!="align"&&key!="texfilter"&&key!="rotz"&&key!="mulcolor"&&key!="addcolor")std::cerr<<"PENDING-IMAGE-PROPERTY "<<cmd<<" "<<key<<"="<<v<<"\n";
  }
  transition(l,before,position,color);
  auto loadBase=[&](){auto base=l.params.find("base");if((!chara&&!face)||base==l.params.end()||base->second=="none"||base->second.empty())return false;
@@ -308,7 +310,7 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  }if(chara){auto pair=split(f,58);
  if(pair.size()>1)l.prefix=pair[1];
  f=pair[0].find(47)!=std::string::npos?pair[0]:l.prefix+pair[0];
- }std::string path=(chara?"chara/":face?"face/":"image/")+f;
+ }std::string path=(chara?"chara/":face?"face/":message?"avg/window/":"image/")+f;
  if(!assets.exists(path)){if(assets.exists(path+".png"))path+=".png";
  else if(assets.exists(path+".b"))path+=".b";
  else throw std::runtime_error("Missing image "+path);
@@ -355,11 +357,18 @@ void SceneImages::selectFace(const std::string&speaker,const std::string&voice){
 void SceneImages::draw(qlie::Bytes&out)const{render(out,0);}
 void SceneImages::drawScene(qlie::Bytes&out)const{render(out,1);}
 void SceneImages::drawFaces(qlie::Bytes&out)const{render(out,2);}
+void SceneImages::drawMessages(qlie::Bytes&out)const{render(out,3);}
+MessageStyle SceneImages::messageStyle()const{MessageStyle style;auto it=layers.find("message");if(it==layers.end())return style;auto&params=it->second.params;
+ auto pair=[&](const std::string&key,unsigned&a,unsigned&b){auto found=params.find(key);if(found==params.end())return;auto values=split(found->second,':');a=unsigned(numeric(values[0]));b=values.size()>1?unsigned(numeric(values[1])):a;};
+ pair("textarea",style.width,style.height);pair("fontsize",style.fontWidth,style.fontHeight);auto color=params.find("fontcolor");if(color!=params.end())style.color=uint32_t(numeric(color->second));return style;
+}
+void SceneImages::setMessageImage(const Image&image,bool show){if(!layers.count("message"))command("^message,$window01");auto&layer=layers.at("message");layer.pixels=std::make_shared<Image>(image);if(show)layer.params["show"]="true";}
+
 void SceneImages::render(qlie::Bytes&out,unsigned pass)const{
  if(out.size()!=1280*720*4)throw std::runtime_error("Scene canvas size");
  std::vector<const Layer*>sorted;
- for(auto&x:layers){auto&layer=x.second;bool face=x.first=="face";
- if((pass==1&&face)||(pass==2&&!face))continue;
+ for(auto&x:layers){auto&layer=x.second;bool face=x.first=="face",message=x.first=="message";
+ if((pass==1&&(face||message))||(pass==2&&!face)||(pass==3&&!message))continue;
  if(face&&layer.params.at("disp")!="keep"&&layer.params.at("@face-active")!="true"){
  if(layer.params.at("show")=="true"&&layer.params.at("mode")=="auto"&&!faceWarning){std::cerr<<"PENDING-FACE automatic portrait selection\n";faceWarning=true;}continue;
  }
@@ -375,7 +384,7 @@ void SceneImages::render(qlie::Bytes&out,unsigned pass)const{
  float ax=align.rfind("center",0)==0?0.5f:align.rfind("right",0)==0?1.f:0.f,ay=align.find(":bottom")!=align.npos?1.f:align.find(":center")!=align.npos?0.5f:0.f;
  unsigned w=l->composite?unsigned(l->composite->definition.bounds[0]):l->pixels->width,h=l->composite?unsigned(l->composite->definition.bounds[1]):l->pixels->height;
  auto placement=imagePlacement(get(l,"x",640),get(l,"y",360),get(l,"scalex",100)/100,get(l,"scaley",100)/100,get(l,"rotz",0),ax,ay,w,h);
- if(l->composite){auto m=l->params.find("motion");l->composite->enqueue(queue,l->milliseconds,m==l->params.end()?"":m->second,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),0,l->params.count("@portrait")?l->pixels.get():nullptr);}
+ if(l->composite){auto m=l->params.find("motion");l->composite->enqueue(queue,l->milliseconds,m==l->params.end()?"":m->second,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),0,l->params.count("@portrait")?l->pixels.get():nullptr,layers.count("message")&&l==(&layers.at("message"))?l->pixels.get():nullptr);}
  else queue.image(*l->pixels,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)));
  }
  queue.draw(out,1280,720);

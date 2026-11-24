@@ -63,3 +63,5 @@ $cxx -std=c++17 $common $($pc --cflags freetype2 libpng libjpeg) src/qlie.cpp sr
 $cxx -std=c++17 $common $($pc --cflags libpng libjpeg) src/qlie.cpp src/story.cpp src/cg_catalog.cpp src/image.cpp tools/cg_audio_probe.cpp build/video.o $($pc --libs libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -o build/cg-audio-probe
 
 $cxx -std=c++17 $common $($pc --cflags libpng libjpeg) src/qlie.cpp src/story.cpp src/image.cpp src/animation.cpp src/particles.cpp src/scene_images.cpp src/model.cpp src/gradient_mask.cpp src/render_queue.cpp tools/cg_loop_probe.cpp build/video.o $($pc --libs libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -o build/cg-loop-probe
+
+$cxx -std=c++17 $common $($pc --cflags libpng libjpeg) src/qlie.cpp src/image.cpp tools/container_audio_inventory.cpp $($pc --libs libpng libjpeg) -o build/container-audio-inventory

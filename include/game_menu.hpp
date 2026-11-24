@@ -17,11 +17,12 @@ class GameMenu {
  void render(qlie::Bytes*,RenderTarget*);
 public:
  enum Panel {None,Save,Load,History,Settings};
- enum Action {Nothing,Close,Slot,Quit,Title,Yes,No,SettingsChanged,ResetSettings,SceneReturn,ReplayVoice,TestVolume};
+ enum Action {Nothing,Close,Slot,Quit,Title,Yes,No,SettingsChanged,ResetSettings,SceneReturn,ReplayVoice,TestVolume,DeleteSlot};
  Panel panel=None;int focus=0,page=0,historyOffset=0;bool asking=false;
  Action requested=Nothing;
  bool settingsDirty=false,allowSceneReturn=false;
  std::array<bool,4> historyVoices{};
+ std::array<bool,8> populatedSlots{};
  int historyVoiceRow=-1,historyMaxOffset=0,historyRows=0;
  unsigned testVolumeCategory=0;
  explicit GameMenu(qlie::Assets&a,whj2::Settings&s):assets(a),settings(s){}
@@ -31,7 +32,7 @@ public:
  bool visible()const{return panel!=None||asking;}
  void ask(Action a){requested=a;promptFocus=focus;asking=true;focus=0;draggedSlider=-1;}
  void dismissPrompt(){asking=false;focus=promptFocus;}
- int slot()const{return page*8+focus+1;}
+ int slot()const{return page*8+focus%8+1;}
  void move(int dx,int dy);
  Action confirm();
  Action tap(float,float);

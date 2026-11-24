@@ -12,7 +12,11 @@ int main(int argc,char**argv){try{if(argc!=2)return 2;qlie::Assets assets(argv[1
  if(menu.tap(598,314)!=whj2::GameMenu::SettingsChanged||settings.get("TextSpeed")!=0)throw std::runtime_error("Speed slider right edge");
  menu.tap(357,314);if(settings.get("TextSpeed")!=100)throw std::runtime_error("Speed slider left edge");
  menu.tap(664,163);if(settings.gains()[0]!=0)throw std::runtime_error("Master mute");
+ if(!menu.beginDrag(664,222)||!menu.drag(2000,20)||settings.get("BGMVolume")!=100)throw std::runtime_error("Captured drag upper clamp");menu.drag(0,700);if(settings.get("BGMVolume")!=0)throw std::runtime_error("Captured drag lower clamp");menu.endDrag();if(menu.drag(1100,222))throw std::runtime_error("Released drag still active");
+ menu.tap(598,373);if(settings.get("AutoTextWait")!=0||settings.get("AutoClickWait")!=0)throw std::runtime_error("Auto speed fast endpoint");menu.tap(357,373);if(settings.get("AutoTextWait")!=100||settings.get("AutoClickWait")!=5000)throw std::runtime_error("Auto speed slow endpoint");menu.tap(410,353);if(!settings.get("ClickVoiceStop"))throw std::runtime_error("Click voice setting");menu.tap(534,412);if(settings.get("AutoPlayVoiceWait"))throw std::runtime_error("Voice wait setting");menu.focus=14;menu.move(1,0);if(!settings.get("AutoPlayVoiceWait"))throw std::runtime_error("Controller voice wait setting");
  auto state=settings.save();whj2::Settings restored(assets);restored.restore(state);if(restored.save()!=state)throw std::runtime_error("Settings roundtrip");
  qlie::Bytes pixels(1280*720*4);menu.draw(pixels);if(std::none_of(pixels.begin(),pixels.end(),[](uint8_t x){return x!=0;}))throw std::runtime_error("Original controls not rendered");
+ menu.open(whj2::GameMenu::History);std::fill(pixels.begin(),pixels.end(),100);menu.draw(pixels);auto pixel=(200*1280+100)*4;if(pixels[pixel]!=30)throw std::runtime_error("History single-pass darkening");menu.ask(whj2::GameMenu::Quit);std::fill(pixels.begin(),pixels.end(),100);menu.draw(pixels);if(pixels[pixel]!=11)throw std::runtime_error("Confirmation overlay");
+ std::cout<<"PASS history single composition and confirmation overlay\n";
  std::cout<<"PASS original defaults and fixed point gains; slider endpoints/controller; settings persistence; original artwork\n";return 0;
  }catch(const std::exception&e){std::cerr<<"FAIL "<<e.what()<<"\n";return 1;}}

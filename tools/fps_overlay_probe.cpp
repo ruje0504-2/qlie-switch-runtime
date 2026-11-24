@@ -1,0 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+#include "fps_overlay.hpp"
+#include <iostream>
+#include <stdexcept>
+int main(){try{whj2::FpsOverlay fps;fps.presented(0);for(unsigned i=1;i<=60;i++)fps.presented(i*1000/60);if(fps.fps()!=60)throw std::runtime_error("60 FPS sample");for(unsigned i=1;i<=30;i++)fps.presented(1000+i*1000/30);if(fps.fps()!=30)throw std::runtime_error("Actual 30 FPS sample");qlie::Bytes canvas(1280*720*4,77),before=canvas;fps.draw(canvas);unsigned colored=0,changed=0;for(unsigned y=0;y<720;y++)for(unsigned x=0;x<1280;x++){auto i=(y*1280+x)*4;if(canvas[i]!=before[i]||canvas[i+1]!=before[i+1]||canvas[i+2]!=before[i+2]){if(y<696||x>=164)throw std::runtime_error("FPS escaped lower-left region");changed++;if(canvas[i]==255&&canvas[i+1]==216&&canvas[i+2]==128)colored++;}}if(!changed||!colored)throw std::runtime_error("Reference FPS glyphs missing");std::cout<<"PASS 60/30 FPS sampling, lower-left bounds, cyan glyphs and black shadow pixels="<<changed<<"\n";return 0;}catch(const std::exception&e){std::cerr<<"FAIL "<<e.what()<<"\n";return 1;}}

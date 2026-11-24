@@ -1,0 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+#include "auto_play.hpp"
+#include <iostream>
+#include <stdexcept>
+int main(){try{whj2::AutoPlay timer;timer.enabled=true;timer.page(1200);timer.tick(100,5,40,10);if(timer.pending()!=1300)throw std::runtime_error("Glyph accumulation and elapsed time");timer.tick(1300,5,40,10);if(!timer.ready(true,false,true)||timer.ready(false,false,true)||timer.ready(true,true,true)||!timer.ready(true,true,false))throw std::runtime_error("Completion and voice gate");timer.page(0);timer.tick(0,2,10,50);if(timer.pending()!=100)throw std::runtime_error("Native max(text wait, text speed)");auto state=timer.save();whj2::AutoPlay copy;copy.restore(state);if(copy.save()!=state)throw std::runtime_error("Timer restoration");copy.tick(100,2,10,50);if(!copy.ready(true,false,true))throw std::runtime_error("Restored timer continuation");std::cout<<"PASS glyph timer, click interval, voice gating, completion and saved continuation\n";return 0;}catch(const std::exception&e){std::cerr<<"FAIL "<<e.what()<<"\n";return 1;}}

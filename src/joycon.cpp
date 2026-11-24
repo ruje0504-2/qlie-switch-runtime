@@ -17,6 +17,7 @@ JoyConInput JoyCon::poll(uint64_t ms){
  out.history=down&HidNpadButton_Up;
  out.horizontal=(down&HidNpadButton_AnyLeft)?-1:(down&HidNpadButton_AnyRight)?1:0;
  out.upperMenu=down&HidNpadButton_Y;
+ out.fps=down&HidNpadButton_Minus;
  out.menu=down&HidNpadButton_X;
  int direction=(held&HidNpadButton_AnyUp)?-1:(held&HidNpadButton_AnyDown)?1:0;
  if(direction&&(direction!=heldDirection||ms>=repeatAt)){out.direction=direction;

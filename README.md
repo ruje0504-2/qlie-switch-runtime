@@ -23,9 +23,11 @@ Switch需要devkitPro、devkitA64、libnx和Switch portlibs：
 
 构建输出集中到固定build/build-switch目录，后续更新覆盖产物。同版本已有有效结果可以复用。
 
+Mac和Switch运行循环统一限制为最高60 FPS，保留垂直同步；输入处理和动画计时使用实际经过时间。
+
 ## 输入
 
-目标输入为Joy-Con与触摸。L打开存档界面，R打开读档界面，A点击/确认，B取消；正文中B隐藏/显示文字框。X打开菜单页面，十字键上打开历史文字，按住ZR强制快进、松开停止，选项处不自动选择。Y或屏幕下滑调出原版顶部栏，再按Y/B收起。存读档界面中方向键选择槽位，L/R翻页。游戏画面不显示自制按键说明或常驻触摸按钮。
+目标输入为Joy-Con与触摸。L打开存档界面，R打开读档界面，A点击/确认，B取消；正文中B隐藏/显示文字框。X打开菜单页面，十字键上打开历史文字，按住ZR强制快进、松开停止，选项处不自动选择。Y或屏幕下滑调出原版顶部栏，再按Y/B收起。存读档界面中方向键选择槽位，L/R翻页。游戏画面不显示自制按键说明或常驻触摸按钮。−键切换左下角FPS显示，默认隐藏；采用biko3参考的浅蓝黑影像素字，显示实际每秒提交帧率，60FPS上限始终独立生效。
 这些入口已接线，但仍缺实际Joy-Con和Switch触摸验收。SDL注入事件仅验证输入处理和状态流程。
 
 ## 实现范围
@@ -42,7 +44,7 @@ Switch需要devkitPro、devkitA64、libnx和Switch portlibs：
 
 ## 已知缺口
 
-原版剩余UI（字体、自动模式、画质等设置）、部分富文本和禁则排版、精确字体与文本计时对齐、其余缓动/图元/随机/上下文、3D模型和旋转、非位图遮罩、嵌套及影片粒子、条件关键帧跳转、嵌套音轨与完整对象生命周期、规则/马赛克/动画转场、跳过/自动播放和语音seek仍未全部完成。对白ID到实际载荷的映射尚未闭合。
+原版剩余UI（字体、画质等设置）、部分富文本和禁则排版、精确字体与文本计时对齐、其余缓动/图元/随机/上下文、3D模型和旋转、非位图遮罩、嵌套及影片粒子、条件关键帧跳转、嵌套音轨与完整对象生命周期、规则/马赛克/动画转场、既读跳过、自动播放的特殊文本计时和语音seek仍未全部完成。对白ID到实际载荷的映射尚未闭合。
 
 未实现路径通过PENDING日志记录，不作为完整游戏行为通过。Mac验证与Switch构建都不能替代本游戏的Switch实机验收。
 
@@ -73,4 +75,4 @@ build/whj2-runtime /absolute/path/to/game /absolute/path/to/empty-test-saves --t
 
 L opens the save panel; R opens the load panel. A confirms a selected slot, and B cancels a panel. X opens the settings page, Up opens text history, and held ZR forces text advance until released or a choice is reached. During dialogue B hides or restores the text box; A first restores hidden text without advancing. Y or a downward swipe opens the original upper menu. No controller legend or permanent touch overlay is drawn.
 
-Save/load panels use the original resources, 15 pages of eight local slots, and small scene thumbnails. History contains displayed pages and is included with each slot. The settings page supports the original eight sliders for text speed, text-window opacity, and six volume controls, with local persistence and reset confirmation. Remaining font, auto-play, display-quality, and character-voice controls are pending; this is not full settings parity. Confirmation dialogs currently use original artwork without the original transition timing. Physical controller/touch and Switch runtime acceptance remain pending.
+Save/load panels use the original resources, 15 pages of eight local slots, and small scene thumbnails. History contains displayed pages and is included with each slot. The settings page supports nine sliders for text speed, text-window opacity, auto-play delay, and six volume controls, plus click-to-stop voice and auto-play voice-wait toggles. Sliders support captured touch drags and controller adjustment, with local persistence and reset confirmation. The original auto-play button controls timed progression and waits for text completion and, when selected, voice completion. Remaining font, display-quality, and character-voice controls are pending; this is not full settings parity. Confirmation dialogs currently use original artwork without the original transition timing. Physical controller/touch and Switch runtime acceptance remain pending.

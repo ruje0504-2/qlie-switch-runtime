@@ -9,9 +9,9 @@ struct SettingSlider{const char*key;float x,y,width;};
 const SettingSlider sliders[]={
  {"WindowAlpha",357,195,241},{"TextSpeed",357,314,241},
  {"MasterVolume",664,163,461},{"BGMVolume",664,222,461},{"VoiceVolume",664,279,461},
- {"SEVolume",664,340,461},{"SysSEVolume",664,399,461},{"MovieVolume",664,458,461}};
-int sliderPosition(const whj2::Settings&s,int i){int value=s.get(sliders[i].key);return i==0?(value*20+127)/255:i==1?20-value/5:value/5;}
-void setPosition(whj2::Settings&s,int i,int step){step=std::clamp(step,0,20);s.set(sliders[i].key,i==0?step*255/20:i==1?100-step*5:step*5);}
+ {"SEVolume",664,340,461},{"SysSEVolume",664,399,461},{"MovieVolume",664,458,461},{"AutoTextWait",357,373,241}};
+int sliderPosition(const whj2::Settings&s,int i){int value=s.get(sliders[i].key);return i==0?(value*20+127)/255:(i==1||i==8)?20-value/5:value/5;}
+void setPosition(whj2::Settings&s,int i,int step){step=std::clamp(step,0,20);s.set(sliders[i].key,i==0?step*255/20:(i==1||i==8)?100-step*5:step*5);if(i==8)s.set("AutoClickWait",5000-step*250);}
 }
 const Image& GameMenu::resource(const std::string&path){auto it=cache.find(path);if(it==cache.end()){auto hash=path.find('#');Image decoded;
  if(hash==path.npos)decoded=image(assets.read(path));else {unsigned wanted=unsigned(std::stoul(path.substr(hash+1))),index=0;bool found=false;for(auto&member:abmp(assets.read(path.substr(0,hash))))if(member.type.rfind("abimg",0)==0){if(index++==wanted){decoded=image(member.data);found=true;break;}}if(!found)throw std::runtime_error("UI image member missing "+path);}
@@ -21,15 +21,18 @@ void GameMenu::put(RenderQueue&q,const std::string&path,float x,float y,bool cen
 void GameMenu::move(int dx,int dy){if(asking){if(dx||dy)focus=1-focus;return;}
  if(panel==Save||panel==Load){if(dx)focus=(focus+4)%8;if(dy)focus=(focus+dy+8)%8;}
  else if(panel==History)historyOffset=std::max(0,historyOffset-dy);
- else if(panel==Settings){if(dy)focus=(focus+dy+12)%12;else if(dx&&focus>=3&&focus<=10){int index=focus-3;setPosition(settings,index,sliderPosition(settings,index)+dx);settingsDirty=true;}else if(dx)focus=(focus+dx+12)%12;}
+ else if(panel==Settings){if(dy)focus=(focus+dy+15)%15;else if(dx&&focus>=3&&focus<=11){int index=focus-3;setPosition(settings,index,sliderPosition(settings,index)+dx);settingsDirty=true;}else if(dx&&focus>=13){const char*key=focus==13?"ClickVoiceStop":"AutoPlayVoiceWait";settings.set(key,1-settings.get(key));settingsDirty=true;}else if(dx)focus=(focus+dx+15)%15;}
 }
-GameMenu::Action GameMenu::confirm()const{if(asking)return focus==0?Yes:No;if(panel==Save||panel==Load)return Slot;if(panel==Settings){if(focus==0)return Close;if(focus==1)return Title;if(focus==2)return Quit;if(focus==11)return ResetSettings;return Nothing;}return Close;}
+GameMenu::Action GameMenu::confirm(){if(asking)return focus==0?Yes:No;if(panel==Save||panel==Load)return Slot;if(panel==Settings){if(focus==0)return Close;if(focus==1)return Title;if(focus==2)return Quit;if(focus==12)return ResetSettings;if(focus>=13){const char*key=focus==13?"ClickVoiceStop":"AutoPlayVoiceWait";settings.set(key,1-settings.get(key));settingsDirty=true;return SettingsChanged;}return Nothing;}return Close;}
+bool GameMenu::beginDrag(float x,float y){if(panel!=Settings||asking)return false;for(int i=0;i<9;i++){const auto&s=sliders[i];if(std::abs(y-s.y)<=18&&x>=s.x-12&&x<=s.x+s.width+12){draggedSlider=i;focus=i+3;drag(x,y);return true;}}return false;}
+bool GameMenu::drag(float x,float){if(draggedSlider<0||panel!=Settings||asking)return false;const auto&s=sliders[draggedSlider];int before=settings.get(s.key);setPosition(settings,draggedSlider,int(std::round((x-s.x)*20/s.width)));settingsDirty|=before!=settings.get(s.key);return true;}
 GameMenu::Action GameMenu::tap(float x,float y){if(asking){if(std::abs(y-325)<=20){if(std::abs(x-550)<=60){focus=0;return Yes;}if(std::abs(x-730)<=60){focus=1;return No;}}return Nothing;}
  if(panel==Save||panel==Load){if(y>=72&&y<=108&&x>=674){page=std::clamp(int((x-674)/40),0,14);focus=0;return Nothing;}if(y>=128&&y<=651){int col=x>=645?1:0;int row=int((y-128)/135);if(row<4){focus=col*4+row;return Slot;}}}
- if(panel==Settings){for(int i=0;i<8;i++){const auto&slider=sliders[i];if(std::abs(y-slider.y)<=18&&x>=slider.x-12&&x<=slider.x+slider.width+12){focus=i+3;setPosition(settings,i,int(std::round((x-slider.x)*20/slider.width)));settingsDirty=true;return SettingsChanged;}}}
+ if(panel==Settings){for(int i=0;i<9;i++){const auto&slider=sliders[i];if(std::abs(y-slider.y)<=18&&x>=slider.x-12&&x<=slider.x+slider.width+12){focus=i+3;setPosition(settings,i,int(std::round((x-slider.x)*20/slider.width)));settingsDirty=true;return SettingsChanged;}}for(int i=0;i<2;i++){if(std::abs(y-(i?412:353))<=15&&(std::abs(x-410)<=56||std::abs(x-534)<=56)){focus=13+i;settings.set(i?"AutoPlayVoiceWait":"ClickVoiceStop",x<472?1:0);settingsDirty=true;return SettingsChanged;}}}
  if(y>=670){if(x>1145)return Close;if(panel==Settings){if(x>1015)return ResetSettings;if(x>885)return Title;if(x>755)return Quit;}else if(panel==Save||panel==Load){if(x>1015)return Title;if(x>885)return Quit;}}
  return Nothing;
 }
+void GameMenu::drawAutoButton(qlie::Bytes&pixels,bool enabled){RenderQueue q;put(q,std::string("avg/window/オートプレイ")+(enabled?"_on.png":"_off.png"),1170,700,true);q.draw(pixels,1280,720);}
 void GameMenu::draw(qlie::Bytes&pixels){RenderQueue q;
  if(panel==Save||panel==Load){std::string dir="script/saveload/";put(q,dir+"背景.png",0,0);put(q,dir+(panel==Save?"アッパーフレーム_セーブ.png":"アッパーフレーム_ロード.png"),0,0);put(q,dir+"アンダーフレーム.png",1,656);
  for(int i=0;i<15;i++){char n[8];std::snprintf(n,sizeof(n),"%02d",i+1);put(q,dir+"ページ_"+n+(i==page?"_on.png":"_off.png"),694+i*40,90,true);}
@@ -37,8 +40,9 @@ void GameMenu::draw(qlie::Bytes&pixels){RenderQueue q;
  put(q,dir+"戻る_off.png",1211,695,true);put(q,dir+"タイトルへ戻る_off.png",1080,695,true);put(q,dir+"ゲームの終了_off.png",950,695,true);
  }else if(panel==History){for(size_t i=0;i<pixels.size();i+=4)for(int c=0;c<3;c++)pixels[i+c]=uint8_t(pixels[i+c]*.3);put(q,"script/log/アッパーフレーム.png",0,0);put(q,"script/log/アンダーフレーム.png",0,658);put(q,"script/log/ゲームに戻る_off.png",1208,694,true);
  }else if(panel==Settings){put(q,"script/config/背景.png",0,0);put(q,"script/config/設定フレーム.png",139,89);put(q,"script/config/アッパーフレーム.png",0,0);put(q,"script/config/アンダーフレーム.png",0,656);
- for(int i=0;i<8;i++){const auto&slider=sliders[i];bool active=focus==i+3;auto part=std::to_string(active?1:0);put(q,std::string("script/config/")+(i<2?"scroll_bar_s.b#":"scroll_bar.b#")+part,slider.x-(i<2?8:10),slider.y-(i<2?10:11));put(q,"script/config/scroll_button.b#"+part,slider.x+sliderPosition(settings,i)*slider.width/20,slider.y,true);}
- put(q,std::string("script/config/確認_設定初期化")+(focus==11?"_on.png":"_off.png"),1079,694,true);
+ for(int i=0;i<9;i++){const auto&slider=sliders[i];bool active=focus==i+3;auto part=std::to_string(active?1:0);put(q,std::string("script/config/")+((i<2||i==8)?"scroll_bar_s.b#":"scroll_bar.b#")+part,slider.x-((i<2||i==8)?8:10),slider.y-((i<2||i==8)?10:11));put(q,"script/config/scroll_button.b#"+part,slider.x+sliderPosition(settings,i)*slider.width/20,slider.y,true);}
+ put(q,std::string("script/config/確認_設定初期化")+(focus==12?"_on.png":"_off.png"),1079,694,true);
+ for(int i=0;i<2;i++){const char*yes=i?"待つ":"する";const char*no=i?"待たない":"しない";bool value=settings.get(i?"AutoPlayVoiceWait":"ClickVoiceStop");put(q,std::string("script/config/")+yes+(value?"_on.png":"_off.png"),410,i?412:353,true);put(q,std::string("script/config/")+no+(!value?"_on.png":"_off.png"),534,i?412:353,true);}
  const char*names[]={"戻る","タイトルへ戻る","ゲームの終了"};const int xs[]={1210,950,820};for(int i=0;i<3;i++)put(q,std::string("script/config/")+names[i]+(focus==i?"_on.png":"_off.png"),xs[i],695,true);
  }
  q.draw(pixels,1280,720);

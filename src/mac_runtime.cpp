@@ -459,6 +459,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  void uiSound(const std::string&name){auto path="misc/"+name+".wav";audio->play(whj2::Audio::SystemChannel,assets.read(path),false,1,0,path,3);}
  void performUi(whj2::GameMenu::Action action){using UI=whj2::GameMenu;
  if(action==UI::Nothing)return;
+ if(action==UI::TestVolume){audio->playFile(assets,whj2::Audio::SettingsTestChannel,"script/config/soundtest.ogg",false,1,0,gameMenu.testVolumeCategory);return;}
  if(action==UI::ReplayVoice){
   const size_t offset=size_t(gameMenu.historyOffset);
   for(int row=0;row<4;row++){

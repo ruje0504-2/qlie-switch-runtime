@@ -9,7 +9,7 @@ struct AudioStats {uint64_t frames,nonzero;};
 struct AudioPosition {uint64_t frame=0,length=0;bool loop=false,playing=false;};
 class Audio {
 public:
- static constexpr unsigned MusicPreviousChannel=4,SystemChannel=24,ChannelCount=25;
+ static constexpr unsigned MusicPreviousChannel=4,SettingsTestChannel=5,SystemChannel=24,ChannelCount=25;
 private:
  struct Channel {DecodedPcm pcm;std::string path;unsigned category=2;size_t pos=0;bool loop=false,stop=false;float gain=0,target=0,step=0;uint64_t fade=0;};
  std::array<float,6> userGains{{1,1,1,1,1,1}};

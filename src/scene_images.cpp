@@ -99,7 +99,7 @@ struct Composite {
  void restoreIdentity(StateReader&r){identity=uint32_t(r.n());auto count=r.n();if(count!=motionIdentities.size())throw std::runtime_error("Composite identity motion count");for(auto&v:motionIdentities)v=uint32_t(r.n());for(auto&e:members)if(e.nested)e.nested->restoreIdentity(r);}
  void warn(const std::string&s)const{if(warnings.insert(s).second)std::cerr<<"PENDING-ANIMATION "<<path<<" "<<s<<"\n";
  }
- void enqueue(RenderQueue&queue,double ms,const std::string&motionName,const Affine2D&parent,float depth,float opacity,uint32_t parentAdd,uint32_t parentMul,unsigned parentBlend=0,const Image*replacement=nullptr,const Image*messageSurface=nullptr)const{
+ void enqueue(RenderQueue&queue,double ms,const std::string&motionName,const Affine2D&parent,float depth,float opacity,uint32_t parentAdd,uint32_t parentMul,unsigned parentBlend=0,const Image*replacement=nullptr,const Image*messageSurface=nullptr,unsigned windowAlpha=255)const{
   if(definition.bounds[0]<0||definition.bounds[1]<0||definition.bounds[0]>4096||definition.bounds[1]>4096)throw std::runtime_error("Composite bounds "+path);
   const Motion*motion=findMotion(definition,motionName);
  if(!motion)throw std::runtime_error("Missing motion "+motionName+" in "+path);
@@ -111,7 +111,7 @@ struct Composite {
  if(parentBlend)k.flags=parentBlend;
  for(auto&w:k.unsupported)if(w!="primitive=20")warn(w);
  if(!motion->layers[index].flags||!k.kind)continue;
- k.alpha=int(k.alpha)*int(opacity)/255;k.addColor=colorAdd(k.addColor,parentAdd);k.mulColor=colorMultiply(k.mulColor,parentMul);
+ k.alpha=int(k.alpha)*int(opacity)/255;if(messageSurface&&k.kind==4&&k.resource==0)k.alpha=int(k.alpha)*int(windowAlpha)/255;k.addColor=colorAdd(k.addColor,parentAdd);k.mulColor=colorMultiply(k.mulColor,parentMul);
  if(k.kind==15||k.kind==16){queue.control(k,depth+k.priority);continue;}
  if(k.kind==1){
   if((k.flags&0x7f)>8){warn("rectangle-blend="+std::to_string(k.flags));continue;}
@@ -219,6 +219,8 @@ std::vector<SceneSoundEvent> SceneImages::takeSoundEvents(){
  for(auto&entry:layers){auto&layer=entry.second;
   int base=layer.params.count("dchannel")?std::stoi(layer.params.at("dchannel")):0;
   if(base<0||base>=16)throw std::runtime_error("Direct sound channel out of range");
+  unsigned category=entry.first.rfind("chara",0)==0?1:2;
+  auto type=layer.params.find("voltype");if(type!=layer.params.end()){if(type->second=="bgm")category=0;else if(type->second=="voice")category=1;else if(type->second=="se")category=2;}
   int volume=layer.params.count("vol")?int(std::stof(layer.params.at("vol"))*256/100):256;
   if(layer.audioStopPending){SceneSoundEvent sound;sound.stop=true;sound.channel=8+unsigned(base);result.push_back(sound);layer.audioStopPending=false;}
   if(!layer.composite)continue;
@@ -227,7 +229,7 @@ std::vector<SceneSoundEvent> SceneImages::takeSoundEvents(){
   if(!motion)continue;
   for(auto event:animationSoundEvents(*motion,layer.audioMilliseconds,layer.milliseconds)){
    if(unsigned(base)+event.channel>=16)throw std::runtime_error("Embedded sound channel out of range");
-   SceneSoundEvent sound; sound.stop=event.stop;sound.loop=event.loop;sound.channel=8+unsigned(base)+event.channel;sound.gain=std::clamp(int(event.gain*256)*volume/256,0,256)/256.f;
+   SceneSoundEvent sound; sound.category=category;sound.stop=event.stop;sound.loop=event.loop;sound.channel=8+unsigned(base)+event.channel;sound.gain=std::clamp(int(event.gain*256)*volume/256,0,256)/256.f;
    if(!event.stop&&sound.gain==0)continue;
    if(!event.stop){if(event.resource>=object.sounds.size()||object.sounds[event.resource].empty())throw std::runtime_error("Embedded sound resource missing "+layer.path);
     sound.source="@abmp:"+std::to_string(event.resource)+":"+layer.path;sound.bytes=object.sounds[event.resource];
@@ -294,7 +296,7 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  if(key=="alpha"||key=="mulcolor"||key=="addcolor")color=true;
  if(key=="vol"&&std::stof(v)==0)l.audioStopPending=true;
  if(key=="motion"){l.milliseconds=0;l.audioMilliseconds=-1;}
- if(key!="textarea"&&key!="fontsize"&&key!="fontcolor"&&key!="fontno"&&key!="trans"&&key!="id"&&key!="mode"&&key!="disp"&&key!="base"&&key!="time"&&key!="speed"&&key!="move"&&key!="movepow"&&key!="ax"&&key!="ay"&&key!="vol"&&key!="dchannel"&&key!="motion"&&key!="file"&&key!="x"&&key!="y"&&key!="scalex"&&key!="scaley"&&key!="alpha"&&key!="show"&&key!="pri"&&key!="align"&&key!="texfilter"&&key!="rotz"&&key!="mulcolor"&&key!="addcolor")std::cerr<<"PENDING-IMAGE-PROPERTY "<<cmd<<" "<<key<<"="<<v<<"\n";
+ if(key!="textarea"&&key!="fontsize"&&key!="fontcolor"&&key!="fontno"&&key!="trans"&&key!="id"&&key!="mode"&&key!="disp"&&key!="base"&&key!="time"&&key!="speed"&&key!="move"&&key!="movepow"&&key!="ax"&&key!="ay"&&key!="vol"&&key!="voltype"&&key!="dchannel"&&key!="motion"&&key!="file"&&key!="x"&&key!="y"&&key!="scalex"&&key!="scaley"&&key!="alpha"&&key!="show"&&key!="pri"&&key!="align"&&key!="texfilter"&&key!="rotz"&&key!="mulcolor"&&key!="addcolor")std::cerr<<"PENDING-IMAGE-PROPERTY "<<cmd<<" "<<key<<"="<<v<<"\n";
  }
  if(messageShow&&l.composite){const std::string mode=l.params["show"]=="true"?"*Enable":"*Disable";
   if(findMotion(l.composite->definition,mode)){l.params["motion"]=mode;l.milliseconds=0;l.audioMilliseconds=-1;
@@ -394,7 +396,7 @@ void SceneImages::render(qlie::Bytes&out,unsigned pass)const{
  float ax=align.rfind("center",0)==0?0.5f:align.rfind("right",0)==0?1.f:0.f,ay=align.find(":bottom")!=align.npos?1.f:align.find(":center")!=align.npos?0.5f:0.f;
  unsigned w=l->composite?unsigned(l->composite->definition.bounds[0]):l->pixels->width,h=l->composite?unsigned(l->composite->definition.bounds[1]):l->pixels->height;
  auto placement=imagePlacement(get(l,"x",640),get(l,"y",360),get(l,"scalex",100)/100,get(l,"scaley",100)/100,get(l,"rotz",0),ax,ay,w,h);
- if(l->composite){auto m=l->params.find("motion");l->composite->enqueue(queue,l->milliseconds,m==l->params.end()?"":m->second,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),0,l->params.count("@portrait")?l->pixels.get():nullptr,layers.count("message")&&l==(&layers.at("message"))?l->pixels.get():nullptr);}
+ if(l->composite){auto m=l->params.find("motion");l->composite->enqueue(queue,l->milliseconds,m==l->params.end()?"":m->second,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),0,l->params.count("@portrait")?l->pixels.get():nullptr,layers.count("message")&&l==(&layers.at("message"))?l->pixels.get():nullptr,windowAlpha);}
  else queue.image(*l->pixels,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)));
  }
  queue.draw(out,1280,720);

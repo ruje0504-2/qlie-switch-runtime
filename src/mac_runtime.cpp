@@ -54,16 +54,19 @@ struct Frontend {
  std::unique_ptr<whj2::Movie>movie;
  std::unique_ptr<whj2::VoiceResolver>voices;
  std::unique_ptr<whj2::UpperMenu>upperMenu;
- whj2::GameMenu gameMenu{assets};
+ whj2::Settings settings{assets};
+ whj2::GameMenu gameMenu{assets,settings};
  std::vector<std::pair<std::string,std::string>>history;
  bool fastForward=false;unsigned selectedSlot=1;unsigned skipStart=0;
  bool fingerActive=false;SDL_FingerID fingerId=0;float fingerX=0,fingerY=0;qlie::Bytes gestureStory;
- bool movieOnly=false,movieCaptured=false,touchOnlyTest=false;
+ bool movieOnly=false,movieCaptured=false,touchOnlyTest=false,settingsTest=false;
+ uint64_t mutedNonzero=0;
  qlie::Bytes touchSavedStory;std::string touchSavedText;
  std::map<std::string,std::map<std::string,std::string>>audioTemplates;
  std::array<float,3>volumes{{0.4f,1.f,1.f}};
  std::array<bool,3>loops{{true,false,false}};
  std::array<unsigned,3>audioTimes{{1500,0,0}};
+ std::array<unsigned,3>audioTypes{{0,2,2}};
  KFont*font=nullptr;
  SDL_Window*window=nullptr;
  SDL_Renderer*renderer=nullptr;
@@ -96,6 +99,8 @@ struct Frontend {
  movie=std::make_unique<whj2::Movie>(assets,*audio);
  voices=std::make_unique<whj2::VoiceResolver>(assets);
  upperMenu=std::make_unique<whj2::UpperMenu>(assets);
+ if(std::filesystem::exists(saveDir+"/settings.cfg"))settings.restore(qlie::file(saveDir+"/settings.cfg"));
+ applySettings(false);
  for(auto type:{"music","sound"}){std::istringstream in(qlie::cp932(assets.read(std::string("avg/imoscripter_template_")+type+".txt")));
  std::string l;
  while(std::getline(in,l)){auto p=l.find(61);
@@ -110,6 +115,7 @@ struct Frontend {
  if(window)SDL_DestroyWindow(window);
  SDL_Quit();
  }
+ void applySettings(bool persist=true){audio->setUserGains(settings.gains());images->setWindowAlpha(unsigned(settings.get("WindowAlpha")));messageText->setSpeed(settings.get("TextSpeed"));if(!text.empty())refreshMessage();if(persist)qlie::write_file(saveDir+"/settings.cfg",settings.save());gameMenu.settingsDirty=false;}
  void line(const std::string&s,int x,int y,int size=26,uint32_t color=0xffffff){KImage dst{0,0,1280,720,1280*4,pixels.data()};
  int start=x;
  for(auto cp:utf8(s)){int width=cp<128?size/2:size;
@@ -141,12 +147,13 @@ struct Frontend {
  auto c=t.find(58);
  if(c==t.npos)throw std::runtime_error("Unknown audio template "+t);
  attrs[t.substr(0,c)]=t.substr(c+1);
- }for(auto&v:attrs)if(v.first!="file"&&v.first!="loop"&&v.first!="vol"&&v.first!="time"&&v.first!="clear")throw std::runtime_error("Unsupported audio property "+v.first);
+ }for(auto&v:attrs)if(v.first!="file"&&v.first!="loop"&&v.first!="vol"&&v.first!="voltype"&&v.first!="time"&&v.first!="clear")throw std::runtime_error("Unsupported audio property "+v.first);
  if(attrs.count("clear")){audio->volume(ch,0,0,true);
  return true;
  }if(attrs.count("loop"))loops[ch]=attrs["loop"]=="true";
  if(attrs.count("vol"))volumes[ch]=std::stof(attrs["vol"])/100.f*(ch==0?0.4f:1.f);
  if(attrs.count("time"))audioTimes[ch]=unsigned(std::stoul(attrs["time"]));
+ if(attrs.count("voltype")){auto type=attrs["voltype"];if(type=="bgm")audioTypes[ch]=0;else if(type=="voice")audioTypes[ch]=1;else if(type=="se")audioTypes[ch]=2;else std::cerr<<"PENDING audio volume type "<<type<<"\n";}
  unsigned ms=audioTimes[ch];
  if(attrs.count("file")){auto f=attrs["file"];
  if(f=="none"){audio->volume(ch,0,ms,true);
@@ -154,7 +161,7 @@ struct Frontend {
  }std::string path=(ch==0?"music/":"se/")+f;
  if(!assets.exists(path))path+=".ogg";
  if(!assets.exists(path))throw std::runtime_error("Missing audio "+path);
- audio->play(ch,assets.read(path),loops[ch],volumes[ch],ms,path);
+ audio->play(ch,assets.read(path),loops[ch],volumes[ch],ms,path,audioTypes[ch]);
  }else audio->volume(ch,volumes[ch],ms);
  return true;
  }
@@ -239,10 +246,10 @@ struct Frontend {
  qlie::write_file(slotPrefix(slot)+".message",messageText->save());
  qlie::write_file(slotPrefix(slot)+".audio",audio->save());
  whj2::StateWriter settings;
- settings.str("WHJ2-mixer-1");
+ settings.str("WHJ2-mixer-2");
  for(unsigned i=0;i<3;i++){settings.f(volumes[i]);
  settings.n(loops[i]);
- settings.n(audioTimes[i]);
+ settings.n(audioTimes[i]);settings.n(audioTypes[i]);
  }qlie::write_file(slotPrefix(slot)+".mixer",settings.bytes);
  whj2::StateWriter log;log.str("WHJ2-history-1");log.n(history.size());for(auto&entry:history){log.str(entry.first);log.str(entry.second);}qlie::write_file(slotPrefix(slot)+".history",log.bytes);
  status="現在の状態を保存しました。";
@@ -258,15 +265,15 @@ struct Frontend {
  if(std::filesystem::exists(slotPrefix(slot)+".transition"))transition->restore(qlie::file(slotPrefix(slot)+".transition"));else transition->reset();
  audio->restore(qlie::file(slotPrefix(slot)+".audio"),assets);
  auto b=qlie::file(slotPrefix(slot)+".mixer");
- whj2::StateReader settings{b};
- if(settings.str()!="WHJ2-mixer-1")throw std::runtime_error("Mixer version");
- for(unsigned i=0;i<3;i++){volumes[i]=settings.f();
- loops[i]=settings.n()!=0;
- audioTimes[i]=unsigned(settings.n());
- }settings.end();
+ whj2::StateReader mixerState{b};
+ auto mixerVersion=mixerState.str();if(mixerVersion!="WHJ2-mixer-1"&&mixerVersion!="WHJ2-mixer-2")throw std::runtime_error("Mixer version");
+ for(unsigned i=0;i<3;i++){volumes[i]=mixerState.f();
+ loops[i]=mixerState.n()!=0;
+ audioTimes[i]=unsigned(mixerState.n());audioTypes[i]=mixerVersion=="WHJ2-mixer-2"?unsigned(mixerState.n()):i==0?0:2;
+ }mixerState.end();
  if(std::filesystem::exists(slotPrefix(slot)+".flow")){auto flowBytes=qlie::file(slotPrefix(slot)+".flow");whj2::StateReader flow{flowBytes};if(flow.str()!="WHJ2-flow-1")throw std::runtime_error("Flow state version");auto state=flow.str();sentenceWait.restore(qlie::Bytes(state.begin(),state.end()));pendingBody=flow.str();pendingSpeaker=flow.str();pendingVoice=flow.str();flow.end();}
  else {sentenceWait=whj2::SentenceWait{};sentenceWait.page();pendingBody=text;pendingSpeaker=name;pendingVoice.clear();}
- if(std::filesystem::exists(slotPrefix(slot)+".message"))messageText->restore(qlie::file(slotPrefix(slot)+".message"));else {messageText->start(text);messageText->reveal();}refreshMessage();
+ if(std::filesystem::exists(slotPrefix(slot)+".message"))messageText->restore(qlie::file(slotPrefix(slot)+".message"));else {messageText->start(text);messageText->reveal();}messageText->setSpeed(settings.get("TextSpeed"));refreshMessage();
  history.clear();if(std::filesystem::exists(slotPrefix(slot)+".history")){auto bytes=qlie::file(slotPrefix(slot)+".history");whj2::StateReader log{bytes};if(log.str()!="WHJ2-history-1")throw std::runtime_error("History version");auto count=log.n();for(uint64_t i=0;i<count;i++){auto who=log.str();auto words=log.str();history.emplace_back(who,words);}log.end();}
  menu=false;hidden=false;
  focus=0;
@@ -285,18 +292,23 @@ struct Frontend {
  }else if(story.state.awaiting){story.choose(unsigned(focus));
  next();
  }else {if(sentenceWait.blocksClick())return;
+ if(settings.get("ClickVoiceStop"))audio->volume(3,0,0,true);
  if(messageText->reveal()){auto action=sentenceWait.prewaiting()?sentenceWait.confirm():whj2::SentenceWait::None;refreshMessage();if(action==whj2::SentenceWait::Next)next();else if(action==whj2::SentenceWait::Resume)next(true);return;}
  auto action=sentenceWait.confirm();if(action==whj2::SentenceWait::Next)next();else if(action==whj2::SentenceWait::Resume)next(true);}
  }
+ void uiSound(const std::string&name){auto path="misc/"+name+".wav";audio->play(20,assets.read(path),false,1,0,path,3);}
  void performUi(whj2::GameMenu::Action action){using UI=whj2::GameMenu;
  if(action==UI::Nothing)return;
+ if(action==UI::SettingsChanged){applySettings();uiSound("Sys_OnMouse");return;}
+ uiSound(action==UI::No||action==UI::Close?"Sys_Cancel":"Sys_OnClick");
  if(action==UI::No){gameMenu.asking=false;return;}
  if(action==UI::Yes){action=gameMenu.requested;gameMenu.asking=false;
  if(action==UI::Slot){save(selectedSlot);gameMenu.close();return;}
+ if(action==UI::ResetSettings){settings.reset();applySettings();return;}
  if(action==UI::Quit){done=true;return;}
  if(action==UI::Title){if(movie->playing())movie->stop();audio->stopAll();gameMenu.close();menu=true;focus=0;return;}}
  if(action==UI::Close){gameMenu.close();return;}
- if(action==UI::Quit||action==UI::Title){gameMenu.ask(action);return;}
+ if(action==UI::Quit||action==UI::Title||action==UI::ResetSettings){gameMenu.ask(action);return;}
  if(action==UI::Slot){selectedSlot=unsigned(gameMenu.slot());
  if(gameMenu.panel==UI::Save){if(std::filesystem::exists(slotPrefix(selectedSlot)+".story")){gameMenu.ask(UI::Slot);return;}save(selectedSlot);gameMenu.close();}
  else if(gameMenu.panel==UI::Load){if(std::filesystem::exists(slotPrefix(selectedSlot)+".story")){load(selectedSlot);gameMenu.close();}else status="保存データがありません。";}
@@ -308,9 +320,9 @@ struct Frontend {
  if(action==whj2::UpperMenu::Title){performUi(whj2::GameMenu::Title);return;}
  if(action==whj2::UpperMenu::Screen){auto flags=SDL_GetWindowFlags(window);if(SDL_SetWindowFullscreen(window,(flags&SDL_WINDOW_FULLSCREEN_DESKTOP)?0:SDL_WINDOW_FULLSCREEN_DESKTOP))std::cerr<<"PENDING-UPPERMENU screen mode: "<<SDL_GetError()<<"\n";}
  }
- void back(){if(gameMenu.asking){performUi(whj2::GameMenu::No);return;}if(gameMenu.visible()){gameMenu.close();return;}if(upperMenu->visible()){upperMenu->close();return;}if(!menu)hidden=!hidden;}
+ void back(){if(gameMenu.asking){performUi(whj2::GameMenu::No);return;}if(gameMenu.visible()){performUi(whj2::GameMenu::Close);return;}if(upperMenu->visible()){upperMenu->close();return;}if(!menu)hidden=!hidden;}
  void drawPanel(){using UI=whj2::GameMenu;gameMenu.draw(pixels);
- if(gameMenu.asking){auto prompt=gameMenu.requested==UI::Quit?"ゲームを終了しますか？":gameMenu.requested==UI::Title?"タイトルに戻りますか？":"上書きしてよろしいですか？";line(prompt,440,275,28);return;}
+ if(gameMenu.asking){auto prompt=gameMenu.requested==UI::Quit?"ゲームを終了しますか？":gameMenu.requested==UI::Title?"タイトルに戻りますか？":gameMenu.requested==UI::ResetSettings?"設定を初期状態に戻しますか？":"上書きしてよろしいですか？";line(prompt,440,275,28);return;}
  if(gameMenu.panel==UI::Save||gameMenu.panel==UI::Load){for(int i=0;i<8;i++){unsigned slot=unsigned(gameMenu.page*8+i+1);int x=i<4?198:834,y=136+(i%4)*135;line("No."+std::to_string(slot),x,y,16,0xff5555);bool exists=std::filesystem::exists(slotPrefix(slot)+".story");if(exists){if(std::filesystem::exists(slotPrefix(slot)+".thumbnail")){whj2::Image thumbnail{160,90,qlie::file(slotPrefix(slot)+".thumbnail")};if(thumbnail.pixels.size()!=160*90*4)throw std::runtime_error("Thumbnail size");whj2::RenderQueue queue;queue.image(thumbnail,whj2::imagePlacement(i<4?27:660,137+(i%4)*135,1,1,0,0,0,160,90),0,255,0,0xffffff);queue.draw(pixels,1280,720);}auto content=qlie::file(slotPrefix(slot)+".text");std::string excerpt(content.begin(),content.end());auto chars=utf8(excerpt);int px=x;for(size_t n=0;n<chars.size()&&n<23;n++){kfont_draw(font,newImage(),chars[n],px,y+22,18,18,0xffffff);px+=chars[n]<128?9:18;}}else line("NO DATA",x,y+24,18,0x999999);}
  if(!status.empty())line(status,30,677,18);}
  if(gameMenu.panel==UI::History){size_t offset=std::min(size_t(gameMenu.historyOffset),history.size());for(size_t row=0;row<4&&row+offset<history.size();row++){auto&entry=history[history.size()-1-offset-row];int y=64+int(3-row)*149;line(whj2::messageDisplayName(entry.first),230,y,24);int x=230,cy=y+30;for(auto cp:utf8(entry.second)){int width=cp<128?12:24;if(cp==10||x+width>1140){x=230;cy+=30;if(cp==10)continue;}if(cy>=y+140)break;kfont_draw(font,newImage(),cp,x,cy,width,24,0xffffff);x+=width;}}}
@@ -369,7 +381,7 @@ struct Frontend {
  std::cerr<<"INPUT controller connected id="<<id<<"\n";
  }
  void controllerKey(Uint8 button){using UI=whj2::GameMenu;
- if(gameMenu.visible()){if(button==SDL_CONTROLLER_BUTTON_B)back();else if(button==SDL_CONTROLLER_BUTTON_A)performUi(gameMenu.confirm());else if(button==SDL_CONTROLLER_BUTTON_DPAD_UP)gameMenu.move(0,-1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_DOWN)gameMenu.move(0,1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_LEFT)gameMenu.move(-1,0);else if(button==SDL_CONTROLLER_BUTTON_DPAD_RIGHT)gameMenu.move(1,0);else if(button==SDL_CONTROLLER_BUTTON_LEFTSHOULDER&&(gameMenu.panel==UI::Save||gameMenu.panel==UI::Load))gameMenu.page=(gameMenu.page+14)%15;else if(button==SDL_CONTROLLER_BUTTON_RIGHTSHOULDER&&(gameMenu.panel==UI::Save||gameMenu.panel==UI::Load))gameMenu.page=(gameMenu.page+1)%15;return;}
+ if(gameMenu.visible()){if(button==SDL_CONTROLLER_BUTTON_B)back();else if(button==SDL_CONTROLLER_BUTTON_A)performUi(gameMenu.confirm());else if(button==SDL_CONTROLLER_BUTTON_DPAD_UP)gameMenu.move(0,-1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_DOWN)gameMenu.move(0,1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_LEFT)gameMenu.move(-1,0);else if(button==SDL_CONTROLLER_BUTTON_DPAD_RIGHT)gameMenu.move(1,0);else if(button==SDL_CONTROLLER_BUTTON_LEFTSHOULDER&&(gameMenu.panel==UI::Save||gameMenu.panel==UI::Load))gameMenu.page=(gameMenu.page+14)%15;else if(button==SDL_CONTROLLER_BUTTON_RIGHTSHOULDER&&(gameMenu.panel==UI::Save||gameMenu.panel==UI::Load))gameMenu.page=(gameMenu.page+1)%15;if(gameMenu.settingsDirty){applySettings();uiSound("Sys_OnMouse");}return;}
  if(button==SDL_CONTROLLER_BUTTON_Y&&!menu){upperMenu->toggle();return;}
  if(upperMenu->visible()){if(button==SDL_CONTROLLER_BUTTON_A)upperAction(upperMenu->confirm());else if(button==SDL_CONTROLLER_BUTTON_B)back();else if(button==SDL_CONTROLLER_BUTTON_DPAD_UP||button==SDL_CONTROLLER_BUTTON_DPAD_LEFT)upperMenu->move(-1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_DOWN||button==SDL_CONTROLLER_BUTTON_DPAD_RIGHT)upperMenu->move(1);return;}
  switch(button){case SDL_CONTROLLER_BUTTON_A:activate();break;
@@ -400,7 +412,7 @@ struct Frontend {
  if(waitAction==whj2::SentenceWait::Next)next();else if(waitAction==whj2::SentenceWait::Resume)next(true);
  for(auto&event:images->takeSoundEvents()){
   if(event.stop)audio->volume(event.channel,0,0,true);
-  else audio->play(event.channel,event.bytes,event.loop,event.gain,0,event.source);
+  else audio->play(event.channel,event.bytes,event.loop,event.gain,0,event.source,event.category);
  }
 }
  lastUpdate=now;
@@ -443,7 +455,17 @@ controllerKey(e.cbutton.button);
  if(movieOnly&&!movieCaptured&&movie->elapsedMs()>=1000){snapshot("movie.bmp");
  movieCaptured=true;
  std::cerr<<"MOVIE screenshot audio_clock_ms="<<movie->elapsedMs()<<"\n";
- }if(smoke){if(touchOnlyTest){
+ }if(smoke){if(settingsTest){
+ auto tap=[&](float x,float y){pointer(int(x),int(y));};
+ if(frames==1){activate();controllerKey(SDL_CONTROLLER_BUTTON_X);}
+ if(frames==4){if(gameMenu.panel!=whj2::GameMenu::Settings)throw std::runtime_error("Settings entry");tap(664,163);if(settings.get("MasterVolume")!=0)throw std::runtime_error("Touch master volume");}
+ if(frames==12)mutedNonzero=audio->stats().nonzero;
+ if(frames==18){if(audio->stats().nonzero!=mutedNonzero)throw std::runtime_error("Muted mixer emitted samples");tap(1125,163);if(settings.get("MasterVolume")!=100)throw std::runtime_error("Master gain restore");tap(598,314);if(settings.get("TextSpeed")!=0)throw std::runtime_error("Text speed right edge");tap(357,195);if(settings.get("WindowAlpha")!=0)throw std::runtime_error("Window alpha");draw();snapshot("settings.bmp");}
+ if(frames==20){gameMenu.focus=3;controllerKey(SDL_CONTROLLER_BUTTON_DPAD_RIGHT);if(settings.get("WindowAlpha")!=12)throw std::runtime_error("Controller slider increment");whj2::Settings restored(assets);restored.restore(qlie::file(saveDir+"/settings.cfg"));if(restored.save()!=settings.save())throw std::runtime_error("Settings persistence");controllerKey(SDL_CONTROLLER_BUTTON_B);}
+ if(frames==23){if(messageText->getSpeed()!=0)throw std::runtime_error("Text speed not applied");snapshot("window-alpha.bmp");controllerKey(SDL_CONTROLLER_BUTTON_X);gameMenu.focus=11;controllerKey(SDL_CONTROLLER_BUTTON_A);}
+ if(frames==25){if(!gameMenu.asking)throw std::runtime_error("Reset confirmation");controllerKey(SDL_CONTROLLER_BUTTON_A);whj2::Settings defaults(assets);if(settings.save()!=defaults.save())throw std::runtime_error("Reset defaults");draw();snapshot("settings-reset.bmp");}
+ if(++frames>=smoke){std::cerr<<"SETTINGS PASS mute / gain restore / speed / opacity / controller / persistence / reset\n";done=true;}continue;
+ }if(touchOnlyTest){
  auto touch=[](float x,float y){SDL_Event ev{};ev.type=SDL_FINGERDOWN;ev.tfinger.x=x;ev.tfinger.y=y;if(SDL_PushEvent(&ev)<0)throw std::runtime_error(SDL_GetError());ev.type=SDL_FINGERUP;if(SDL_PushEvent(&ev)<0)throw std::runtime_error(SDL_GetError());};
  auto controller=[](Uint8 button){SDL_Event ev{};ev.type=SDL_CONTROLLERBUTTONDOWN;ev.cbutton.button=button;if(SDL_PushEvent(&ev)<0)throw std::runtime_error(SDL_GetError());};
  if(frames==1)controller(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
@@ -519,7 +541,8 @@ if(game.empty()){std::cerr<<"usage: whj2-runtime GAME [SAVE_DIR] [--smoke-frames
 #ifdef __SWITCH__
 if(argc<3)saves="sdmc:/switch/whj2/saves";
 #endif
-Frontend f(game,saves);if(argc>4&&std::string(argv[3])=="--touch-smoke"){f.touchOnlyTest=true;smoke=unsigned(std::stoul(argv[4]));}
+Frontend f(game,saves);if(argc>4&&std::string(argv[3])=="--settings-smoke"){f.settingsTest=true;smoke=unsigned(std::stoul(argv[4]));}
+ if(argc>4&&std::string(argv[3])=="--touch-smoke"){f.touchOnlyTest=true;smoke=unsigned(std::stoul(argv[4]));}
  if(argc>4&&std::string(argv[3])=="--movie"){f.movieOnly=true;
  f.menu=false;
  f.movie->open(argv[4]);

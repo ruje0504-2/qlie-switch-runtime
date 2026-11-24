@@ -38,20 +38,21 @@ void Audio::callback(void*context,Uint8*stream,int bytes){auto&a=*static_cast<Au
  }if(c.fade){c.gain+=c.step;
  if(!--c.fade)c.gain=c.target;
  }if(c.stop&&!c.fade&&c.gain==0)continue;
- left+=c.pcm[c.pos++]*c.gain;
- right+=c.pcm[c.pos++]*c.gain;
+ left+=c.pcm[c.pos++]*c.gain*a.userGains[c.category];
+ right+=c.pcm[c.pos++]*c.gain*a.userGains[c.category];
  }int l=std::clamp(int(left),-32768,32767),r=std::clamp(int(right),-32768,32767);
  out[2*i]=int16_t(l);
  out[2*i+1]=int16_t(r);
  if(l||r)a.nonzero.fetch_add(1,std::memory_order_relaxed);
  }a.frames.fetch_add(count,std::memory_order_relaxed);
  }
-void Audio::play(unsigned ch,const qlie::Bytes&bytes,bool loop,float gain,unsigned ms,const std::string&path){if(ch>=channels.size())throw std::runtime_error("Audio channel out of range");
+void Audio::play(unsigned ch,const qlie::Bytes&bytes,bool loop,float gain,unsigned ms,const std::string&path,unsigned category){if(ch>=channels.size())throw std::runtime_error("Audio channel out of range");
  uint8_t*raw=nullptr;
  size_t n=0;
  if(kaudio_decode(bytes.data(),bytes.size(),&raw,&n))throw std::runtime_error("PCM decode failed");
  Channel c;
  c.path=path;
+ c.category=category<5?category:ch==0?0:ch==3?1:ch==7?4:2;
  c.pcm.resize(n/2);
  if(n)std::memcpy(c.pcm.data(),raw,n);
  free(raw);
@@ -75,6 +76,7 @@ void Audio::volume(unsigned ch,float gain,unsigned ms,bool stopAfter){if(ch>=cha
  c.stop=stopAfter;
  SDL_UnlockAudioDevice(device);
  }
+void Audio::setUserGains(const std::array<float,5>&gains){for(float gain:gains)if(!std::isfinite(gain)||gain<0||gain>1)throw std::runtime_error("Invalid category gain");SDL_LockAudioDevice(device);userGains=gains;SDL_UnlockAudioDevice(device);}
 void Audio::stopAll(){SDL_LockAudioDevice(device);
  for(auto&c:channels)c=Channel{};
  SDL_UnlockAudioDevice(device);
@@ -82,10 +84,11 @@ void Audio::stopAll(){SDL_LockAudioDevice(device);
 AudioStats Audio::stats()const{return {frames.load(),nonzero.load()};
  }
 qlie::Bytes Audio::save(){StateWriter w;
- w.str("WHJ2-audio-2");
+ w.str("WHJ2-audio-3");
  w.n(channels.size());
  SDL_LockAudioDevice(device);
  for(auto&c:channels){w.str(c.path);
+ w.n(c.category);
  w.n(c.pos);
  w.n(c.loop);
  w.n(c.stop);
@@ -107,10 +110,13 @@ qlie::Bytes audioSource(qlie::Assets&assets,const std::string&path){
 }
 void Audio::restore(const qlie::Bytes&bytes,qlie::Assets&assets){StateReader r{bytes};
  auto version=r.str();bool legacy=version=="WHJ2-audio-1";
- if(!legacy&&version!="WHJ2-audio-2")throw std::runtime_error("Audio state version");
+ bool categories=version=="WHJ2-audio-3";
+ if(!legacy&&!categories&&version!="WHJ2-audio-2")throw std::runtime_error("Audio state version");
  auto count=legacy?8:r.n();if(count>channels.size())throw std::runtime_error("Audio state channel count");
  std::array<Channel,24>next;
  for(size_t index=0;index<count;++index){auto&c=next[index];c.path=r.str();
+ c.category=categories?unsigned(r.n()):index==0?0:index==3?1:index==7?4:2;
+ if(c.category>4)throw std::runtime_error("Audio category");
  c.pos=r.n();
  c.loop=r.n()!=0;
  c.stop=r.n()!=0;

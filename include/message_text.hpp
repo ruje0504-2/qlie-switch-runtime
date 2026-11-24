@@ -11,6 +11,7 @@ class MessageText {
  void index();
 public:
  explicit MessageText(qlie::Assets&);
+ void setSpeed(double);double getSpeed()const{return speed;}
  void start(const std::string&);void update(double ms);bool reveal();bool finished()const;size_t visible()const;
  Image render(KFont*,const MessageStyle&)const;
  qlie::Bytes save()const;void restore(const qlie::Bytes&);

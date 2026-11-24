@@ -42,7 +42,7 @@ Switch需要devkitPro、devkitA64、libnx和Switch portlibs：
 
 ## 已知缺口
 
-原版完整UI、部分富文本和禁则排版、精确字体与文本计时对齐、其余缓动/图元/随机/上下文、3D模型和旋转、非位图遮罩、嵌套及影片粒子、条件关键帧跳转、嵌套音轨与完整对象生命周期、规则/马赛克/动画转场、跳过/自动播放和语音seek仍未全部完成。对白ID到实际载荷的映射尚未闭合。
+原版剩余UI（字体、自动模式、画质等设置）、部分富文本和禁则排版、精确字体与文本计时对齐、其余缓动/图元/随机/上下文、3D模型和旋转、非位图遮罩、嵌套及影片粒子、条件关键帧跳转、嵌套音轨与完整对象生命周期、规则/马赛克/动画转场、跳过/自动播放和语音seek仍未全部完成。对白ID到实际载荷的映射尚未闭合。
 
 未实现路径通过PENDING日志记录，不作为完整游戏行为通过。Mac验证与Switch构建都不能替代本游戏的Switch实机验收。
 
@@ -73,4 +73,4 @@ build/whj2-runtime /absolute/path/to/game /absolute/path/to/empty-test-saves --t
 
 L opens the save panel; R opens the load panel. A confirms a selected slot, and B cancels a panel. X opens the settings page, Up opens text history, and held ZR forces text advance until released or a choice is reached. During dialogue B hides or restores the text box; A first restores hidden text without advancing. Y or a downward swipe opens the original upper menu. No controller legend or permanent touch overlay is drawn.
 
-Save/load panels use the original resources, 15 pages of eight local slots, and small scene thumbnails. History contains displayed pages and is included with each slot. The settings page layout is available, but its configuration widgets are still pending; opening the page is not full settings parity. Confirmation dialogs currently use original artwork without the original transition timing. Physical controller/touch and Switch runtime acceptance remain pending.
+Save/load panels use the original resources, 15 pages of eight local slots, and small scene thumbnails. History contains displayed pages and is included with each slot. The settings page supports the original eight sliders for text speed, text-window opacity, and six volume controls, with local persistence and reset confirmation. Remaining font, auto-play, display-quality, and character-voice controls are pending; this is not full settings parity. Confirmation dialogs currently use original artwork without the original transition timing. Physical controller/touch and Switch runtime acceptance remain pending.

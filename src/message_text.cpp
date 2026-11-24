@@ -23,6 +23,7 @@ void MessageText::index(){glyphs.clear();double time=0,currentSpeed=speed;
   size_t end=text.find('[',pos+1);if(end==text.npos)end=text.size();append(text.substr(pos,end-pos),false);pos=end;
  }
 }
+void MessageText::setSpeed(double value){auto count=visible();speed=std::clamp(value,0.,100.);index();elapsed=count?glyphs[count-1].deadline:0;}
 void MessageText::start(const std::string&value){text=value;index();elapsed=0;}
 void MessageText::update(double ms){elapsed+=std::max(0.,ms);}
 size_t MessageText::visible()const{return size_t(std::upper_bound(glyphs.begin(),glyphs.end(),elapsed,[](double time,const Glyph&g){return time<g.deadline;})-glyphs.begin());}

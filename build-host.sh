@@ -52,3 +52,4 @@ $cxx -std=c++17 $common $($pc --cflags sdl2 libpng libjpeg) src/qlie.cpp src/ima
 
 $cxx -std=c++17 $common src/qlie.cpp src/story.cpp src/progress.cpp src/replay_catalog.cpp tools/replay_probe.cpp -o build/replay-probe
 $cxx -std=c++17 $common $($pc --cflags libpng libjpeg) src/qlie.cpp src/image.cpp src/animation.cpp src/particles.cpp tools/title_phase_probe.cpp $($pc --libs libpng libjpeg) -o build/title-phase-probe
+$cxx -std=c++17 $common src/render_queue.cpp tools/texture_filter_probe.cpp -o build/texture-filter-probe

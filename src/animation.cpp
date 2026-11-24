@@ -137,6 +137,8 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
  out.scaleY=val(0x1e,a.at(0x30),a.at(0x31)/100.f);
  out.priority=val(0x20,a.at(0x30),a.at(0x31)/100.f);
  out.rotationZ=val(0x22,a.at(0x30),a.at(0x31)/100.f);
+ // PE f1cb8/f1cc0 and e6324 preserve filter1(point)/2(linear).
+ if(a.size()>0x91)out.textureFilter=a[0x91];
  // PE f1ce9/f1cf1: packed 0x93 becomes runtime rotation order +0xa9.
  if(a.size()>0x93)out.rotationOrder=a[0x93];
  out.rotationX=val(0x48,a.at(0x30),a.at(0x31)/100.f);

@@ -15,10 +15,10 @@ class RenderQueue {
  std::vector<Command> commands;
  std::deque<Image> snapshots;
 public:
- void image(const Image&,const Affine2D&,float priority,float alpha,uint32_t add,uint32_t mul,unsigned blend=0);
+ void image(const Image&,const Affine2D&,float priority,float alpha,uint32_t add,uint32_t mul,unsigned blend=0,unsigned filter=0);
  const Image& snapshotImage(const Image&);
- void snapshot(const Image&,const Affine2D&,float priority,float alpha,uint32_t add,uint32_t mul,unsigned blend=0);
- void triangle(const Image&,const std::array<TextureVertex,3>&,float priority,float alpha,uint32_t add,uint32_t mul,unsigned blend=0);
+ void snapshot(const Image&,const Affine2D&,float priority,float alpha,uint32_t add,uint32_t mul,unsigned blend=0,unsigned filter=0);
+ void triangle(const Image&,const std::array<TextureVertex,3>&,float priority,float alpha,uint32_t add,uint32_t mul,unsigned blend=0,unsigned filter=0);
  void control(const AnimationSample&,float priority);
  void draw(qlie::Bytes&,unsigned width,unsigned height)const;
 };

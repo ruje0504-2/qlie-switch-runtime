@@ -45,8 +45,8 @@ Matrix3D placement3D(const AnimationSample&k,unsigned width,unsigned height){
 }
 void quad(RenderQueue&queue,const Image&texture,const Matrix3D&matrix,const AnimationSample&k,float priority){
  std::array<TextureVertex,4> v;for(unsigned i=0;i<4;i++){float x=i==1||i==2?texture.width:0,y=i>=2?texture.height:0;auto p=matrix.point({x,y,0});v[i]={p.x,p.y,1000-p.z,x,y};}
- queue.triangle(texture,{v[0],v[1],v[2]},priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
- queue.triangle(texture,{v[0],v[2],v[3]},priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
+ queue.triangle(texture,{v[0],v[1],v[2]},priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,k.textureFilter);
+ queue.triangle(texture,{v[0],v[2],v[3]},priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,k.textureFilter);
 }
 const Motion* findMotion(const Animation&definition,const std::string&name){
  if(!name.empty()&&std::all_of(name.begin(),name.end(),[](unsigned char c){return c>='0'&&c<='9';})){
@@ -151,7 +151,7 @@ struct Composite {
   // PE eaff0/ea798: rectangle dimensions are pixels, not image scale percentages.
   static const Image white{1,1,{255,255,255,255}};
   auto shape=imagePlacement(k.x,k.y,k.scaleX,k.scaleY,k.rotationZ,k.anchorX/100,k.anchorY/100,1,1);
-  queue.image(white,affine(parent,shape),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
+  queue.image(white,affine(parent,shape),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,k.textureFilter);
   continue;
  }
  if(k.kind==10){
@@ -172,7 +172,7 @@ struct Composite {
    std::copy(src,src+4,dst);dst[3]=gradientMaskAlpha(src[3],mask->pixels[(size_t(my)*mask->width+mx)*4],k.mask.amount,k.mask.mode);
   }
   auto placement=imagePlacement(k.x,k.y,k.scaleX/100*width/source->width,k.scaleY/100*height/source->height,k.rotationZ,k.anchorX/100,k.anchorY/100,source->width,source->height);
-  queue.snapshot(output,affine(parent,placement),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
+  queue.snapshot(output,affine(parent,placement),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,k.textureFilter);
   continue;
  }
  if(k.kind==20){
@@ -199,7 +199,7 @@ struct Composite {
    auto pos=projectParticle(point,k.particles,k.x,k.y,k.anchorX/100,k.anchorY/100,k.rotationZ,1280,720,e.image->width,e.image->height);
    if(!pos.visible)continue;
    auto placement=imagePlacement(pos.x,pos.y,pos.scale,pos.scale,k.rotationZ,.5f,.5f,e.image->width,e.image->height);
-   queue.image(*e.image,affine(parent,placement),depth+k.priority,k.alpha*point.alpha/255,k.addColor,k.mulColor,k.flags&0x7f);
+   queue.image(*e.image,affine(parent,placement),depth+k.priority,k.alpha*point.alpha/255,k.addColor,k.mulColor,k.flags&0x7f,k.textureFilter);
   }
   continue;
  }
@@ -218,8 +218,8 @@ struct Composite {
    for(const auto&member:members)if(member.name==material.name){texture=member.image.get();break;}
    if(!texture){warn("model-material-texture="+material.name);continue;}
    std::array<TextureVertex,4> vertices;for(unsigned i=0;i<face.corners;i++){auto point=matrix.point(object.vertices.at(face.vertices[i]));vertices[i]={point.x,point.y,1000-point.z,face.uv[i]*texture->width,face.uv[i+4]*texture->height};}
-   queue.triangle(*texture,{vertices[0],vertices[1],vertices[2]},depth+k.priority,k.alpha*materialAlpha/255,k.addColor,colorMultiply(k.mulColor,materialColor),k.flags&0x7f);
-   if(face.corners==4)queue.triangle(*texture,{vertices[0],vertices[2],vertices[3]},depth+k.priority,k.alpha*materialAlpha/255,k.addColor,colorMultiply(k.mulColor,materialColor),k.flags&0x7f);
+   queue.triangle(*texture,{vertices[0],vertices[1],vertices[2]},depth+k.priority,k.alpha*materialAlpha/255,k.addColor,colorMultiply(k.mulColor,materialColor),k.flags&0x7f,k.textureFilter);
+   if(face.corners==4)queue.triangle(*texture,{vertices[0],vertices[2],vertices[3]},depth+k.priority,k.alpha*materialAlpha/255,k.addColor,colorMultiply(k.mulColor,materialColor),k.flags&0x7f,k.textureFilter);
   }
   continue;
  }
@@ -230,7 +230,7 @@ struct Composite {
  if(uiSlots){auto override=uiSlots->find(k.resource);if(override!=uiSlots->end())slot=override->second;}
  const Image*source=slot?slot:e.image.get();bool dynamic=false;
    if(slot){
-    queue.image(*source,affine(parent,imagePlacement(k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,source->width,source->height)),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);continue;
+    queue.image(*source,affine(parent,imagePlacement(k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,source->width,source->height)),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,k.textureFilter);continue;
    }
    if(e.nested){
  if(!k.childTimeResolved){warn("nested-time context unresolved");continue;}
@@ -253,8 +253,8 @@ struct Composite {
    }
    if(source&&parent3D){auto matrix=combine(*parent3D,placement3D(k,source->width,source->height));quad(queue,dynamic?queue.snapshotImage(*source):*source,matrix,k,depth+k.priority);continue;}
    if(source){auto place=affine(parent,imagePlacement(k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,source->width,source->height));
- if(dynamic)queue.snapshot(*source,place,depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
- else queue.image(*source,place,depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
+ if(dynamic)queue.snapshot(*source,place,depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,k.textureFilter);
+ else queue.image(*source,place,depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,k.textureFilter);
  }
   }
  }

@@ -9,6 +9,7 @@ class GameMenu {
  qlie::Assets& assets;whj2::Settings& settings;std::map<std::string,Image> cache;
  const Image& resource(const std::string&);
  int volumeTestAt(float,float);
+ int qualityAt(float,float);
  int draggedSlider=-1;
  std::array<Image,2> textPreviews;
  void put(RenderQueue&,const std::string&,float,float,bool center=false,unsigned opacity=255);

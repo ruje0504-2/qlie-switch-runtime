@@ -93,6 +93,7 @@ struct Frontend {
  std::array<bool,3>loops{{true,false,false}};
  std::array<unsigned,3>audioTimes{{1500,0,0}};
  std::array<unsigned,3>audioTypes{{0,2,2}};
+ bool cpuInterlaced=false;unsigned cpuScanlinePhase=0;qlie::Bytes cpuScanlineHistory;
  KFont*font=nullptr;
  SDL_Window*window=nullptr;
  SDL_Renderer*renderer=nullptr;
@@ -234,7 +235,13 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  void showTitle(){normalSkip=false;currentPageKey.clear();cgScreen->close();replayActive=false;replayScreen->close();opening=0;images->clear();syncProgress();menu=true;hidden=false;focus=0;upperMenu->close();gameMenu.close();
   title->reset(false,progress.extras());audio->stopAll();audio->playFile(assets,0,"music/wbgm06.ogg",true,255.f/256,0,0);warmNextScene(true);
  }
- void applySettings(bool persist=true){audio->setUserGains(settings.gains());images->setWindowAlpha(unsigned(settings.get("WindowAlpha")));messageText->setSpeed(settings.get("TextSpeed"));if(!text.empty())refreshMessage();if(persist)qlie::write_file(saveDir+"/settings.cfg",settings.save());gameMenu.settingsDirty=false;}
+ void applySettings(bool persist=true){
+ bool interlace=settings.get("Interlace")!=0;bool cpuMode=interlace;
+#ifdef WHJ2_WITH_VULKAN
+ if(vulkan){vulkan->setInterlaced(interlace);cpuMode=false;}
+#endif
+ if(cpuInterlaced!=cpuMode){cpuInterlaced=cpuMode;if(cpuMode)cpuScanlineHistory=pixels;else cpuScanlineHistory.clear();}
+ audio->setUserGains(settings.gains());images->setWindowAlpha(unsigned(settings.get("WindowAlpha")));messageText->setSpeed(settings.get("TextSpeed"));if(!text.empty())refreshMessage();if(persist)qlie::write_file(saveDir+"/settings.cfg",settings.save());gameMenu.settingsDirty=false;}
  void drawGlyph(uint32_t cp,int x,int y,unsigned width,unsigned height,uint32_t color){
  if(!frameTarget){kfont_draw(font,newImage(),cp,x,y,width,height,color);return;}
  auto key=std::make_tuple(cp,width,height,color);auto at=uiGlyphs.find(key);
@@ -542,6 +549,12 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
 #ifdef WHJ2_WITH_VULKAN
  if(vulkan&&vulkan->nativePresentation()){framePacer.wait();if(auto stamp=vulkan->presentPixels(pixels))fpsDisplay.presented(*stamp);return;}
 #endif
+ bool cpuScanlines=true;
+#ifdef WHJ2_WITH_VULKAN
+ cpuScanlines=!vulkan;
+#endif
+ cpuScanlinePhase^=1;
+ if(cpuScanlines&&cpuInterlaced){if(cpuScanlineHistory.size()!=pixels.size())cpuScanlineHistory=pixels;else for(unsigned y=cpuScanlinePhase;y<720;y+=2)std::copy_n(pixels.data()+size_t(y)*1280*4,1280*4,cpuScanlineHistory.data()+size_t(y)*1280*4);pixels=cpuScanlineHistory;}
  SDL_UpdateTexture(texture,nullptr,pixels.data(),1280*4);SDL_RenderClear(renderer);SDL_RenderCopy(renderer,texture,nullptr,nullptr);framePacer.wait();SDL_RenderPresent(renderer);fpsDisplay.presented(SDL_GetTicks64());}
 #ifdef WHJ2_WITH_VULKAN
  void drawNative(){

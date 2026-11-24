@@ -122,7 +122,8 @@ struct VulkanRaster::Impl {
   qlie::Bytes unversionedCopy;
   std::optional<bool> opaque;
  };
- Buffer output,staging,texels,parameters,tileBuffer;bool uploadBase=false;VkDescriptorSet rasterSet=VK_NULL_HANDLE;
+ Buffer output,staging,texels,parameters,tileBuffer,scanlineHistory;bool uploadBase=false;VkDescriptorSet rasterSet=VK_NULL_HANDLE;
+ bool interlaced=false,scanlineValid=false,canvasValid=false;unsigned scanlinePhase=0;
  bool descriptorsChanged=true;
  std::map<const Image*,Texture>textures;std::vector<Span>retired;std::map<size_t,size_t>freeSpans;size_t textureEnd=0,maxBufferBytes=0;
  RasterFrame frameA,frameB;
@@ -395,7 +396,7 @@ struct VulkanRaster::Impl {
     swap.oldLayout=copiedTiles==TileCount?VK_IMAGE_LAYOUT_UNDEFINED:VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     swap.newLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;swap.dstAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;
     CmdPipelineBarrier(command,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,0,0,nullptr,0,nullptr,1,&swap);
-    CmdCopyBufferToImage(command,output.buffer,swap.image,swap.newLayout,uint32_t(copies.size()),copies.data());
+    CmdCopyBufferToImage(command,interlaced?scanlineHistory.buffer:output.buffer,swap.image,swap.newLayout,uint32_t(copies.size()),copies.data());
     swap.oldLayout=swap.newLayout;swap.newLayout=VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;swap.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;swap.dstAccessMask=0;
     CmdPipelineBarrier(command,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,0,0,nullptr,0,nullptr,1,&swap);
    }
@@ -458,7 +459,7 @@ struct VulkanRaster::Impl {
  void markSwapDamage(){
   if(!copyPresent)return;
   SwapDamage::Mask changed;
-  if(!current->cleared||workTiles.size()==TileCount)changed.set();
+  if(interlaced||!current->cleared||workTiles.size()==TileCount)changed.set();
   else for(const auto&h:workTiles){
    unsigned x=h[0]&65535u,y=h[0]>>16;changed.set((y/Tile)*Columns+x/Tile);
   }
@@ -475,7 +476,7 @@ struct VulkanRaster::Impl {
    std::lock_guard<std::mutex> lock(presentMutex);
    confirmed=std::exchange(completedMs,std::nullopt);
   }
-  if(!refreshUnchanged&&nativeDisplayCurrent&&current->cleared&&workTiles.empty()){
+  if(!interlaced&&!refreshUnchanged&&nativeDisplayCurrent&&current->cleared&&workTiles.empty()){
    // The compositor still displays the last presented surface. Throttle input
    // and animation sampling when FIFO acquisition no longer paces the loop.
    cpuBuildMs=milliseconds(Clock::now()-cpuFrameStart)-priorWaitMs;
@@ -545,7 +546,7 @@ struct VulkanRaster::Impl {
 #ifdef __SWITCH__
  destroyPresentation();
 #endif
- release(texels);release(parameters);release(tileBuffer);release(output);release(staging);if(fence)DestroyFence(device,fence,nullptr);if(commandPool)DestroyCommandPool(device,commandPool,nullptr);if(pipeline)DestroyPipeline(device,pipeline,nullptr);if(layout)DestroyPipelineLayout(device,layout,nullptr);if(descriptorPool)DestroyDescriptorPool(device,descriptorPool,nullptr);if(setLayout)DestroyDescriptorSetLayout(device,setLayout,nullptr);DestroyDevice(device,nullptr);}
+ release(texels);release(parameters);release(tileBuffer);release(output);release(staging);release(scanlineHistory);if(fence)DestroyFence(device,fence,nullptr);if(commandPool)DestroyCommandPool(device,commandPool,nullptr);if(pipeline)DestroyPipeline(device,pipeline,nullptr);if(layout)DestroyPipelineLayout(device,layout,nullptr);if(descriptorPool)DestroyDescriptorPool(device,descriptorPool,nullptr);if(setLayout)DestroyDescriptorSetLayout(device,setLayout,nullptr);DestroyDevice(device,nullptr);}
 #ifdef __SWITCH__
  if(surface&&DestroySurfaceKHR)DestroySurfaceKHR(instance,surface,nullptr);
 #endif
@@ -750,11 +751,38 @@ struct VulkanRaster::Impl {
 #endif
   beginGpuCommands();
  }
+ void setInterlaced(bool enabled){
+  if(interlaced==enabled)return;
+  waitForPrevious();
+  interlaced=enabled;scanlineValid=false;
+  if(enabled&&!scanlineHistory.buffer){
+#ifdef __SWITCH__
+   scanlineHistory=buffer(CanvasBytes,VK_BUFFER_USAGE_TRANSFER_SRC_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT,false);
+#else
+   scanlineHistory=buffer(CanvasBytes);
+#endif
+  }
+#ifdef __SWITCH__
+  if(displaySet){VkDescriptorBufferInfo bi{enabled?scanlineHistory.buffer:output.buffer,0,CanvasBytes};VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};write.dstSet=displaySet;write.dstBinding=1;write.descriptorCount=1;write.descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;write.pBufferInfo=&bi;UpdateDescriptorSets(device,1,&write,0,nullptr);}
+  nativeDisplayCurrent=false;for(auto&pending:swapDamage)pending.set();
+#endif
+ }
+ void copyScanlines(bool seed){
+  barrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT|VK_PIPELINE_STAGE_HOST_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_SHADER_WRITE_BIT|VK_ACCESS_TRANSFER_WRITE_BIT|VK_ACCESS_HOST_WRITE_BIT,VK_ACCESS_TRANSFER_READ_BIT|VK_ACCESS_TRANSFER_WRITE_BIT);
+  if(seed){VkBufferCopy copy{0,0,CanvasBytes};CmdCopyBuffer(command,output.buffer,scanlineHistory.buffer,1,&copy);scanlineValid=true;}
+  else{
+   std::array<VkBufferCopy,Height/2> rows{};unsigned count=0;scanlinePhase=unsigned((frames+1)&1);
+   for(unsigned y=scanlinePhase;y<Height;y+=2){auto offset=VkDeviceSize(y)*Width*4;rows[count++]={offset,offset,Width*4};}
+   CmdCopyBuffer(command,output.buffer,scanlineHistory.buffer,count,rows.data());
+  }
+  barrier(VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_TRANSFER_READ_BIT|VK_ACCESS_SHADER_READ_BIT|VK_ACCESS_SHADER_WRITE_BIT);
+ }
  void beginGpuCommands(){
   checked(ResetCommandPool(device,commandPool,0),"reset commands");
   VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   bi.flags=VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   checked(BeginCommandBuffer(command,&bi),"begin commands");
+  if(interlaced&&!scanlineValid&&canvasValid)copyScanlines(true);
 #ifdef __SWITCH__
   timingFrame=(frames==0||(frames+1)%120==0)?frames+1:0;
   timingHadRaster=!workTiles.empty();
@@ -764,6 +792,8 @@ struct VulkanRaster::Impl {
    barrier(VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT|VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT|VK_ACCESS_SHADER_WRITE_BIT);
   }
   if(!workTiles.empty())recordTiles();
+  if(interlaced)copyScanlines(!scanlineValid);
+  canvasValid=true;
   cpuBuildMs=milliseconds(Clock::now()-cpuFrameStart)-priorWaitMs;
  }
 #ifdef __SWITCH__
@@ -912,6 +942,7 @@ std::optional<uint64_t> VulkanRaster::present(bool refreshUnchanged){
 #endif
 }
 std::optional<uint64_t> VulkanRaster::presentPixels(const qlie::Bytes&pixels){begin(pixels);return present();}
+void VulkanRaster::setInterlaced(bool enabled){impl->setInterlaced(enabled);}
 void VulkanRaster::begin(const qlie::Bytes&pixels){
  auto&s=*impl;if(pixels.size()!=CanvasBytes)throw std::runtime_error("Vulkan input frame dimensions");
  s.beginFrame(false,0);s.waitForPrevious();
@@ -977,15 +1008,16 @@ void VulkanRaster::end(qlie::Bytes&pixels){
 #ifdef __SWITCH__
  writers|=VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
 #endif
- if(!s.output.data){
+ auto&display=s.interlaced?s.scanlineHistory:s.output;
+ if(!display.data){
   s.ensureStaging();s.barrier(writers,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_SHADER_WRITE_BIT|VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_TRANSFER_READ_BIT);
-  VkBufferCopy copy{0,0,CanvasBytes};s.CmdCopyBuffer(s.command,s.output.buffer,s.staging.buffer,1,&copy);
+  VkBufferCopy copy{0,0,CanvasBytes};s.CmdCopyBuffer(s.command,display.buffer,s.staging.buffer,1,&copy);
   s.barrier(VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_HOST_BIT,VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_HOST_READ_BIT);
  }else s.barrier(writers,VK_PIPELINE_STAGE_HOST_BIT,VK_ACCESS_SHADER_WRITE_BIT|VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_HOST_READ_BIT);
  checked(s.EndCommandBuffer(s.command),"end commands");checked(s.ResetFences(s.device,1,&s.fence),"reset fence");
  VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};submit.commandBufferCount=1;submit.pCommandBuffers=&s.command;
  checked(s.QueueSubmit(s.queue,1,&submit,s.fence),"submit");checked(s.WaitForFences(s.device,1,&s.fence,VK_TRUE,5000000000ull),"wait");
- auto&readback=s.output.data?s.output:s.staging;s.flush(readback,true);std::memcpy(pixels.data(),readback.data,CanvasBytes);
+ auto&readback=display.data?display:s.staging;s.flush(readback,true);std::memcpy(pixels.data(),readback.data,CanvasBytes);
  s.recording=false;s.nativeDisplayCurrent=false;s.completeFrame();
 }
 void VulkanRaster::image(const Image&i,const Affine2D&m,float alpha,uint32_t add,uint32_t mul,unsigned blend,unsigned filter){float det=m.a*m.d-m.b*m.c;if(std::abs(det)<1e-12f)return;Push p;p.p[0][0]=m.a;p.p[0][1]=m.b;p.p[0][2]=m.c;p.p[0][3]=m.d;p.p[1][0]=m.x;p.p[1][1]=m.y;p.p[1][2]=det;

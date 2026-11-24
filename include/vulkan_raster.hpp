@@ -9,6 +9,7 @@ class VulkanRaster final:public RenderTarget {
 public:
  VulkanRaster();~VulkanRaster();
  bool nativePresentation()const;
+ void setInterlaced(bool);
  void begin(const qlie::Bytes&);void end(qlie::Bytes&);
  void begin(uint32_t clearColor);
  void beginVideo(const Image&);

@@ -426,7 +426,12 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  void refreshSlotFlags(){using UI=whj2::GameMenu;if(gameMenu.panel!=UI::Save&&gameMenu.panel!=UI::Load)return;for(unsigned i=0;i<8;i++)gameMenu.populatedSlots[i]=slotPreview(unsigned(gameMenu.page)*8+i+1).exists;if(!gameMenu.asking&&gameMenu.focus>=8&&!gameMenu.populatedSlots[unsigned(gameMenu.focus)%8])gameMenu.focus%=8;}
  void deleteSlot(unsigned slot){
   if(!slot||slot>=AutoSaveBase)throw std::runtime_error("Manual delete slot range");
-  try{for(auto ext:{".text",".name",".images",".transition",".flow",".message",".auto",".choice",".audio",".mixer",".history",".thumbnail",".story"})std::filesystem::remove(slotPrefix(slot)+ext);status="データを削除しました。";}catch(const std::exception&e){std::cerr<<"DELETE FAIL "<<e.what()<<"\n";status="削除できませんでした。";}
+  bool removed=false;
+  try{
+   std::filesystem::remove(slotPrefix(slot)+".story");removed=true;
+   for(auto ext:{".text",".name",".images",".transition",".flow",".message",".auto",".choice",".audio",".mixer",".history",".thumbnail"})std::filesystem::remove(slotPrefix(slot)+ext);
+   status="データを削除しました。";
+  }catch(const std::exception&e){std::cerr<<"DELETE FAIL "<<e.what()<<"\n";status=removed?"データを削除しましたが、一部のファイルが残っています。":"削除できませんでした。";}
   slotPreviews.erase(slot);if(latestManualSlot==slot)manualSlotsScanned=false;refreshSlotFlags();
  }
  void autoSaveChoice(){

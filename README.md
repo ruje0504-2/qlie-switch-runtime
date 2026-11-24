@@ -43,7 +43,7 @@ Mac和Switch运行循环统一限制为最高60 FPS，保留垂直同步；输�
 - 独立系统通关进度与原版额外菜单。音乐鉴赏已接入18曲原资源、PCM游标计时/定位、曲目切换/循环、专用音量和控制器/触摸操作；底部跨模式导航及完整图库/回想仍待接线。
 - 场景交叠/cut/catch、点击/固定/正文等待和原生等待续行。图像、音轨、过渡、逐字及等待状态可以保存和恢复。
 
-CG目录支持原33组784个差分资源，按已显示资源解锁整组；支持原按钮分页、图片/动画差分、放大和平移，以及CG/回想/音乐页面互跳。显示记录保存在进度v2，旧进度v1可读取。动画CG内嵌音轨与完整原UI转场仍待接线。
+CG目录支持原33组784个差分资源，按已显示资源解锁整组；支持原按钮分页、图片/动画差分、放大和平移，以及CG/回想/音乐页面互跳。显示记录保存在进度v2，旧进度v1可读取。动画CG按原关键帧时间循环；34个影片资源中24个音轨解码后为全零PCM，10个无音轨。完整原UI转场仍待接线。
 
 回想目录使用原版两页缩略图和按钮，按实际经过的剧情标签解锁；回放保留原选项并在结束后返回目录，回放期间禁用存读档。当前仅完成目录和播放/返回接线，尚未完成所有回想段落的视听验收。
 
@@ -64,6 +64,8 @@ build/presentation-probe /absolute/path/to/game --chara-base
 build/presentation-probe /absolute/path/to/game --face-render
 build/presentation-probe /absolute/path/to/game --dynamic-instances
 build/embedded-audio-probe /absolute/path/to/game
+build/cg-audio-probe /absolute/path/to/game
+build/cg-loop-probe /absolute/path/to/game
 build/transition-probe /absolute/path/to/game
 build/wait-probe /absolute/path/to/game
 build/message-probe /absolute/path/to/game

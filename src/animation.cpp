@@ -116,6 +116,8 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
  const auto&a=layer.keys[i];
  const auto&b=layer.keys[std::min(i+1,layer.keys.size()-1)];
  double span=double(keyU32(b,0))-keyU32(a,0),t=span>0?std::clamp((ms-keyU32(a,0))/span,0.,1.):0;
+ size_t mediaStart=i;while(mediaStart>0&&layer.keys[mediaStart-1][4]==a[4]&&layer.keys[mediaStart-1][6]==a[6])mediaStart--;
+ out.mediaTime=ms-keyU32(layer.keys[mediaStart],0);
  out.kind=a.at(4);
  out.flags=a.at(5);
  out.resource=a.at(6);

@@ -59,3 +59,7 @@ $cxx -std=c++17 $common $($pc --cflags freetype2 libpng libjpeg) src/qlie.cpp sr
 $cxx -std=c++17 $common $($pc --cflags libpng libjpeg) src/qlie.cpp src/story.cpp src/image.cpp src/animation.cpp src/particles.cpp src/scene_images.cpp src/model.cpp src/gradient_mask.cpp src/render_queue.cpp src/progress.cpp src/cg_catalog.cpp tools/cg_catalog_probe.cpp build/video.o $($pc --libs libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -o build/cg-catalog-probe
 
 $cxx -std=c++17 $common $($pc --cflags freetype2 libpng libjpeg) src/qlie.cpp src/story.cpp src/image.cpp src/animation.cpp src/particles.cpp src/scene_images.cpp src/model.cpp src/message_text.cpp src/gradient_mask.cpp src/render_queue.cpp src/progress.cpp src/cg_catalog.cpp src/cg_screen.cpp tools/cg_ui_probe.cpp build/font.o build/video.o $($pc --libs freetype2 libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -o build/cg-ui-probe
+
+$cxx -std=c++17 $common $($pc --cflags libpng libjpeg) src/qlie.cpp src/story.cpp src/cg_catalog.cpp src/image.cpp tools/cg_audio_probe.cpp build/video.o $($pc --libs libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -o build/cg-audio-probe
+
+$cxx -std=c++17 $common $($pc --cflags libpng libjpeg) src/qlie.cpp src/story.cpp src/image.cpp src/animation.cpp src/particles.cpp src/scene_images.cpp src/model.cpp src/gradient_mask.cpp src/render_queue.cpp tools/cg_loop_probe.cpp build/video.o $($pc --libs libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -o build/cg-loop-probe

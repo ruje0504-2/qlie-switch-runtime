@@ -62,7 +62,7 @@ struct EmbeddedVideo {
  KVideo*video=nullptr;
  Image frame;
  uint64_t ticks=0;
- bool ended=false;
+ bool ended=false,audible=false;
  explicit EmbeddedVideo(const qlie::Bytes&b):bytes(b){reset();
  }
  ~EmbeddedVideo(){if(video)kvideo_close(video);
@@ -73,7 +73,7 @@ struct EmbeddedVideo {
  frame={kvideo_source_width(video),kvideo_source_height(video),{}};
  frame.pixels.resize(size_t(frame.width)*frame.height*4);
  ticks=0;
- ended=false;
+ ended=false;audible=false;
  }
  const Image&at(double ms){uint64_t target=uint64_t(std::max(0.,ms)*60/1000);
  if(target+1<ticks)reset();
@@ -81,6 +81,7 @@ struct EmbeddedVideo {
  uint8_t*pcm=nullptr;
  size_t count=0;
  int code=kvideo_step(video,&dst,&pcm,&count);
+ if(pcm&&count&&std::any_of(pcm,pcm+count,[](uint8_t sample){return sample!=0;}))audible=true;
  free(pcm);
  ticks++;
  if(code<0)throw std::runtime_error(kvideo_error(video));
@@ -246,10 +247,9 @@ struct Composite {
    else if(!e.video.empty()){
     auto&clip=clips[index];
  if(!clip||&clip->bytes!=&e.video){clip=std::make_unique<EmbeddedVideo>(e.video);
- if(kvideo_has_audio(clip->video))warn("video-audio requires mixer binding");
+
  }
-    warn("video-member origin alignment unverified");
- source=&clip->at(ms);dynamic=true;
+ source=&clip->at(k.mediaTime);if(clip->audible)warn("video nonzero audio requires mixer binding");dynamic=true;
    }
    if(source&&parent3D){auto matrix=combine(*parent3D,placement3D(k,source->width,source->height));quad(queue,dynamic?queue.snapshotImage(*source):*source,matrix,k,depth+k.priority);continue;}
    if(source){auto place=affine(parent,imagePlacement(k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,source->width,source->height));

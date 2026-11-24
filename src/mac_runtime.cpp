@@ -75,7 +75,7 @@ struct Frontend {
  std::vector<std::pair<std::string,std::string>>history;
  bool fastForward=false;unsigned selectedSlot=1;unsigned skipStart=0;unsigned autoPhase=0,autoPhaseFrame=0,titlePhase=0;
  bool fingerActive=false,fingerUiDrag=false;SDL_FingerID fingerId=0;float fingerX=0,fingerY=0;qlie::Bytes gestureStory;
- bool movieOnly=false,movieCaptured=false,touchOnlyTest=false,settingsTest=false,autoTest=false,fpsTest=false,titleTest=false,extraTest=false,musicTest=false,openingTest=false,viewTest=false,replayTest=false,cgTest=false;
+ bool movieOnly=false,movieCaptured=false,touchOnlyTest=false,settingsTest=false,autoTest=false,fpsTest=false,titleTest=false,extraTest=false,musicTest=false,openingTest=false,viewTest=false,replayTest=false,cgTest=false,cgLoopTest=false;
  unsigned opening=0;double openingElapsed=0;bool openingLogoCaptured=false;uint64_t openingTitleStarted=0;unsigned openingTitleCaptures=0;float titleAxis=0,titleAxisY=0,titlePointer=640;
  uint64_t mutedNonzero=0;
  qlie::Bytes touchSavedStory;std::string touchSavedText;
@@ -521,7 +521,15 @@ controllerKey(e.cbutton.button);
  if(movieOnly&&!movieCaptured&&movie->elapsedMs()>=1000){snapshot("movie.bmp");
  movieCaptured=true;
  std::cerr<<"MOVIE screenshot audio_clock_ms="<<movie->elapsedMs()<<"\n";
- }if(smoke){if(cgTest){
+ }if(smoke){if(cgLoopTest){
+ if(frames==1)openCg();
+ if(frames==25){cgScreen->move(0,-1);cgScreen->move(1,0);cgAction(cgScreen->confirm());}
+ if(frames==50){if(cgScreen->pageIndex()!=1)throw std::runtime_error("Loop test catalogue page");for(unsigned i=0;i<5;i++)cgScreen->move(1,0);cgAction(cgScreen->confirm());if(!cgScreen->inView())throw std::runtime_error("Animated CG fixture not unlocked");}
+ if(frames==230){touchSavedStory=pixels;snapshot("cg-loop-after-first.bmp");}
+ if(frames==260){if(pixels==touchSavedStory)throw std::runtime_error("CG movie froze after loop boundary");snapshot("cg-loop-moving.bmp");back();back();}
+ if(frames==265){if(cgScreen->visible()||!menu)throw std::runtime_error("Animated CG exit");std::cerr<<"CG LOOP PASS animation continues after first loop; normal exit; source audio separately verified silent\n";done=true;}
+ if(++frames>=smoke&&!done){throw std::runtime_error("CG loop runtime timeout");}continue;
+ }if(cgTest){
  if(frames==1){if(!progress.extras())throw std::runtime_error("CG smoke needs earned progress");title->select(2);activate();titlePhase=1;}
  else if(titlePhase==1&&title->ready()){title->select(0);activate();titlePhase=2;autoPhaseFrame=frames;}
  else if(titlePhase==2&&frames>autoPhaseFrame+25){if(!cgScreen->visible()||cgScreen->inView())throw std::runtime_error("CG catalogue not open");snapshot("cg-page1.bmp");controllerKey(SDL_CONTROLLER_BUTTON_A);titlePhase=3;autoPhaseFrame=frames;}
@@ -700,7 +708,8 @@ if(game.empty()){std::cerr<<"usage: whj2-runtime GAME [SAVE_DIR] [--smoke-frames
 #ifdef __SWITCH__
 if(argc<3)saves="sdmc:/switch/whj2/saves";
 #endif
-Frontend f(game,saves);if(argc>4&&std::string(argv[3])=="--cg-smoke"){f.cgTest=true;smoke=unsigned(std::stoul(argv[4]));}
+Frontend f(game,saves);if(argc>4&&std::string(argv[3])=="--cg-loop-smoke"){f.cgLoopTest=true;smoke=unsigned(std::stoul(argv[4]));}
+ if(argc>4&&std::string(argv[3])=="--cg-smoke"){f.cgTest=true;smoke=unsigned(std::stoul(argv[4]));}
  if(argc>4&&std::string(argv[3])=="--replay-smoke"){f.replayTest=true;smoke=unsigned(std::stoul(argv[4]));}
  if(argc>4&&std::string(argv[3])=="--title-view-smoke"){f.viewTest=true;smoke=unsigned(std::stoul(argv[4]));}
  if(argc>4&&std::string(argv[3])=="--title-smoke"){f.titleTest=true;smoke=unsigned(std::stoul(argv[4]));}

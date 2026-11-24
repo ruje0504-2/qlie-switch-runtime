@@ -19,6 +19,7 @@
 #include "choice_screen.hpp"
 #include "progress.hpp"
 #include "music_screen.hpp"
+#include "replay_screen.hpp"
 #include <sstream>
 #include <algorithm>
 extern "C" {
@@ -66,12 +67,13 @@ struct Frontend {
  std::unique_ptr<whj2::TitleScreen>title;
  std::unique_ptr<whj2::ChoiceScreen>choiceScreen;
  std::unique_ptr<whj2::MusicScreen>musicScreen;
+ std::unique_ptr<whj2::ReplayScreen>replayScreen;bool replayActive=false;unsigned replayPage=0;
  whj2::Settings settings{assets};
  whj2::GameMenu gameMenu{assets,settings};
  std::vector<std::pair<std::string,std::string>>history;
  bool fastForward=false;unsigned selectedSlot=1;unsigned skipStart=0;unsigned autoPhase=0,autoPhaseFrame=0,titlePhase=0;
  bool fingerActive=false,fingerUiDrag=false;SDL_FingerID fingerId=0;float fingerX=0,fingerY=0;qlie::Bytes gestureStory;
- bool movieOnly=false,movieCaptured=false,touchOnlyTest=false,settingsTest=false,autoTest=false,fpsTest=false,titleTest=false,extraTest=false,musicTest=false,openingTest=false,viewTest=false;
+ bool movieOnly=false,movieCaptured=false,touchOnlyTest=false,settingsTest=false,autoTest=false,fpsTest=false,titleTest=false,extraTest=false,musicTest=false,openingTest=false,viewTest=false,replayTest=false;
  unsigned opening=0;double openingElapsed=0;bool openingLogoCaptured=false;uint64_t openingTitleStarted=0;unsigned openingTitleCaptures=0;float titleAxis=0,titlePointer=640;
  uint64_t mutedNonzero=0;
  qlie::Bytes touchSavedStory;std::string touchSavedText;
@@ -117,6 +119,7 @@ struct Frontend {
  title=std::make_unique<whj2::TitleScreen>(assets);
  choiceScreen=std::make_unique<whj2::ChoiceScreen>(assets);
  musicScreen=std::make_unique<whj2::MusicScreen>(assets,*audio,settings,font);
+ replayScreen=std::make_unique<whj2::ReplayScreen>(assets,progress);
  if(std::filesystem::exists(saveDir+"/system.progress"))progress.restore(qlie::file(saveDir+"/system.progress"));
  if(std::filesystem::exists(saveDir+"/settings.cfg"))settings.restore(qlie::file(saveDir+"/settings.cfg"));
  applySettings(false);
@@ -128,7 +131,7 @@ struct Frontend {
  opening=1;images->command("^ui_caution,file:script/caution/caution.b,x:0,y:0");
  std::cerr<<"OPENING caution\n";
  }
- ~Frontend(){musicScreen.reset();movie.reset();
+ ~Frontend(){replayScreen.reset();musicScreen.reset();movie.reset();
  for(auto&c:controllers)SDL_GameControllerClose(c.second);
  audio.reset();
  kfont_close(font);
@@ -139,7 +142,7 @@ struct Frontend {
  }
  void syncProgress(){if(progress.capture(story))qlie::write_file(saveDir+"/system.progress",progress.save());}
  void makerLogo(){opening=2;images->clear();movie->open("script/makerlogo/omegastar.ogv");std::cerr<<"OPENING maker-logo\n";}
- void showTitle(){opening=0;images->clear();syncProgress();menu=true;hidden=false;focus=0;upperMenu->close();gameMenu.close();title->reset(false,progress.extras());audio->stopAll();audio->play(0,assets.read("music/wbgm06.ogg"),true,255.f/256,0,"music/wbgm06.ogg",0);}
+ void showTitle(){replayActive=false;replayScreen->close();opening=0;images->clear();syncProgress();menu=true;hidden=false;focus=0;upperMenu->close();gameMenu.close();title->reset(false,progress.extras());audio->stopAll();audio->play(0,assets.read("music/wbgm06.ogg"),true,255.f/256,0,"music/wbgm06.ogg",0);}
  void applySettings(bool persist=true){audio->setUserGains(settings.gains());images->setWindowAlpha(unsigned(settings.get("WindowAlpha")));messageText->setSpeed(settings.get("TextSpeed"));if(!text.empty())refreshMessage();if(persist)qlie::write_file(saveDir+"/settings.cfg",settings.save());gameMenu.settingsDirty=false;}
  void line(const std::string&s,int x,int y,int size=26,uint32_t color=0xffffff){KImage dst{0,0,1280,720,1280*4,pixels.data()};
  int start=x;
@@ -220,7 +223,7 @@ struct Frontend {
  advances++;
  std::cerr<<"PAGE "<<e.file<<":"<<e.line<<"\n";
  return;
- }if(e.type=="finish"||e.type=="finished"){showTitle();
+ }if(e.type=="finish"||e.type=="finished"){if(replayActive){openReplay(replayPage);return;}showTitle();
  text="";
  status="物語の終了地点に到達しました。";
  return;
@@ -257,7 +260,7 @@ struct Frontend {
  }throw std::runtime_error("Frontend event budget");
  }
  std::string slotPrefix(unsigned slot=1)const{char number[16];std::snprintf(number,sizeof(number),"/slot%02u",slot);return saveDir+number;}
- void save(unsigned slot=1){if(menu||movie->playing())return;
+ void save(unsigned slot=1){if(replayActive||menu||movie->playing())return;
  qlie::Bytes scene(1280*720*4,0);images->drawScene(scene);transition->blend(scene);if(!hidden){images->drawMessages(scene);images->drawFaces(scene);}qlie::Bytes thumb(160*90*4);for(unsigned y=0;y<90;y++)for(unsigned x=0;x<160;x++)for(unsigned c=0;c<4;c++)thumb[(y*160+x)*4+c]=scene[((y*8)*1280+x*8)*4+c];qlie::write_file(slotPrefix(slot)+".thumbnail",thumb);
  auto b=story.save();
  qlie::write_file(slotPrefix(slot)+".story",b);
@@ -316,6 +319,7 @@ struct Frontend {
  else if(action==whj2::TitleScreen::Settings)openPanel(whj2::GameMenu::Settings);
  else if(action==whj2::TitleScreen::Extra)title->setExtraPage(true);
  else if(action==whj2::TitleScreen::Sound)musicScreen->open();
+ else if(action==whj2::TitleScreen::Memory)openReplay();
  else if(action==whj2::TitleScreen::Back)title->setExtraPage(false);
  else if(action==whj2::TitleScreen::Quit)performUi(whj2::GameMenu::Quit);
  else std::cerr<<"PENDING-TITLE extra modes\n";
@@ -344,14 +348,20 @@ struct Frontend {
  else if(gameMenu.panel==UI::Load){if(std::filesystem::exists(slotPrefix(selectedSlot)+".story")){load(selectedSlot);gameMenu.close();}else status="保存データがありません。";}
  }
  }
- void openPanel(whj2::GameMenu::Panel panel){if(movie->playing())return;if(panel==whj2::GameMenu::Save&&menu)return;upperMenu->close();status.clear();gameMenu.open(panel);}
+ void openPanel(whj2::GameMenu::Panel panel){if(movie->playing()||(replayActive&&(panel==whj2::GameMenu::Save||panel==whj2::GameMenu::Load)))return;if(panel==whj2::GameMenu::Save&&menu)return;upperMenu->close();status.clear();gameMenu.open(panel);}
  void upperAction(whj2::UpperMenu::Action action){if(action==whj2::UpperMenu::None)return;upperMenu->close();
  if(action==whj2::UpperMenu::Quit){performUi(whj2::GameMenu::Quit);return;}
  if(action==whj2::UpperMenu::Title){performUi(whj2::GameMenu::Title);return;}
  if(action==whj2::UpperMenu::Screen){auto flags=SDL_GetWindowFlags(window);if(SDL_SetWindowFullscreen(window,(flags&SDL_WINDOW_FULLSCREEN_DESKTOP)?0:SDL_WINDOW_FULLSCREEN_DESKTOP))std::cerr<<"PENDING-UPPERMENU screen mode: "<<SDL_GetError()<<"\n";}
  }
+ void openReplay(unsigned page=0){replayActive=false;menu=true;hidden=false;gameMenu.close();upperMenu->close();images->clear();transition->reset();sentenceWait=whj2::SentenceWait{};history.clear();text.clear();name.clear();messageText->start("");audio->stopAll();replayScreen->open(page);auto path="music/wbgm16.ogg";audio->play(0,assets.read(path),true,255.f/256,0,path,0);}
+ void replayAction(int action){if(action==whj2::ReplayScreen::None)return;uiSound(action==whj2::ReplayScreen::Back?"Sys_Cancel":"Sys_OnClick");
+ if(action==whj2::ReplayScreen::Back){replayScreen->close();title->setExtraPage(true);leaveMusic();return;}
+ if(action==whj2::ReplayScreen::Music){replayScreen->close();musicScreen->open();return;}
+ if(action==whj2::ReplayScreen::Album){std::cerr<<"PENDING-TITLE CG page\n";return;}
+ if(action>=0){replayPage=replayScreen->pageIndex();auto script=replayScreen->entry(unsigned(action)).script;replayScreen->close();audio->stopAll();story.startReplay(script);progress.apply(story);replayActive=true;menu=false;hidden=false;autoPlay.enabled=false;focus=0;next();}}
  void leaveMusic(){audio->play(0,assets.read("music/wbgm06.ogg"),true,255.f/256,0,"music/wbgm06.ogg",0);}
- void back(){if(musicScreen->visible()){if(musicScreen->back())leaveMusic();return;}if(gameMenu.asking){performUi(whj2::GameMenu::No);return;}if(gameMenu.visible()){performUi(whj2::GameMenu::Close);return;}if(upperMenu->visible()){upperMenu->close();return;}if(!menu)hidden=!hidden;}
+ void back(){if(replayScreen->visible()){replayAction(whj2::ReplayScreen::Back);return;}if(musicScreen->visible()){if(musicScreen->back())leaveMusic();return;}if(gameMenu.asking){performUi(whj2::GameMenu::No);return;}if(gameMenu.visible()){performUi(whj2::GameMenu::Close);return;}if(upperMenu->visible()){upperMenu->close();return;}if(!menu)hidden=!hidden;}
  void drawPanel(){++panelDraws;using UI=whj2::GameMenu;gameMenu.draw(pixels);
  if(gameMenu.asking){auto prompt=gameMenu.requested==UI::Quit?"ゲームを終了しますか？":gameMenu.requested==UI::Title?"タイトルに戻りますか？":gameMenu.requested==UI::ResetSettings?"設定を初期状態に戻しますか？":"上書きしてよろしいですか？";line(prompt,440,275,28);return;}
  if(gameMenu.panel==UI::Save||gameMenu.panel==UI::Load){for(int i=0;i<8;i++){unsigned slot=unsigned(gameMenu.page*8+i+1);int x=i<4?198:834,y=136+(i%4)*135;line("No."+std::to_string(slot),x,y,16,0xff5555);bool exists=std::filesystem::exists(slotPrefix(slot)+".story");if(exists){if(std::filesystem::exists(slotPrefix(slot)+".thumbnail")){whj2::Image thumbnail{160,90,qlie::file(slotPrefix(slot)+".thumbnail")};if(thumbnail.pixels.size()!=160*90*4)throw std::runtime_error("Thumbnail size");whj2::RenderQueue queue;queue.image(thumbnail,whj2::imagePlacement(i<4?27:660,137+(i%4)*135,1,1,0,0,0,160,90),0,255,0,0xffffff);queue.draw(pixels,1280,720);}auto content=qlie::file(slotPrefix(slot)+".text");std::string excerpt(content.begin(),content.end());auto chars=utf8(excerpt);int px=x;for(size_t n=0;n<chars.size()&&n<23;n++){kfont_draw(font,newImage(),chars[n],px,y+22,18,18,0xffffff);px+=chars[n]<128?9:18;}}else line("NO DATA",x,y+24,18,0x999999);}
@@ -360,7 +370,7 @@ struct Frontend {
  }
  KImage*newImage(){static KImage dst;dst={0,0,1280,720,1280*4,pixels.data()};return &dst;}
  void present(){if(fpsVisible)fpsDisplay.draw(pixels);SDL_UpdateTexture(texture,nullptr,pixels.data(),1280*4);SDL_RenderClear(renderer);SDL_RenderCopy(renderer,texture,nullptr,nullptr);framePacer.wait();SDL_RenderPresent(renderer);fpsDisplay.presented(SDL_GetTicks64());}
- void draw(){panelDraws=0;if(opening==1){std::fill(pixels.begin(),pixels.end(),0);images->draw(pixels);present();return;}if(musicScreen->visible()){std::fill(pixels.begin(),pixels.end(),0);musicScreen->draw(pixels);present();return;}if(movie->playing()){pixels=movie->image().pixels;
+ void draw(){panelDraws=0;if(replayScreen->visible()){std::fill(pixels.begin(),pixels.end(),0);replayScreen->draw(pixels);present();return;}if(opening==1){std::fill(pixels.begin(),pixels.end(),0);images->draw(pixels);present();return;}if(musicScreen->visible()){std::fill(pixels.begin(),pixels.end(),0);musicScreen->draw(pixels);present();return;}if(movie->playing()){pixels=movie->image().pixels;
  upperMenu->draw(pixels);
  if(gameMenu.visible())drawPanel();
  present();
@@ -384,12 +394,13 @@ struct Frontend {
  SDL_FreeSurface(surface);
  std::cerr<<"SCREENSHOT "<<saveDir<<"/"<<name<<"\n";
  }
- bool titleViewActive()const{return menu&&!opening&&!gameMenu.visible()&&!musicScreen->visible();}
+ bool titleViewActive()const{return menu&&!opening&&!gameMenu.visible()&&!musicScreen->visible()&&!replayScreen->visible();}
  void touchTitleView(float x,float y){if(!titleViewActive())return;int w,h;SDL_GetWindowSize(window,&w,&h);float lx,ly;SDL_RenderWindowToLogical(renderer,int(x*w),int(y*h),&lx,&ly);titlePointer=std::clamp(lx,0.f,1280.f);title->view(titlePointer);}
- void touchDrag(float x,float y,bool start){int w,h;SDL_GetWindowSize(window,&w,&h);float lx,ly;SDL_RenderWindowToLogical(renderer,int(x*w),int(y*h),&lx,&ly);if(musicScreen->visible()){bool moved=musicScreen->drag(lx,ly);if(start)fingerUiDrag=moved;return;}if(start)fingerUiDrag=gameMenu.beginDrag(lx,ly);else gameMenu.drag(lx,ly);if(fingerUiDrag&&gameMenu.settingsDirty){applySettings(false);uiSound("Sys_OnMouse");}}
+ void touchDrag(float x,float y,bool start){int w,h;SDL_GetWindowSize(window,&w,&h);float lx,ly;SDL_RenderWindowToLogical(renderer,int(x*w),int(y*h),&lx,&ly);if(replayScreen->visible()){if(start)fingerUiDrag=false;return;}if(musicScreen->visible()){bool moved=musicScreen->drag(lx,ly);if(start)fingerUiDrag=moved;return;}if(start)fingerUiDrag=gameMenu.beginDrag(lx,ly);else gameMenu.drag(lx,ly);if(fingerUiDrag&&gameMenu.settingsDirty){applySettings(false);uiSound("Sys_OnMouse");}}
  void pointer(int px,int py){float x,y;
  SDL_RenderWindowToLogical(renderer,px,py,&x,&y);
  if(opening){activate();return;}if(menu){titlePointer=x;title->view(x);}
+ if(replayScreen->visible()){replayAction(replayScreen->tap(x,y));return;}
  if(musicScreen->visible()){if(musicScreen->tap(x,y))leaveMusic();return;}
  if(gameMenu.visible()){performUi(gameMenu.tap(x,y));return;}
  if(upperMenu->visible()){upperAction(upperMenu->tap(x,y));return;}
@@ -409,6 +420,7 @@ struct Frontend {
  void controllerKey(Uint8 button){using UI=whj2::GameMenu;
  if(button==SDL_CONTROLLER_BUTTON_BACK){fpsVisible=!fpsVisible;return;}
  if(opening){if(button==SDL_CONTROLLER_BUTTON_A)activate();return;}
+ if(replayScreen->visible()){if(button==SDL_CONTROLLER_BUTTON_B)back();else if(button==SDL_CONTROLLER_BUTTON_A)replayAction(replayScreen->confirm());else if(button==SDL_CONTROLLER_BUTTON_DPAD_UP)replayScreen->move(0,-1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_DOWN)replayScreen->move(0,1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_LEFT)replayScreen->move(-1,0);else if(button==SDL_CONTROLLER_BUTTON_DPAD_RIGHT)replayScreen->move(1,0);return;}
  if(musicScreen->visible()){if(button==SDL_CONTROLLER_BUTTON_B)back();else if(button==SDL_CONTROLLER_BUTTON_A){musicScreen->confirm();if(!musicScreen->visible())leaveMusic();}else if(button==SDL_CONTROLLER_BUTTON_DPAD_UP)musicScreen->move(0,-1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_DOWN)musicScreen->move(0,1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_LEFT)musicScreen->move(-1,0);else if(button==SDL_CONTROLLER_BUTTON_DPAD_RIGHT)musicScreen->move(1,0);return;}
  if(gameMenu.visible()){if(button==SDL_CONTROLLER_BUTTON_B)back();else if(button==SDL_CONTROLLER_BUTTON_A)performUi(gameMenu.confirm());else if(button==SDL_CONTROLLER_BUTTON_DPAD_UP)gameMenu.move(0,-1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_DOWN)gameMenu.move(0,1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_LEFT)gameMenu.move(-1,0);else if(button==SDL_CONTROLLER_BUTTON_DPAD_RIGHT)gameMenu.move(1,0);else if(button==SDL_CONTROLLER_BUTTON_LEFTSHOULDER&&(gameMenu.panel==UI::Save||gameMenu.panel==UI::Load))gameMenu.page=(gameMenu.page+14)%15;else if(button==SDL_CONTROLLER_BUTTON_RIGHTSHOULDER&&(gameMenu.panel==UI::Save||gameMenu.panel==UI::Load))gameMenu.page=(gameMenu.page+1)%15;if(gameMenu.settingsDirty){applySettings();uiSound("Sys_OnMouse");}return;}
  if(button==SDL_CONTROLLER_BUTTON_Y&&!menu){upperMenu->toggle();return;}
@@ -437,7 +449,8 @@ struct Frontend {
  while(!done){auto now=SDL_GetTicks64();
  if(opening==1){openingElapsed+=double(now-lastUpdate);images->update(double(now-lastUpdate));if(openingElapsed>=4500)makerLogo();}
  if(titleViewActive()&&!fingerActive){titlePointer=std::clamp(titlePointer+titleAxis*double(now-lastUpdate)*.6,0.,1280.);title->view(titlePointer);}
- if(musicScreen->visible()){musicScreen->update(double(now-lastUpdate));if(musicScreen->takeSettingsChanged())applySettings();}
+ if(replayScreen->visible())replayScreen->update(double(now-lastUpdate));
+ else if(musicScreen->visible()){musicScreen->update(double(now-lastUpdate));if(musicScreen->takeSettingsChanged())applySettings();}
  else if(!opening&&menu&&!gameMenu.visible())title->update(double(now-lastUpdate));
  if(!menu&&!movie->playing()&&!gameMenu.visible()&&!upperMenu->visible()){
  images->update(double(now-lastUpdate));
@@ -498,7 +511,19 @@ controllerKey(e.cbutton.button);
  if(movieOnly&&!movieCaptured&&movie->elapsedMs()>=1000){snapshot("movie.bmp");
  movieCaptured=true;
  std::cerr<<"MOVIE screenshot audio_clock_ms="<<movie->elapsedMs()<<"\n";
- }if(smoke){if(viewTest){
+ }if(smoke){if(replayTest){
+ if(frames==1){if(!progress.extras())throw std::runtime_error("Replay smoke needs earned progress");title->select(2);activate();titlePhase=1;}
+ else if(titlePhase==1&&title->ready()){title->select(1);activate();titlePhase=2;autoPhaseFrame=frames;}
+ else if(titlePhase==2&&frames>autoPhaseFrame+25){if(!replayScreen->visible())throw std::runtime_error("Replay page did not open");snapshot("replay-page1.bmp");pointer(1210,90);titlePhase=3;autoPhaseFrame=frames;}
+ else if(titlePhase==3&&frames>autoPhaseFrame+25){if(replayScreen->pageIndex()!=1)throw std::runtime_error("Replay second page");snapshot("replay-page2.bmp");replayScreen->move(0,-1);replayAction(replayScreen->confirm());titlePhase=4;autoPhaseFrame=frames;}
+ else if(titlePhase==4&&frames>autoPhaseFrame+25){if(replayScreen->pageIndex()!=0)throw std::runtime_error("Replay first page return");replayAction(replayScreen->confirm());titlePhase=5;autoPhaseFrame=frames;}
+ else if(titlePhase==5&&frames>autoPhaseFrame+12){if(menu||!replayActive||!story.state.replay)throw std::runtime_error("Replay did not start");snapshot("replay-playing.bmp");openPanel(whj2::GameMenu::Save);if(gameMenu.visible())throw std::runtime_error("Replay save was not locked");openPanel(whj2::GameMenu::Load);if(gameMenu.visible())throw std::runtime_error("Replay load was not locked");
+ // Test setup: seek the logical stream to its return boundary; this is not a full audiovisual playback test.
+ bool found=false;for(unsigned i=0;i<100000;i++){auto before=story.save();auto e=story.next();if(e.type=="choice")throw std::runtime_error("Unexpected first replay choice");if(e.type=="finish"){story.restore(before);found=true;break;}}
+ if(!found){throw std::runtime_error("Replay return boundary absent");}next();titlePhase=6;autoPhaseFrame=frames;}
+ else if(titlePhase==6&&frames>autoPhaseFrame+25){if(replayActive||!menu||!replayScreen->visible()||replayScreen->pageIndex()!=0)throw std::runtime_error("Replay did not restore original page");snapshot("replay-returned.bmp");back();if(replayScreen->visible()||!title->isExtraPage())throw std::runtime_error("Replay back to extras");std::cerr<<"REPLAY UI PASS title entry / page1-page2 / playback sample / save-load lock / logical-boundary return / extras\n";done=true;}
+ if(++frames>=smoke&&!done){throw std::runtime_error("Replay UI test timeout");}continue;
+ }if(viewTest){
  auto finger=[&](Uint32 type,float x){SDL_Event e{};e.type=type;e.tfinger.x=x;e.tfinger.y=.5f;e.tfinger.fingerId=7;if(SDL_PushEvent(&e)<0)throw std::runtime_error(SDL_GetError());};
  auto axis=[&](Sint16 x){SDL_Event e{};e.type=SDL_CONTROLLERAXISMOTION;e.caxis.axis=SDL_CONTROLLER_AXIS_LEFTX;e.caxis.value=x;if(SDL_PushEvent(&e)<0)throw std::runtime_error(SDL_GetError());};
  if(frames==1)finger(SDL_FINGERDOWN,.2f);
@@ -654,7 +679,8 @@ if(game.empty()){std::cerr<<"usage: whj2-runtime GAME [SAVE_DIR] [--smoke-frames
 #ifdef __SWITCH__
 if(argc<3)saves="sdmc:/switch/whj2/saves";
 #endif
-Frontend f(game,saves);if(argc>4&&std::string(argv[3])=="--title-view-smoke"){f.viewTest=true;smoke=unsigned(std::stoul(argv[4]));}
+Frontend f(game,saves);if(argc>4&&std::string(argv[3])=="--replay-smoke"){f.replayTest=true;smoke=unsigned(std::stoul(argv[4]));}
+ if(argc>4&&std::string(argv[3])=="--title-view-smoke"){f.viewTest=true;smoke=unsigned(std::stoul(argv[4]));}
  if(argc>4&&std::string(argv[3])=="--title-smoke"){f.titleTest=true;smoke=unsigned(std::stoul(argv[4]));}
  if(argc>4&&std::string(argv[3])=="--opening-smoke"){f.openingTest=true;smoke=unsigned(std::stoul(argv[4]));}
  if(argc>4&&std::string(argv[3])=="--music-smoke"){f.musicTest=true;smoke=unsigned(std::stoul(argv[4]));}

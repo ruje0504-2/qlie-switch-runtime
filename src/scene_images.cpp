@@ -463,20 +463,21 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  auto key=s.substr(0,c),v=s.substr(c+1);
  if(key.size()==4&&key.rfind("rep",0)==0&&key[3]>='0'&&key[3]<='3')replacementChanged[key[3]-'0']=true;
  if(face&&key=="clear"&&v=="def"){l=Layer{};l.params=faceDefaults;continue;}
- if(key=="clear"){l.params.erase("@portrait");l.params.erase("@replacement");l.scriptReplacement.reset();l.path.clear();
+ if(key=="imgfilter")l.filtered={};
+ if(key=="clear"){l.filtered={};l.params.erase("@portrait");l.params.erase("@replacement");l.scriptReplacement.reset();l.path.clear();
  l.pixels.reset();
  l.composite.reset();
  l.params["show"]="false";
  continue;
  }l.params[key]=v;
  if(message&&key=="show")messageShow=true;
- if(key=="file"){file=true;if(face)l.params["@face-active"]="true";}
+ if(key=="file"){l.filtered={};file=true;if(face)l.params["@face-active"]="true";}
  if((chara||face)&&key=="base")baseChanged=true;
  if(key=="x"||key=="y"||key=="z"||key=="ax"||key=="ay"||key=="az"||key=="scalex"||key=="scaley"||key=="scalez"||key=="rotx"||key=="roty"||key=="rotz"||key=="pri")position=true;
  if(key=="alpha"||key=="mulcolor"||key=="addcolor")color=true;
  if(key=="vol"&&std::stof(v)==0)l.audioStopPending=true;
  if(key=="motion"){l.milliseconds=0;l.audioMilliseconds=-1;}
- if(key!="rep0"&&key!="rep1"&&key!="rep2"&&key!="rep3"&&key!="textarea"&&key!="fontsize"&&key!="fontcolor"&&key!="fontno"&&key!="trans"&&key!="id"&&key!="mode"&&key!="disp"&&key!="base"&&key!="time"&&key!="speed"&&key!="move"&&key!="movepow"&&key!="ax"&&key!="ay"&&key!="az"&&key!="z"&&key!="scalez"&&key!="rotx"&&key!="roty"&&key!="vol"&&key!="voltype"&&key!="dchannel"&&key!="motion"&&key!="file"&&key!="x"&&key!="y"&&key!="scalex"&&key!="scaley"&&key!="alpha"&&key!="show"&&key!="pri"&&key!="align"&&key!="texfilter"&&key!="rotz"&&key!="mulcolor"&&key!="addcolor")std::cerr<<"PENDING-IMAGE-PROPERTY "<<cmd<<" "<<key<<"="<<v<<"\n";
+ if(key!="rep0"&&key!="rep1"&&key!="rep2"&&key!="rep3"&&key!="textarea"&&key!="fontsize"&&key!="fontcolor"&&key!="fontno"&&key!="imgfilter"&&key!="trans"&&key!="id"&&key!="mode"&&key!="disp"&&key!="base"&&key!="time"&&key!="speed"&&key!="move"&&key!="movepow"&&key!="ax"&&key!="ay"&&key!="az"&&key!="z"&&key!="scalez"&&key!="rotx"&&key!="roty"&&key!="vol"&&key!="voltype"&&key!="dchannel"&&key!="motion"&&key!="file"&&key!="x"&&key!="y"&&key!="scalex"&&key!="scaley"&&key!="alpha"&&key!="show"&&key!="pri"&&key!="align"&&key!="texfilter"&&key!="rotz"&&key!="mulcolor"&&key!="addcolor")std::cerr<<"PENDING-IMAGE-PROPERTY "<<cmd<<" "<<key<<"="<<v<<"\n";
  }
  if(messageShow&&l.composite){const std::string mode=l.params["show"]=="true"?"*Enable":"*Disable";
   if(findMotion(l.composite->definition,mode)){l.params["motion"]=mode;l.milliseconds=0;l.audioMilliseconds=-1;
@@ -594,10 +595,26 @@ void SceneImages::render(qlie::Bytes&out,unsigned pass,RenderTarget*target)const
  bool spatial=transform.z!=0||transform.rotationX!=0||transform.rotationY!=0||transform.scaleZ!=100;
  Matrix3D matrix;if(spatial)matrix=placement3D(transform,w,h);
  std::map<unsigned,const Image*> uiSlots;for(auto&slot:l->uiSlots)uiSlots[slot.first]=slot.second.get();if(l->scriptReplacement)uiSlots[0]=l->scriptReplacement.get();
+ std::string filter=l->params.count("imgfilter")?l->params.at("imgfilter"):"none";
+ auto filtered=[&](unsigned slot,const std::shared_ptr<const Image>&source)->const Image*{
+  auto&cached=l->filtered[slot];if(filter.empty()||filter=="none"){cached={};return source.get();}
+  if(cached.source!=source||cached.name!=filter){auto result=sceneBitmap(filterImage(*source,filter));cached.source=source;cached.name=filter;cached.result=std::move(result);}
+  return cached.result.get();
+ };
+ const Image*plain=l->pixels.get();
+ if(l->composite){if(filter.empty()||filter=="none"){for(auto&cached:l->filtered)cached={};}else for(unsigned i=0;i<4;i++){
+  std::shared_ptr<const Image> source=i<l->composite->members.size()?l->composite->members[i].image:nullptr;
+  if(i==0&&l->params.count("@portrait"))source=l->pixels;
+  if(i==1&&layers.count("message")&&l==&layers.at("message"))source=l->pixels;
+  auto slot=l->uiSlots.find(i);if(slot!=l->uiSlots.end())source=slot->second;
+  if(i==0&&l->scriptReplacement)source=l->scriptReplacement;
+  if(source)uiSlots[i]=filtered(i,source);
+  else if(i<l->composite->members.size()){auto&e=l->composite->members[i];if(e.nested||e.mesh||!e.video.empty())l->composite->warn("image-filter-nonbitmap-slot="+std::to_string(i));}
+ }}else if(l->pixels)plain=filtered(0,l->pixels);
  AnimationContext external;external.randomCursor=&waveformCursor;for(unsigned i=0;i<16;i++){auto v=l->params.find("@exv"+std::to_string(i));if(v!=l->params.end()){external.external[i]=numeric(v->second);external.externalMask|=uint16_t(1u<<i);}}
  if(l->composite){auto m=l->params.find("motion");l->composite->enqueue(queue,l->milliseconds,m==l->params.end()?"":m->second,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),0,l->params.count("@portrait")?l->pixels.get():nullptr,layers.count("message")&&l==(&layers.at("message"))?l->pixels.get():nullptr,windowAlpha,uiSlots.empty()?nullptr:&uiSlots,&external,spatial?&matrix:nullptr,unsigned(get(l,"texfilter",0)));}
- else if(spatial){transform.alpha=get(l,"alpha",255);transform.addColor=uint32_t(get(l,"addcolor",0));transform.mulColor=uint32_t(get(l,"mulcolor",0xffffff));transform.textureFilter=unsigned(get(l,"texfilter",0));quad(queue,*l->pixels,matrix,transform,get(l,"pri",0));}
- else queue.image(*l->pixels,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),0,unsigned(get(l,"texfilter",0)));
+ else if(spatial){transform.alpha=get(l,"alpha",255);transform.addColor=uint32_t(get(l,"addcolor",0));transform.mulColor=uint32_t(get(l,"mulcolor",0xffffff));transform.textureFilter=unsigned(get(l,"texfilter",0));quad(queue,*plain,matrix,transform,get(l,"pri",0));}
+ else queue.image(*plain,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),0,unsigned(get(l,"texfilter",0)));
  if(queue.imageCount()>beforeImages){if(qlie::canonical(l->path).rfind("image/ev/",0)==0)shownFiles.insert(qlie::canonical(l->path));auto replacement=l->params.find("@replacement");if(replacement!=l->params.end()&&qlie::canonical(replacement->second).rfind("image/ev/",0)==0)shownFiles.insert(qlie::canonical(replacement->second));}
  }
  if(target)queue.draw(*target,1280,720);else queue.draw(out,1280,720);

@@ -82,8 +82,8 @@ struct Frontend {
  whj2::Settings settings{assets};
  whj2::GameMenu gameMenu{assets,settings};
  std::vector<whj2::HistoryEntry>history;bool historyVoicePlayed=false;int historyVoiceCacheOffset=-1;
- bool normalSkip=false,leftTrigger=false,currentPageWasRead=false;std::string currentPageKey;
- bool fastForward=false;unsigned selectedSlot=1;unsigned skipStart=0;unsigned autoPhase=0,autoPhaseFrame=0,titlePhase=0;
+ bool normalSkip=false,skipReadOnly=true,leftTrigger=false,rightTrigger=false,currentPageWasRead=false;std::string currentPageKey;
+ unsigned selectedSlot=1;unsigned skipStart=0;unsigned autoPhase=0,autoPhaseFrame=0,titlePhase=0;
  bool manualSlotsScanned=false;unsigned latestManualSlot=1;
  bool fingerActive=false,fingerUiDrag=false;SDL_FingerID fingerId=0;float fingerX=0,fingerY=0;qlie::Bytes gestureStory;
  bool movieOnly=false,movieCaptured=false,touchOnlyTest=false,settingsTest=false,autoTest=false,fpsTest=false,titleTest=false,extraTest=false,musicTest=false,openingTest=false,viewTest=false,replayTest=false,cgTest=false,cgLoopTest=false,replayReturnTest=false,readSkipTest=false;
@@ -215,7 +215,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   catch(const std::runtime_error&e){std::fprintf(stderr,"LOAD read-ahead script: %s\n",e.what());return;}
   for(auto&line:upcoming){
    if(line.rfind("％",0)==0){
-    if((!normalSkip&&!fastForward)||voices->forcePlay)
+    if(!normalSkip||voices->forcePlay)
      if(auto voice=voices->resolve(line))add(voice->request,true);
     if(hints.size()==6)break;
     continue;
@@ -342,7 +342,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  return true;
  }
  void playVoice(const std::string&id,bool historyReplay=false){
- if(!historyReplay&&!voices->forcePlay&&(normalSkip||fastForward)){audio->stop(3);return;}
+ if(!historyReplay&&!voices->forcePlay&&normalSkip){audio->stop(3);return;}
  if(id.empty())return;
  auto match=voices->resolve(id);
  if(!match){std::cerr<<"VOICE unresolved id="<<id;for(auto&candidate:voices->candidates(id))std::cerr<<" candidate="<<candidate;std::cerr<<"\n";if(voices->fileErrors)throw std::runtime_error("Voice file not found: "+id);return;}
@@ -351,7 +351,9 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }
  void refreshMessage(bool show=false){images->setMessageImage(messageText->render(font,images->messageStyle()),show);lastMessageVisible=messageText->visible();}
  void recordCurrentRead(){if(!menu&&!hidden&&!gameMenu.visible()&&!movie->playing()&&images->messageVisible()&&!currentPageKey.empty()&&messageText->finished()&&progress.markRead(currentPageKey))qlie::write_file(saveDir+"/system.progress",progress.save());}
- void toggleSkip(){if(menu||movie->playing()||gameMenu.visible()||upperMenu->visible()||story.state.awaiting)return;if(normalSkip){normalSkip=false;return;}normalSkip=settings.get("SkipMode")==0||progress.wasRead(currentPageKey);if(normalSkip){autoPlay.enabled=false;hidden=false;}}
+ void toggleAuto(){if(menu||movie->playing()||gameMenu.visible()||upperMenu->visible()||story.state.awaiting)return;autoPlay.enabled=!autoPlay.enabled;normalSkip=false;hidden=false;uiSound("Sys_OnClick");}
+ void toggleSkip(bool onlyRead=false){if(menu||movie->playing()||gameMenu.visible()||upperMenu->visible()||story.state.awaiting)return;if(normalSkip){normalSkip=false;return;}autoPlay.enabled=false;skipReadOnly=onlyRead||settings.get("SkipMode")==1;normalSkip=!skipReadOnly||progress.wasRead(currentPageKey);if(normalSkip){autoPlay.enabled=false;hidden=false;}}
+
  void next(bool resume=false){if(menu||story.state.finished)return;
   using LoadClock=std::chrono::steady_clock;
   struct PageTiming {
@@ -380,7 +382,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }if(e.type=="page"){if(body.empty())continue;
  transition->present();
  text=body;
-  currentPageKey=qlie::canonical(e.file)+":"+std::to_string(e.line);currentPageWasRead=progress.wasRead(currentPageKey);if(settings.get("SkipMode")==1&&!currentPageWasRead)normalSkip=false;
+  currentPageKey=qlie::canonical(e.file)+":"+std::to_string(e.line);currentPageWasRead=progress.wasRead(currentPageKey);if(skipReadOnly&&!currentPageWasRead)normalSkip=false;
  messageText->start(text);autoPlay.page(settings.get("AutoClickWait"));refreshMessage(true);
  name=speaker;
  history.push_back({name,text,voiceId});
@@ -478,7 +480,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   slotPreviews.erase(slot);if(latestManualSlot==slot)manualSlotsScanned=false;refreshSlotFlags();
  }
  void autoSaveChoice(){
-  if(replayActive||menu||movie->playing()||normalSkip||fastForward)return;
+  if(replayActive||menu||movie->playing()||normalSkip)return;
   std::filesystem::create_directories(saveDir+"/autosave");
   unsigned chosen=AutoSaveBase;auto oldest=std::filesystem::file_time_type::max();
   for(unsigned i=0;i<AutoSaveCount;i++){unsigned slot=AutoSaveBase+i;auto path=slotPrefix(slot)+".story";auto time=std::filesystem::exists(path)?std::filesystem::last_write_time(path):std::filesystem::file_time_type::min();if(time<=oldest){oldest=time;chosen=slot;}}
@@ -722,7 +724,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(musicScreen->visible()){if(musicScreen->tap(x,y))leaveMusic();return;}
  if(gameMenu.visible()){refreshSlotFlags();auto action=gameMenu.tap(x,y);refreshSlotFlags();performUi(action);return;}
  if(upperMenu->visible()){upperAction(upperMenu->tap(x,y));return;}
- if(!menu&&!hidden&&images->messageVisible()&&std::abs(x-1170)<=14&&std::abs(y-700)<=14){autoPlay.enabled=!autoPlay.enabled;normalSkip=false;uiSound("Sys_OnClick");return;}
+ if(!menu&&!hidden&&images->messageVisible()&&std::abs(x-1170)<=14&&std::abs(y-700)<=14){toggleAuto();return;}
  if(!menu&&!hidden&&images->messageVisible()&&std::abs(x-1200)<=14&&std::abs(y-700)<=14){toggleSkip();uiSound("Sys_OnClick");return;}
  if(menu){if(!title->ready()){activate();return;}int target=title->hit(x,y);if(!title->select(target))return;focus=title->selection();
  }else if(story.state.awaiting){if(choiceScreen->exiting()){activate();return;}int target=choiceScreen->hit(x,y);if(target<0)return;focus=target;if(choiceScreen->select(focus))uiSound("Sys_OnMouse");
@@ -779,7 +781,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  else if(!opening&&menu&&!gameMenu.visible())title->update(double(now-lastUpdate));
  if(!menu&&!movie->playing()&&!gameMenu.visible()&&!upperMenu->visible()){
  images->update(double(now-lastUpdate));
- if(story.state.awaiting){if(fastForward)choiceScreen->skipConfirmation();choiceScreen->update(double(now-lastUpdate));if(choiceScreen->takeAutoSaveRequest())autoSaveChoice();int chosen=choiceScreen->takeConfirmed();if(chosen>=0){story.choose(unsigned(chosen));next();}}
+ if(story.state.awaiting){choiceScreen->update(double(now-lastUpdate));if(choiceScreen->takeAutoSaveRequest())autoSaveChoice();int chosen=choiceScreen->takeConfirmed();if(chosen>=0){story.choose(unsigned(chosen));next();}}
  messageText->update(double(now-lastUpdate));if(messageText->visible()!=lastMessageVisible)refreshMessage();
  transition->update(double(now-lastUpdate));
  autoPlay.tick(double(now-lastUpdate),messageText->visible(),settings.get("AutoTextWait"),settings.get("TextSpeed"),messageText->timedCharacters(autoPlay.countedGlyphs(),messageText->visible()));
@@ -796,8 +798,9 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(!appletMainLoop()){done=true;
  break;
  }if(!window)pollNativeTouch();auto pad=joycon.poll(now);
- fastForward=pad.fastForward;titleAxis=pad.viewAxis;titleAxisY=pad.viewAxisY;
- if(pad.skipToggle)toggleSkip();
+ titleAxis=pad.viewAxis;titleAxisY=pad.viewAxisY;
+ if(pad.autoToggle)toggleAuto();
+ if(pad.skipToggle)toggleSkip(true);
  if(pad.fps)controllerKey(SDL_CONTROLLER_BUTTON_BACK);
  if(pad.upperMenu)controllerKey(SDL_CONTROLLER_BUTTON_Y);
  if(pad.confirm)controllerKey(SDL_CONTROLLER_BUTTON_A);
@@ -824,7 +827,7 @@ else if(e.type==SDL_FINGERDOWN){if(!fingerActive){fingerActive=true;fingerId=e.t
  if(fingerUiDrag){touchDrag(e.tfinger.x,e.tfinger.y,false);gameMenu.endDrag();fingerUiDrag=false;applySettings();}
  else if(!menu&&!gameMenu.visible()&&upperMenu->swipe(dx,dy)){std::cerr<<"INPUT downward swipe upper menu\n";}
  else if(std::abs(dx)<24&&std::abs(dy)<24){int w,h;windowSize(&w,&h);std::cerr<<"INPUT touch\n";pointer(int(e.tfinger.x*w),int(e.tfinger.y*h));}
- }else if(e.type==SDL_CONTROLLERAXISMOTION&&e.caxis.axis==SDL_CONTROLLER_AXIS_LEFTY){titleAxisY=std::abs(e.caxis.value)>6000?e.caxis.value/32767.f:0;}else if(e.type==SDL_CONTROLLERAXISMOTION&&e.caxis.axis==SDL_CONTROLLER_AXIS_LEFTX){titleAxis=std::abs(e.caxis.value)>6000?e.caxis.value/32767.f:0;}else if(e.type==SDL_CONTROLLERAXISMOTION&&e.caxis.axis==SDL_CONTROLLER_AXIS_TRIGGERLEFT){bool held=e.caxis.value>16000;if(held&&!leftTrigger)toggleSkip();leftTrigger=held;}else if(e.type==SDL_CONTROLLERAXISMOTION&&e.caxis.axis==SDL_CONTROLLER_AXIS_TRIGGERRIGHT){fastForward=e.caxis.value>16000;}else if(e.type==SDL_CONTROLLERDEVICEADDED)controllerAdded(e.cdevice.which);
+ }else if(e.type==SDL_CONTROLLERAXISMOTION&&e.caxis.axis==SDL_CONTROLLER_AXIS_LEFTY){titleAxisY=std::abs(e.caxis.value)>6000?e.caxis.value/32767.f:0;}else if(e.type==SDL_CONTROLLERAXISMOTION&&e.caxis.axis==SDL_CONTROLLER_AXIS_LEFTX){titleAxis=std::abs(e.caxis.value)>6000?e.caxis.value/32767.f:0;}else if(e.type==SDL_CONTROLLERAXISMOTION&&e.caxis.axis==SDL_CONTROLLER_AXIS_TRIGGERLEFT){bool held=e.caxis.value>16000;if(held&&!leftTrigger)toggleAuto();leftTrigger=held;}else if(e.type==SDL_CONTROLLERAXISMOTION&&e.caxis.axis==SDL_CONTROLLER_AXIS_TRIGGERRIGHT){bool held=e.caxis.value>16000;if(held&&!rightTrigger)toggleSkip(true);rightTrigger=held;}else if(e.type==SDL_CONTROLLERDEVICEADDED)controllerAdded(e.cdevice.which);
  else if(e.type==SDL_CONTROLLERDEVICEREMOVED){auto i=controllers.find(e.cdevice.which);
  if(i!=controllers.end()){SDL_GameControllerClose(i->second);
  controllers.erase(i);
@@ -832,22 +835,22 @@ else if(e.type==SDL_FINGERDOWN){if(!fingerActive){fingerActive=true;fingerId=e.t
 #ifndef __SWITCH__
 controllerKey(e.cbutton.button);
 #endif
-}}recordCurrentRead();if((fastForward||normalSkip)&&!menu&&!gameMenu.visible()&&!upperMenu->visible()&&!movie->playing()&&!story.state.awaiting){hidden=false;messageText->reveal();refreshMessage();auto action=sentenceWait.force();if(action==whj2::SentenceWait::Next)next();else if(action==whj2::SentenceWait::Resume)next(true);}
+}}recordCurrentRead();if(normalSkip&&!menu&&!gameMenu.visible()&&!upperMenu->visible()&&!movie->playing()&&!story.state.awaiting){hidden=false;messageText->reveal();refreshMessage();auto action=sentenceWait.force();if(action==whj2::SentenceWait::Next)next();else if(action==whj2::SentenceWait::Resume)next(true);}
  draw();
  if(smoke&&gameMenu.visible()&&panelDraws!=1)throw std::runtime_error("Panel composited more than once");
  if(movieOnly&&!movieCaptured&&movie->elapsedMs()>=1000){snapshot("movie.bmp");
  movieCaptured=true;
  std::cerr<<"MOVIE screenshot audio_clock_ms="<<movie->elapsedMs()<<"\n";
  }if(smoke){if(readSkipTest){
- if(frames==1){activate();if(currentPageKey.empty()||currentPageWasRead)throw std::runtime_error("Read skip needs fresh progress");settings.set("SkipMode",1);toggleSkip();if(normalSkip)throw std::runtime_error("Unread page allowed read-only skip");messageText->reveal();hidden=true;recordCurrentRead();if(progress.wasRead(currentPageKey))throw std::runtime_error("Hidden text marked read");hidden=false;recordCurrentRead();auto key=currentPageKey;whj2::Progress restored;restored.restore(qlie::file(saveDir+"/system.progress"));if(!restored.wasRead(key))throw std::runtime_error("Read page not persisted");for(unsigned version=1;version<=2;version++){whj2::StateWriter old;old.str("WHJ2-progress-"+std::to_string(version));old.n(0);old.n(0);if(version==2)old.n(0);restored.restore(old.bytes);if(restored.wasRead(key))throw std::runtime_error("Legacy progress invented read history");}save(1);skipStart=advances;SDL_Event left{};left.type=SDL_CONTROLLERAXISMOTION;left.caxis.axis=SDL_CONTROLLER_AXIS_TRIGGERLEFT;left.caxis.value=32767;SDL_PushEvent(&left);}
- if(frames==3){if(normalSkip||advances<=skipStart)throw std::runtime_error("Fresh-read ZL did not start and stop at unread page");load(1);if(!currentPageWasRead)throw std::runtime_error("Read page lost on load");toggleSkip();if(!normalSkip)throw std::runtime_error("Read page refused skip");}
+ if(frames==1){activate();if(currentPageKey.empty()||currentPageWasRead)throw std::runtime_error("Read skip needs fresh progress");settings.set("SkipMode",1);toggleSkip();if(normalSkip)throw std::runtime_error("Unread page allowed read-only skip");messageText->reveal();hidden=true;recordCurrentRead();if(progress.wasRead(currentPageKey))throw std::runtime_error("Hidden text marked read");hidden=false;recordCurrentRead();auto key=currentPageKey;whj2::Progress restored;restored.restore(qlie::file(saveDir+"/system.progress"));if(!restored.wasRead(key))throw std::runtime_error("Read page not persisted");for(unsigned version=1;version<=2;version++){whj2::StateWriter old;old.str("WHJ2-progress-"+std::to_string(version));old.n(0);old.n(0);if(version==2)old.n(0);restored.restore(old.bytes);if(restored.wasRead(key))throw std::runtime_error("Legacy progress invented read history");}save(1);skipStart=advances;SDL_Event left{};left.type=SDL_CONTROLLERAXISMOTION;left.caxis.axis=SDL_CONTROLLER_AXIS_TRIGGERRIGHT;left.caxis.value=32767;SDL_PushEvent(&left);}
+ if(frames==3){if(normalSkip||advances<=skipStart)throw std::runtime_error("Fresh-read ZR did not start and stop at unread page");load(1);if(!currentPageWasRead)throw std::runtime_error("Read page lost on load");toggleSkip();if(!normalSkip)throw std::runtime_error("Read page refused skip");}
  if(frames==10){if(normalSkip||advances<=skipStart||currentPageWasRead)throw std::runtime_error("Read skip did not stop at unseen page");messageText->reveal();recordCurrentRead();pointer(1200,700);if(!normalSkip)throw std::runtime_error("Fresh-read touch skip did not enable without load");skipStart=advances;}
- if(frames==12){if(normalSkip||advances<=skipStart)throw std::runtime_error("Fresh-read touch skip did not stop at unread page");skipStart=advances;SDL_Event e{};e.type=SDL_CONTROLLERAXISMOTION;e.caxis.axis=SDL_CONTROLLER_AXIS_TRIGGERRIGHT;e.caxis.value=32767;SDL_PushEvent(&e);}
- if(frames==14){SDL_Event e{};e.type=SDL_CONTROLLERAXISMOTION;e.caxis.axis=SDL_CONTROLLER_AXIS_TRIGGERRIGHT;SDL_PushEvent(&e);if(advances<=skipStart)throw std::runtime_error("Force skip respected unread restriction");}
+ if(frames==12){if(normalSkip||advances<=skipStart)throw std::runtime_error("Fresh-read touch skip did not stop at unread page");skipStart=advances;rightTrigger=false;SDL_Event e{};e.type=SDL_CONTROLLERAXISMOTION;e.caxis.axis=SDL_CONTROLLER_AXIS_TRIGGERRIGHT;e.caxis.value=32767;SDL_PushEvent(&e);}
+ if(frames==14){SDL_Event e{};e.type=SDL_CONTROLLERAXISMOTION;e.caxis.axis=SDL_CONTROLLER_AXIS_TRIGGERRIGHT;SDL_PushEvent(&e);if(advances!=skipStart||normalSkip)throw std::runtime_error("ZR skipped unread page");}
  if(frames==17){settings.set("SkipMode",0);toggleSkip();if(!normalSkip)throw std::runtime_error("All-text skip refused");skipStart=advances;}
  if(frames==22){draw();snapshot("read-skip-scene.bmp");}
  if(frames==23){if(advances<=skipStart)throw std::runtime_error("All-text skip did not advance");back();if(normalSkip)throw std::runtime_error("B did not cancel skip");openPanel(whj2::GameMenu::Settings);performUi(gameMenu.tap(410,442));if(settings.get("SkipMode")!=1)throw std::runtime_error("Read-only setting touch");whj2::Settings copy(assets);copy.restore(qlie::file(saveDir+"/settings.cfg"));if(copy.get("SkipMode")!=1)throw std::runtime_error("Skip mode not persisted");draw();snapshot("read-skip-settings.bmp");gameMenu.close();load(1);pointer(1200,700);if(!normalSkip)throw std::runtime_error("Original skip button did not activate");}
- if(frames==45){if(normalSkip)throw std::runtime_error("Touch skip did not stop at unread text");std::cerr<<"READ SKIP PASS fresh-read ZL and touch without reload / persisted pages / progress1-2 migration / flow2 restore / unread stop / ZR force / all mode / B cancel / original touch button\n";done=true;}
+ if(frames==45){if(normalSkip)throw std::runtime_error("Touch skip did not stop at unread text");std::cerr<<"READ SKIP PASS fresh-read ZR and touch without reload / persisted pages / progress1-2 migration / flow2 restore / unread stop / ZR unread stop / all mode / B cancel / original touch button\n";done=true;}
  if(++frames>=smoke&&!done){throw std::runtime_error("Read skip test timeout");}continue;
  }if(replayReturnTest){
  if(frames==1){openReplay(0);replayScreen->update(300);replayAction(replayScreen->confirm());if(!replayActive)throw std::runtime_error("Return test needs unlocked replay entry");}
@@ -988,9 +991,9 @@ controllerKey(e.cbutton.button);
  if(frames==36){if(!upperMenu->visible()||story.save()!=gestureStory)throw std::runtime_error("Y changed story");controller(SDL_CONTROLLER_BUTTON_Y);}
  if(frames==38){gestureStory=story.save();SDL_Event ev{};ev.type=SDL_FINGERDOWN;ev.tfinger.x=.5f;ev.tfinger.y=.2f;SDL_PushEvent(&ev);ev.type=SDL_FINGERUP;ev.tfinger.y=.5f;SDL_PushEvent(&ev);}
  if(frames==40){if(!upperMenu->visible()||story.save()!=gestureStory)throw std::runtime_error("Swipe changed story");snapshot("upper-menu.bmp");controller(SDL_CONTROLLER_BUTTON_Y);}
- if(frames==42){skipStart=advances;SDL_Event ev{};ev.type=SDL_CONTROLLERAXISMOTION;ev.caxis.axis=SDL_CONTROLLER_AXIS_TRIGGERRIGHT;ev.caxis.value=32767;SDL_PushEvent(&ev);}
- if(frames==48){if(advances<=skipStart)throw std::runtime_error("ZR did not force advance");SDL_Event ev{};ev.type=SDL_CONTROLLERAXISMOTION;ev.caxis.axis=SDL_CONTROLLER_AXIS_TRIGGERRIGHT;ev.caxis.value=0;SDL_PushEvent(&ev);}
- if(frames==50){if(fastForward)throw std::runtime_error("ZR release did not stop");controller(SDL_CONTROLLER_BUTTON_LEFTSHOULDER);}
+ if(frames==42){messageText->reveal();recordCurrentRead();skipStart=advances;SDL_Event ev{};ev.type=SDL_CONTROLLERAXISMOTION;ev.caxis.axis=SDL_CONTROLLER_AXIS_TRIGGERRIGHT;ev.caxis.value=32767;SDL_PushEvent(&ev);}
+ if(frames==48){if(advances<=skipStart)throw std::runtime_error("ZR did not advance read page");SDL_Event ev{};ev.type=SDL_CONTROLLERAXISMOTION;ev.caxis.axis=SDL_CONTROLLER_AXIS_TRIGGERRIGHT;ev.caxis.value=0;SDL_PushEvent(&ev);}
+ if(frames==50){if(normalSkip)throw std::runtime_error("ZR did not stop at unread page");controller(SDL_CONTROLLER_BUTTON_LEFTSHOULDER);}
  if(frames==52)controller(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
  if(frames==54){if(gameMenu.page!=1)throw std::runtime_error("Save page navigation");controller(SDL_CONTROLLER_BUTTON_A);}
  if(frames==56){if(!std::filesystem::exists(slotPrefix(9)+".story"))throw std::runtime_error("Slot 9 missing");controller(SDL_CONTROLLER_BUTTON_B);controller(SDL_CONTROLLER_BUTTON_Y);}
@@ -1000,7 +1003,7 @@ controllerKey(e.cbutton.button);
  if(frames==64){if(history.size()<4||gameMenu.panel!=whj2::GameMenu::History)throw std::runtime_error("History lost previous pages");snapshot("history-menu.bmp");controller(SDL_CONTROLLER_BUTTON_DPAD_UP);}
  if(frames==66){if(gameMenu.historyOffset!=0||gameMenu.focus!=1)throw std::runtime_error("History row navigation");controller(SDL_CONTROLLER_BUTTON_B);}
  if(frames==68&&gameMenu.visible())throw std::runtime_error("History cancel");
- if(++frames>=smoke){snapshot("touch.bmp");std::cerr<<"TARGET INPUT PASS L/R panels and slots / X settings / history / B text visibility / A confirm / Y and swipe / ZR hold-release / cancel dialog\n";done=true;}continue;
+ if(++frames>=smoke){snapshot("touch.bmp");std::cerr<<"TARGET INPUT PASS L/R panels and slots / X settings / history / B text visibility / A confirm / Y and swipe / ZR read-toggle / cancel dialog\n";done=true;}continue;
  }if(frames==1 || (frames>=12 && frames%12==0)){SDL_Event input{};input.type=SDL_CONTROLLERBUTTONDOWN;input.cbutton.button=SDL_CONTROLLER_BUTTON_A;if(SDL_PushEvent(&input)<0)throw std::runtime_error(SDL_GetError());
  }if(frames==4)save();
  if(frames==5){auto before=story.save();

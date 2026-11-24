@@ -20,4 +20,5 @@ struct Image {unsigned width=0,height=0;qlie::Bytes pixels;PixelVersion version{
 struct Member {std::string type,name;qlie::Bytes data;};
 std::vector<Member> abmp(const qlie::Bytes&);
 Image image(const qlie::Bytes&);
+Image filterImage(const Image&,const std::string&);
 }

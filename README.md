@@ -30,11 +30,11 @@ icon.key必须为256字节；密钥和游戏资源不得提交到源码仓库。
 构建输出集中到固定build/build-switch目录，后续更新覆盖产物。同版本已有有效结果可以复用。
 
 Mac和Switch运行循环统一限制为最高60 FPS，保留垂直同步；输入处理和动画计时使用实际经过时间。
-正文语音加入既有后台资源预读队列，播放时复用准备好的PCM。普通与强制快进默认停止语音并跳过其读取、解码，保留资源配置ForceVoicePlay的例外；历史中的手动重播独立处理。点击停止语音使用原版250ms淡出。
+正文语音加入既有后台资源预读队列，播放时复用准备好的PCM。快进默认停止语音并跳过其读取、解码，保留资源配置ForceVoicePlay的例外；历史中的手动重播独立处理。点击停止语音使用原版250ms淡出。
 
 ## 输入
 
-目标输入为Joy-Con与触摸。L打开存档界面，R打开读档界面，A点击/确认，B取消；正文中B隐藏/显示文字框。X打开菜单页面，十字键上打开历史文字，按住ZR强制快进、松开停止，选项处不自动选择。Y或屏幕下滑调出原版顶部栏，再按Y/B收起。存读档界面中方向键选择槽位，L/R翻页。游戏画面不显示自制按键说明或常驻触摸按钮。−键切换左下角FPS显示，默认隐藏；采用biko3参考的浅蓝黑影像素字，显示实际每秒提交帧率，60FPS上限始终独立生效。
+目标输入为Joy-Con与触摸。L打开存档界面，R打开读档界面，A点击/确认，B取消；正文中B隐藏/显示文字框。X打开菜单页面，十字键上打开历史文字，ZL切换自动播放，ZR切换仅已读快进，再按一次关闭，遇到未读或选项停止。Y或屏幕下滑调出原版顶部栏，再按Y/B收起。存读档界面中方向键选择槽位，L/R翻页。游戏画面不显示自制按键说明或常驻触摸按钮。−键切换左下角FPS显示，默认隐藏；采用biko3参考的浅蓝黑影像素字，显示实际每秒提交帧率，60FPS上限始终独立生效。
 标题花海的左右视角跟随触摸按下与拖动；左摇杆左右调整视角，松开后保留角度。十字键独立控制菜单选项。
 这些入口已接线，但仍缺实际Joy-Con和Switch触摸验收。SDL注入事件仅验证输入处理和状态流程。
 
@@ -42,7 +42,7 @@ Mac和Switch运行循环统一限制为最高60 FPS，保留垂直同步；输�
 
 - QLIE资源解密/BPE、日文显示、原配置禁则换行与段首/折行缩进、剧情控制流与四结局逻辑、段落提交、空存档正常处理、原版读档/覆盖/删除确认及最近手动槽定位；有数据的槽显示原删除按钮，手柄可选、触摸命中按原30px范围。
 - 全局图元排序、包含零图元控制层的变换栈、原版定点混合、矩形、部分周期/随机轨道（含顺序随机透明度及游标存读档）、上下文尺寸、位图与嵌套动画粒子。渲染状态支持压栈、退一层和清空全栈。
-- 原标题与选择框资源、动画和碰撞矩形；选项确认保留两段250ms退出过程，支持点击加速与已确认选项的ZR加速，退出中的选择状态可存读；天空模型的纹理三角形、单轴嵌套三维变换、透视UV与近裁剪。无光照材质使用原始颜色；多轴精度和其他光照模式仍待完成。
+- 原标题与选择框资源、动画和碰撞矩形；选项确认保留两段250ms退出过程，支持点击加速，退出中的选择状态可存读；天空模型的纹理三角形、单轴嵌套三维变换、透视UV与近裁剪。无光照材质使用原始颜色；多轴精度和其他光照模式仍待完成。
 - 双纹理位图遮罩、蓝通道阈值。GPU直接采样原图与遮罩；CPU回退的动态遮罩和影片帧保有队列内快照，静态图片继续共享。
 - 角色基础动作与独立立绘替换槽、命名/数字动作、直接后向关键帧循环。显式与自动头像选择、逐页/持续显隐、前景层。
 - 图层位置/颜色渐变、相对位移、播放速度。原消息框显示/隐藏动画、逐字正文（换行不增加逐字或自动等待）、姓名别名，以及spd速度标签与pc居中标签。
@@ -53,7 +53,7 @@ Mac和Switch运行循环统一限制为最高60 FPS，保留垂直同步；输�
 CG目录支持原33组784个差分资源，按已显示资源解锁整组；支持原按钮分页、图片/动画差分、放大和平移，以及CG/回想/音乐页面互跳。显示与已读记录保存在进度v3，旧进度v1/v2可读取，缺失的已读记录保持未读。动画CG按原关键帧时间循环；34个影片资源中24个音轨解码后为全零PCM，10个无音轨。完整原UI转场仍待接线。
 剧情图像的rep替换按原脚本顺序应用，支持遮罩/粒子位图引用、实例隔离和存读档恢复；更换基础文件会清除旧替换。
 回想播放时，X打开的菜单提供独立返回回想目录操作；取消菜单继续播放，返回标题保持原义。
-ZL或原位置的触摸跳过按钮切换普通快进：遵守原设置的仅已读/含未读模式，在未读文字与选项处停止。ZR保持强制快进。已读页面独立持久化，flow2保存当前页标识并兼容flow1。
+ZL切换自动播放，ZR按下切换仅已读快进且始终停止在未读或选项处。原位置的触摸跳过按钮继续遵守设置中的仅已读/含未读模式。已读页面独立持久化，flow2保存当前页标识并兼容flow1。
 
 回想目录使用原版两页缩略图和按钮，按实际经过的剧情标签解锁；回放保留原选项并在结束后返回目录，回放期间禁用存读档。当前仅完成目录和播放/返回接线，尚未完成所有回想段落的视听验收。
 
@@ -94,7 +94,7 @@ build/whj2-runtime /absolute/path/to/game /absolute/path/to/empty-test-saves --t
 
 ### Controller and touch navigation
 
-L opens the save panel; R opens the load panel. A confirms a selected slot, and B cancels a panel. X opens the settings page, Up opens text history, and held ZR forces text advance until released or a choice is reached. During dialogue B hides or restores the text box; A first restores hidden text without advancing. Y or a downward swipe opens the original upper menu. No controller legend or permanent touch overlay is drawn.
+L opens the save panel; R opens the load panel. A confirms a selected slot, and B cancels a panel. X opens the settings page, Up opens text history, ZL toggles auto-play, and ZR toggles read-only skipping, stopping at an unread page or a choice. During dialogue B hides or restores the text box; A first restores hidden text without advancing. Y or a downward swipe opens the original upper menu. No controller legend or permanent touch overlay is drawn.
 
 Save/load panels use the original resources, 15 pages of eight local slots, and small scene thumbnails. History contains displayed pages and is included with each slot. The settings page supports nine sliders for text speed, text-window opacity, auto-play delay, and six volume controls, plus click-to-stop voice and auto-play voice-wait toggles. Sliders support captured touch drags and controller adjustment, with local persistence and reset confirmation. The original auto-play button controls timed progression and waits for text completion and, when selected, voice completion. Remaining font, display-quality, and character-voice controls are pending; this is not full settings parity. Confirmation dialogs currently use original artwork without the original transition timing. Physical controller/touch and Switch runtime acceptance remain pending.
 
@@ -179,3 +179,5 @@ measurements have been run for this revision.
 设置页的原“フォント選択”按钮可选择系统默认字体，以及游戏目录 `fonts/` 下的 `.ttf`、`.otf`、`.ttc` 文件。方向键选择，A 确认，B 取消；触摸可选择条目或翻页。选择保存在独立存档目录的 `font.cfg`，恢复默认设置时一并重置。自定义字体缺少的字符由平台字体补充。字体文件不随项目分发。字体设置提供原版 1/2/4/8 倍采样（默认 4 倍）、加粗、阴影、两种描边宽度及描边/阴影 RGB 颜色。十字键左右调整、A 循环切换；选择“設定”保存，B 或“キャンセル”恢复进入前的设置。字体集合会逐一列出字体族和字面名称，并保存文件名与字面索引；旧版仅保存文件名的配置按第一个字面读取。字体来源为当前平台默认字体及游戏目录提供的字体文件，不枚举 Windows 安装字体。
 
 脚本图层的 `z`、`rotx`、`roty`、`scalez` 已接入外层三维变换与位置补间，并传递到嵌套动画和嵌套粒子；普通平面图层沿用二维路径。原生正文雨景的相关指令已接线，尚无该改动的实机画面对照。
+
+静态位图的 `imgfilter` 支持原 `blur10`、`blur20`、`mono`、`sepia` 公式，按图层前四个图像槽缓存处理结果；`none` 恢复源图。动态影片及嵌套非位图的滤镜仍待实现，会保留未支持日志。

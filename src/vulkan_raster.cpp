@@ -279,7 +279,7 @@ struct VulkanRaster::Impl {
 #ifdef __SWITCH__
   output=buffer(2*CanvasBytes,VK_BUFFER_USAGE_TRANSFER_SRC_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT,false);
 #else
-  output=buffer(2*CanvasBytes);
+  output=buffer(2*CanvasBytes,VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
 #endif
   VkDescriptorSetAllocateInfo descriptors{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};descriptors.descriptorPool=descriptorPool;descriptors.descriptorSetCount=1;descriptors.pSetLayouts=&setLayout;checked(AllocateDescriptorSets(device,&descriptors,&rasterSet),"raster descriptor");
 #ifdef __SWITCH__
@@ -759,7 +759,7 @@ struct VulkanRaster::Impl {
 #ifdef __SWITCH__
    scanlineHistory=buffer(CanvasBytes,VK_BUFFER_USAGE_TRANSFER_SRC_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT,false);
 #else
-   scanlineHistory=buffer(CanvasBytes);
+   scanlineHistory=buffer(CanvasBytes,VK_BUFFER_USAGE_TRANSFER_SRC_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT);
 #endif
   }
 #ifdef __SWITCH__

@@ -247,7 +247,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   std::unique_ptr<KFont,void(*)(KFont*)> nextFont(kfont_open(index?path.c_str():nullptr,0),kfont_close);
   if(!nextFont){status="フォントを読み込めませんでした。";std::cerr<<"FONT FAIL file="<<fontFiles[index]<<"\n";return false;}
   if(persist)qlie::write_file(saveDir+"/font.cfg",qlie::Bytes(fontFiles[index].begin(),fontFiles[index].end()));
-  auto*previous=font;font=nextFont.release();selectedFont=index;uiGlyphs.clear();musicScreen->setFont(font);cgScreen->setFont(font);
+  auto*previous=font;font=nextFont.release();selectedFont=index;kfont_set_antialias(font,unsigned(settings.get("FontAA")));uiGlyphs.clear();musicScreen->setFont(font);cgScreen->setFont(font);
   refreshFontPreviews();if(!text.empty())refreshMessage();
   if(story.state.awaiting){auto savedChoice=choiceScreen->save();choiceScreen->restore(savedChoice,font);}
   kfont_close(previous);return true;
@@ -264,6 +264,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   }catch(const std::exception&e){status="フォント設定を読み込めませんでした。";std::cerr<<"FONT CONFIG FAIL "<<e.what()<<"\n";}
  }
  void applySettings(bool persist=true){
+ if(kfont_set_antialias(font,unsigned(settings.get("FontAA")))>0){uiGlyphs.clear();refreshFontPreviews();if(!text.empty())refreshMessage();if(story.state.awaiting){auto state=choiceScreen->save();choiceScreen->restore(state,font);}}
  bool interlace=settings.get("Interlace")!=0;bool cpuMode=interlace;
 #ifdef WHJ2_WITH_VULKAN
  if(vulkan){vulkan->setInterlaced(interlace);cpuMode=false;}
@@ -541,7 +542,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(action==UI::ResetSettings){settings.reset();selectFont(0,true);applySettings();return;}
  if(action==UI::Quit){done=true;return;}
  if(action==UI::Title){if(movie->playing())movie->stop();showTitle();return;}}
- if(action==UI::ChooseFont){gameMenu.open(UI::Fonts);gameMenu.fontCount=int(fontFiles.size());gameMenu.focus=selectedFont;return;}
+ if(action==UI::ChooseFont){gameMenu.open(UI::Fonts);gameMenu.fontCount=int(fontFiles.size())+1;gameMenu.focus=selectedFont;return;}
  if(action==UI::ApplyFont){if(selectFont(gameMenu.focus,true)){gameMenu.open(UI::Settings);gameMenu.focus=24;status.clear();}return;}
  if(action==UI::Close){if(gameMenu.panel==UI::Fonts){gameMenu.open(UI::Settings);gameMenu.focus=24;status.clear();return;}if(gameMenu.panel==UI::History&&historyVoicePlayed)audio->volume(3,0,200,true);historyVoicePlayed=false;gameMenu.close();return;}
  if(action==UI::Quit||action==UI::Title||action==UI::ResetSettings){gameMenu.ask(action);return;}
@@ -598,9 +599,9 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(gameMenu.asking){auto prompt=gameMenu.requested==UI::Quit?"ゲームを終了しますか？":gameMenu.requested==UI::Title?"タイトルに戻りますか？":gameMenu.requested==UI::ResetSettings?"設定を初期状態に戻しますか？":gameMenu.requested==UI::DeleteSlot?"データを削除しますか？":gameMenu.panel==UI::Load?"データをロードしますか？":"データを上書き保存しますか？";line(prompt,440,275,28);return;}
  if(gameMenu.panel==UI::Fonts){
   line("フォント選択",350,150,30);int first=gameMenu.focus/5*5;
-  for(int row=0;row<5&&first+row<int(fontFiles.size());row++){int index=first+row;auto label=index?fontFiles[index]:"標準フォント";if(index==selectedFont)label="* "+label;line(label,340,220+row*60,24,index==gameMenu.focus?0xffff88:0xffffff);}
+  for(int row=0;row<5&&first+row<gameMenu.fontCount;row++){int index=first+row;auto label=index==int(fontFiles.size())?"アンチエイリアス ×"+std::to_string(settings.get("FontAA")):index?fontFiles[index]:"標準フォント";if(index==selectedFont)label="* "+label;line(label,340,220+row*60,24,index==gameMenu.focus?0xffff88:0xffffff);}
   if(first>0)line("前へ",840,170,24);
-  if(first+5<int(fontFiles.size()))line("次へ",840,555,24);
+  if(first+5<gameMenu.fontCount)line("次へ",840,555,24);
   line("キャンセル",570,565,24);if(!status.empty())line(status,320,525,18);return;
  }
  if(gameMenu.panel==UI::Settings&&gameMenu.allowSceneReturn)line("回想を終了",520,680,26,gameMenu.focus==16?0xffff88:0xffffff);

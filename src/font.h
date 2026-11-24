@@ -9,6 +9,8 @@ typedef struct {
 /* A user font path, or platform font (macOS / Switch shared font). */
 KFont *kfont_open(const char *path,int simplified);
 void kfont_close(KFont *font);
+/* QLIE sampling factor: monochrome rasterization followed by coverage averaging. */
+int kfont_set_antialias(KFont *font,unsigned factor);
 /* Read-only diagnostics for the per-font, colour-independent LRU cache.
    Bitmap bytes exclude fixed hash buckets and bounded entry metadata. */
 int kfont_cache_stats(const KFont *font,KFontCacheStats *stats);

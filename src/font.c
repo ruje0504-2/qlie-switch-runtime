@@ -16,7 +16,7 @@ typedef struct KFontGlyph {
     struct KFontGlyph *hash_next,*newer,*older;
 } KFontGlyph;
 struct KFont {
-    FT_Library library;FT_Face faces[3];unsigned count,shared;
+    FT_Library library;FT_Face faces[3];unsigned count,shared,supersample;
     KFontGlyph *glyphs[FONT_CACHE_BUCKETS],*newest,*oldest;
     size_t cache_count,cache_bytes;
     uint64_t cache_hits,rasterizations;
@@ -93,6 +93,12 @@ void kfont_close(KFont *f){
 #endif
     free(f);
 }
+int kfont_set_antialias(KFont *f,unsigned factor){
+    if(!f||factor<1||factor>16)return -1;
+    if(f->supersample==factor)return 0;
+    while(f->oldest)font_cache_evict(f);
+    f->supersample=factor;return 1;
+}
 int kfont_cache_stats(const KFont *f,KFontCacheStats *stats){
     if(!f||!stats)return -1;
     *stats=(KFontCacheStats){f->cache_count,f->cache_bytes,FONT_CACHE_GLYPHS,FONT_CACHE_BYTES,
@@ -140,10 +146,42 @@ static int font_load_glyph(KFont *f,uint32_t cp,unsigned width,unsigned height,
     }
     FT_Face face=NULL;FT_UInt index=0;
     for(unsigned i=0;i<f->count;i++)if((index=glyph_index(f->faces[i],cp))){face=f->faces[i];break;}
-    if(!face||FT_Set_Pixel_Sizes(face,width,height)||FT_Load_Glyph(face,index,FT_LOAD_RENDER|FT_LOAD_TARGET_NORMAL))return -1;
+    unsigned factor=f->supersample?f->supersample:1;
+    FT_Int32 flags=FT_LOAD_RENDER|(f->supersample?(FT_LOAD_TARGET_MONO|FT_LOAD_MONOCHROME):FT_LOAD_TARGET_NORMAL);
+    if(!face||FT_Set_Pixel_Sizes(face,width*factor,height*factor)||FT_Load_Glyph(face,index,flags))return -1;
     f->rasterizations++;
     FT_GlyphSlot g=face->glyph;FT_Bitmap *bitmap=&g->bitmap;
     if(bitmap->pixel_mode!=FT_PIXEL_MODE_GRAY&&bitmap->pixel_mode!=FT_PIXEL_MODE_MONO)return -1;
+    if(f->supersample){
+        int64_t high_left=g->bitmap_left,high_top=(face->size->metrics.ascender>>6)-g->bitmap_top;
+        int64_t left=high_left/(int)factor,top=high_top/(int)factor;
+        if(high_left<0&&high_left%(int)factor)--left;
+        if(high_top<0&&high_top%(int)factor)--top;
+        unsigned pad_x=(unsigned)(high_left-left*factor),pad_y=(unsigned)(high_top-top*factor);
+        unsigned w=(pad_x+bitmap->width+factor-1)/factor,h=(pad_y+bitmap->rows+factor-1)/factor;
+        size_t bytes=(size_t)w*h;
+        if(bytes>FONT_CACHE_BYTES)return -1;
+        KFontGlyph *cached=calloc(1,sizeof(*cached));if(!cached)return -1;
+        uint8_t *pixels=bytes?calloc(bytes,1):NULL;
+        if(bytes&&!pixels){free(cached);return -1;}
+        for(unsigned y=0;y<h;y++)for(unsigned x=0;x<w;x++){
+            unsigned sum=0;
+            for(unsigned yy=0;yy<factor;yy++)for(unsigned xx=0;xx<factor;xx++){
+                int sy=(int)(y*factor+yy)-(int)pad_y,sx=(int)(x*factor+xx)-(int)pad_x;
+                if(sy<0||sx<0||sy>=(int)bitmap->rows||sx>=(int)bitmap->width)continue;
+                const uint8_t *row=bitmap->buffer+(bitmap->pitch>=0?(unsigned)sy:bitmap->rows-(unsigned)sy-1)*(size_t)abs(bitmap->pitch);
+                sum+=bitmap->pixel_mode==FT_PIXEL_MODE_MONO?((row[sx/8]&(0x80>>(sx%8)))?255:0):row[sx];
+            }
+            pixels[(size_t)y*w+x]=(uint8_t)(sum/(factor*factor));
+        }
+        while(f->cache_count>=FONT_CACHE_GLYPHS||f->cache_bytes>FONT_CACHE_BYTES-bytes)font_cache_evict(f);
+        cached->codepoint=cp;cached->width=width;cached->height=height;cached->left=left;cached->top=top;cached->bytes=bytes;
+        cached->bitmap=(FT_Bitmap){.rows=h,.width=w,.pitch=(int)w,.buffer=pixels,.num_grays=256,.pixel_mode=FT_PIXEL_MODE_GRAY};
+        cached->hash_next=f->glyphs[bucket];f->glyphs[bucket]=cached;
+        cached->older=f->newest;if(f->newest)f->newest->newer=cached;else f->oldest=cached;
+        f->newest=cached;f->cache_count++;f->cache_bytes+=bytes;
+        *bitmap_out=&cached->bitmap;*left_out=left;*top_out=top;return 0;
+    }
     *bitmap_out=bitmap;*left_out=g->bitmap_left;*top_out=(face->size->metrics.ascender>>6)-g->bitmap_top;
     /* Store coverage and metrics only: position, colour and the outline are
        applied by the unchanged draw loops. Copying the bitmap also keeps it

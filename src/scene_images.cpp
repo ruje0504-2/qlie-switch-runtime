@@ -448,6 +448,13 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  if(!ui&&!chara&&!face&&!message&&cmd.rfind("bg",0)!=0&&cmd!="effect"&&cmd!="env")return false;
  auto&l=layers[cmd];
  const std::map<std::string,std::string> faceDefaults{{"mode","auto"},{"disp","once"},{"show","false"},{"x","0"},{"y","0"},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri","0"},{"align","left:top"},{"@face-active","false"}};
+ // Imo_Image_DefaultParam is merged by clear:def, including animation state.
+ static const std::map<std::string,std::string> imageDefaults{
+  {"show","false"},{"x","0"},{"y","0"},{"z","0"},{"ax","0"},{"ay","0"},{"az","0"},
+  {"scalex","100"},{"scaley","100"},{"scalez","100"},{"rotx","0"},{"roty","0"},{"rotz","0"},
+  {"pri","0"},{"align","left:top"},{"motion","0"},{"time","0"},{"move","linear"},{"movepow","100"},
+  {"file","none"},{"texfilter","pass"},{"alpha","$FF"},{"addcolor","$000000"},{"mulcolor","$FFFFFF"},
+  {"speed","100"},{"imgfilter","none"},{"vol","100"},{"voltype","se"},{"dchannel","0"}};
  if(face&&l.params.empty())l.params=faceDefaults;
  if(message&&l.params.empty())l.params={{"mode","cls"},{"show","false"},{"x","0"},{"y","720"},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri","1100"},{"align","left:top"},{"textarea","920:300"},{"fontsize","26:26"},{"fontcolor","$FFFFFF"}};
  if(l.params.empty())l.params={{"x",ui?"0":"640"},{"y",ui?"0":chara?"720":"360"},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri",chara?"500":"0"},{"show","true"},{"align",chara?"center:bottom":(ui||cmd=="effect")?"left:top":"center:center"}};
@@ -462,6 +469,10 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  if(c==s.npos)throw std::runtime_error("Unknown image template "+s);
  auto key=s.substr(0,c),v=s.substr(c+1);
  if(key.size()==4&&key.rfind("rep",0)==0&&key[3]>='0'&&key[3]<='3')replacementChanged[key[3]-'0']=true;
+ if(key=="clear"&&v=="def"&&!chara&&!face&&!message&&!ui){
+  l=Layer{};l.params=imageDefaults;file=baseChanged=position=color=false;
+  std::fill(std::begin(replacementChanged),std::end(replacementChanged),false);continue;
+ }
  if(face&&key=="clear"&&v=="def"){l=Layer{};l.params=faceDefaults;continue;}
  if(key=="imgfilter")l.filtered={};
  if(key=="clear"){l.filtered={};l.params.erase("@portrait");l.params.erase("@replacement");l.scriptReplacement.reset();l.path.clear();

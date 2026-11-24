@@ -18,7 +18,7 @@ const Image& GameMenu::resource(const std::string&path){auto it=cache.find(path)
  if(hash==path.npos)decoded=image(assets.read(path));else {unsigned wanted=unsigned(std::stoul(path.substr(hash+1))),index=0;bool found=false;for(auto&member:abmp(assets.read(path.substr(0,hash))))if(member.type.rfind("abimg",0)==0){if(index++==wanted){decoded=image(member.data);found=true;break;}}if(!found)throw std::runtime_error("UI image member missing "+path);}
  decoded.version.publish();it=cache.emplace(path,std::move(decoded)).first;}return it->second;}
 
-void GameMenu::put(RenderQueue&q,const std::string&path,float x,float y,bool center){auto&im=resource(path);q.image(im,imagePlacement(x,y,1,1,0,center?.5f:0,center?.5f:0,im.width,im.height),0,255,0,0xffffff);}
+void GameMenu::put(RenderQueue&q,const std::string&path,float x,float y,bool center,unsigned opacity){auto&im=resource(path);q.image(im,imagePlacement(x,y,1,1,0,center?.5f:0,center?.5f:0,im.width,im.height),0,opacity,0,0xffffff);}
 void GameMenu::move(int dx,int dy){if(asking){if(dx||dy)focus=1-focus;return;}
  if(panel==Save||panel==Load){if(dx)focus=(focus+4)%8;if(dy)focus=(focus+dy+8)%8;}
  else if(panel==History){
@@ -54,6 +54,13 @@ void GameMenu::render(qlie::Bytes*pixels,RenderTarget*target){RenderQueue q;
  put(q,dir+"戻る_off.png",1211,695,true);put(q,dir+"タイトルへ戻る_off.png",1080,695,true);put(q,dir+"ゲームの終了_off.png",950,695,true);
  }else if(panel==History){dim(3,10);put(q,"script/log/アッパーフレーム.png",0,0);put(q,"script/log/アンダーフレーム.png",0,658);put(q,"script/log/ゲームに戻る_off.png",1208,694,true);for(int row=0;row<4;row++)if(historyVoices[row])put(q,std::string("script/log/button_voice.b#")+(focus==row?"1":"0"),210,585-row*150,true);
  }else if(panel==Settings){put(q,"script/config/背景.png",0,0);put(q,"script/config/設定フレーム.png",139,89);put(q,"script/config/アッパーフレーム.png",0,0);put(q,"script/config/アンダーフレーム.png",0,656);
+ put(q,"script/config/preview_font.b#0",356,490);
+ put(q,"script/config/preview_font.b#1",349,490,false,unsigned(settings.get("WindowAlpha")));
+ put(q,"script/config/preview_font.b#2",349,490);
+ put(q,"script/config/priview_windowalpha.b#0",356,225);
+ put(q,"script/config/priview_windowalpha.b#1",349,225,false,unsigned(settings.get("WindowAlpha")));
+ put(q,"script/config/priview_windowalpha.b#3",349,225);
+ for(unsigned i=0;i<textPreviews.size();++i){auto&text=textPreviews[i];if(!text.pixels.empty())q.image(text,imagePlacement(i?363:361,i?230:495,1,1,0,0,0,text.width,text.height),0,255,0,0xffffff);}
  for(int i=0;i<5;i++)put(q,std::string("script/config/音量テスト")+(focus==17+i?"_on.png":"_off.png"),1070,testButtonY[i],true);
  for(int i=0;i<9;i++){const auto&slider=sliders[i];bool active=focus==i+3;auto part=std::to_string(active?1:0);put(q,std::string("script/config/")+((i<2||i==8)?"scroll_bar_s.b#":"scroll_bar.b#")+part,slider.x-((i<2||i==8)?8:10),slider.y-((i<2||i==8)?10:11));put(q,"script/config/scroll_button.b#"+part,slider.x+sliderPosition(settings,i)*slider.width/20,slider.y,true);}
  put(q,std::string("script/config/確認_設定初期化")+(focus==12?"_on.png":"_off.png"),1079,694,true);

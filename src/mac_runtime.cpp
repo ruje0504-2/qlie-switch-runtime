@@ -156,6 +156,11 @@ struct Frontend {
  images->setReadAhead(readAhead.get());audio->setReadAhead(readAhead.get());
 #endif
  messageText=std::make_unique<whj2::MessageText>(assets,true);
+ {
+  whj2::MessageText preview(assets);whj2::MessageStyle style{400,50,20,20,0xffffff};
+  preview.start("[spd,0]   美 少 女 万 華 鏡");auto fontPreview=preview.render(font,style);
+  preview.start("[spd,0]「サンプルテキスト」");gameMenu.setTextPreviews(std::move(fontPreview),preview.render(font,style));
+ }
  transition=std::make_unique<whj2::SceneTransition>(assets);
  movie=std::make_unique<whj2::Movie>(assets,*audio);
  voices=std::make_unique<whj2::VoiceResolver>(assets);

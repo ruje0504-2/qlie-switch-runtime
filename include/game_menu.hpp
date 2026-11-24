@@ -9,7 +9,8 @@ class GameMenu {
  qlie::Assets& assets;whj2::Settings& settings;std::map<std::string,Image> cache;
  const Image& resource(const std::string&);
  int draggedSlider=-1;
- void put(RenderQueue&,const std::string&,float,float,bool center=false);
+ std::array<Image,2> textPreviews;
+ void put(RenderQueue&,const std::string&,float,float,bool center=false,unsigned opacity=255);
  void render(qlie::Bytes*,RenderTarget*);
 public:
  enum Panel {None,Save,Load,History,Settings};
@@ -21,6 +22,7 @@ public:
  int historyVoiceRow=-1,historyMaxOffset=0,historyRows=0;
  unsigned testVolumeCategory=0;
  explicit GameMenu(qlie::Assets&a,whj2::Settings&s):assets(a),settings(s){}
+ void setTextPreviews(Image font,Image window){font.version.publish();window.version.publish();textPreviews[0]=std::move(font);textPreviews[1]=std::move(window);}
  void open(Panel p){panel=p;focus=p==Settings?3:0;asking=false;historyOffset=0;historyVoiceRow=-1;historyVoices.fill(false);}
  void close(){panel=None;asking=false;draggedSlider=-1;}
  bool visible()const{return panel!=None||asking;}

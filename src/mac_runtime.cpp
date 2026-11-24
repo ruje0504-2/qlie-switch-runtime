@@ -155,7 +155,7 @@ struct Frontend {
  readAhead=std::make_unique<whj2::AssetReadAhead>();
  images->setReadAhead(readAhead.get());audio->setReadAhead(readAhead.get());
 #endif
- messageText=std::make_unique<whj2::MessageText>(assets);
+ messageText=std::make_unique<whj2::MessageText>(assets,true);
  transition=std::make_unique<whj2::SceneTransition>(assets);
  movie=std::make_unique<whj2::Movie>(assets,*audio);
  voices=std::make_unique<whj2::VoiceResolver>(assets);

@@ -7,9 +7,9 @@ extern "C" {
 }
 #include <iostream>
 #include <algorithm>
-int main(int argc,char**argv){KFont*font=nullptr;try{if(argc!=2)return 2;qlie::Assets assets(argv[1]);whj2::MessageText text(assets);font=kfont_open(nullptr,0);if(!font)throw std::runtime_error("Font open");
+int main(int argc,char**argv){KFont*font=nullptr;try{if(argc!=2)return 2;qlie::Assets assets(argv[1]);whj2::MessageText text(assets,true);font=kfont_open(nullptr,0);if(!font)throw std::runtime_error("Font open");
  whj2::SceneImages scene(assets);scene.command("^message,$window01");auto style=scene.messageStyle();if(style.width!=920||style.height!=300||style.fontWidth!=26||style.fontHeight!=26)throw std::runtime_error("Original message template style");
- text.start("文字テストABC");if(text.visible()!=0)throw std::runtime_error("Initial reveal");text.update(10);if(text.visible()!=1)throw std::runtime_error("First UTF8 glyph boundary");auto state=text.save();whj2::MessageText restored(assets);restored.restore(state);if(restored.render(font,style).pixels!=text.render(font,style).pixels)throw std::runtime_error("Message restore pixels");
+ text.start("文字テストABC");if(text.visible()!=0)throw std::runtime_error("Initial reveal");text.update(10);if(text.visible()!=1)throw std::runtime_error("First UTF8 glyph boundary");auto state=text.save();whj2::MessageText restored(assets,true);restored.restore(state);if(restored.render(font,style).pixels!=text.render(font,style).pixels)throw std::runtime_error("Message restore pixels");
  text.update(20);restored.update(20);if(restored.visible()!=text.visible()||restored.render(font,style).pixels!=text.render(font,style).pixels)throw std::runtime_error("Message continuation");
  if(!text.reveal()||!text.finished()||text.reveal())throw std::runtime_error("Reveal must consume only unfinished text");
  auto surface=text.render(font,style);auto blank=surface;std::fill(blank.pixels.begin(),blank.pixels.end(),0);scene.setMessageImage(blank,true);scene.update(250);

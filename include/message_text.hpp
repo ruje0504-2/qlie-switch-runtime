@@ -10,9 +10,10 @@ class MessageText {
  double elapsed=0,speed=10;
  std::vector<uint32_t> lineStartForbidden,lineEndForbidden;
  unsigned lineReserve=1;
+ bool storyLineBreaking=false;
  void index();
 public:
- explicit MessageText(qlie::Assets&);
+ explicit MessageText(qlie::Assets&,bool storyLineBreaking=false);
  void setSpeed(double);double getSpeed()const{return speed;}
  void start(const std::string&);void update(double ms);bool reveal();bool finished()const;size_t visible()const;
  Image render(KFont*,const MessageStyle&)const;

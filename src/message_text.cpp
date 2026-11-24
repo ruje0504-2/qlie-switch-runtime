@@ -15,9 +15,10 @@ static std::vector<uint32_t> codepoints(const std::string&value){
  for(size_t p=0;p<value.size();){uint32_t cp=uint8_t(value[p++]);unsigned tail=0;if(cp>=240){cp&=7;tail=3;}else if(cp>=224){cp&=15;tail=2;}else if(cp>=192){cp&=31;tail=1;}if(p+tail>value.size())throw std::runtime_error("Invalid message UTF8");while(tail--)cp=(cp<<6)|(uint8_t(value[p++])&63);result.push_back(cp);}
  return result;
 }
-MessageText::MessageText(qlie::Assets&assets){
+MessageText::MessageText(qlie::Assets&assets,bool useStoryLineBreaking):storyLineBreaking(useStoryLineBreaking){
  std::istringstream in(qlie::cp932(assets.read("script/config/default.txt")));std::string line;
  while(std::getline(in,line)){auto p=line.find('=');if(p!=line.npos&&trim(line.substr(0,p))=="TextSpeed")speed=std::stod(trim(line.substr(p+1)));}
+ if(!storyLineBreaking)return;
  std::istringstream rules(qlie::cp932(assets.read("misc/value.s")));
  while(std::getline(rules,line)){
   auto p=line.find('=');if(p==line.npos)continue;
@@ -55,7 +56,7 @@ Image MessageText::render(KFont*font,const MessageStyle&style)const{if(!style.wi
   const bool startForbidden=std::find(lineStartForbidden.begin(),lineStartForbidden.end(),cp)!=lineStartForbidden.end();
   const bool endForbidden=std::find(lineEndForbidden.begin(),lineEndForbidden.end(),cp)!=lineEndForbidden.end();
   const unsigned remaining=(style.width-std::min(x,style.width))/std::max(1u,style.fontWidth);
-  const bool earlyWrap=!startForbidden&&remaining<=lineReserve+unsigned(endForbidden);
+  const bool earlyWrap=storyLineBreaking&&!startForbidden&&remaining<=lineReserve+unsigned(endForbidden);
   if(cp=='\n'||x+width>style.width||(x&&earlyWrap)){x=0;y+=style.fontHeight;if(cp=='\n')continue;}
   if(y+style.fontHeight>style.height)break;
   kfont_draw_outline(font,&dst,cp,int(x),int(y),width,style.fontHeight,style.color);x+=width;

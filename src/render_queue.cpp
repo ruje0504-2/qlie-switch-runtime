@@ -36,8 +36,9 @@ uint8_t blendChannel(unsigned mode,uint8_t source,uint8_t destination,uint8_t al
 void RenderQueue::image(const Image&i,const Affine2D&m,float pri,float alpha,uint32_t add,uint32_t mul,unsigned blend){
  Command c;c.image=&i;c.placement=m;c.priority=pri;c.state.alpha=alpha;c.state.addColor=add;c.state.mulColor=mul;c.state.flags=blend;commands.push_back(c);
 }
+const Image& RenderQueue::snapshotImage(const Image&i){snapshots.push_back(i);return snapshots.back();}
 void RenderQueue::snapshot(const Image&i,const Affine2D&m,float pri,float alpha,uint32_t add,uint32_t mul,unsigned blend){
- snapshots.push_back(i);image(snapshots.back(),m,pri,alpha,add,mul,blend);
+ image(snapshotImage(i),m,pri,alpha,add,mul,blend);
 }
 void RenderQueue::triangle(const Image&i,const std::array<TextureVertex,3>&vertices,float pri,float alpha,uint32_t add,uint32_t mul,unsigned blend){
  std::vector<TextureVertex> clipped;
@@ -101,6 +102,8 @@ void RenderQueue::draw(qlie::Bytes&out,unsigned w,unsigned h)const{
  for(auto*c:order){const auto&s=c->state;
  if(!c->image){
   if(s.kind==15){
+   stack.clear();
+  }else if(s.kind==17){
    if(!stack.empty())stack.pop_back();
   }else if(s.kind==16){
    auto t=s;

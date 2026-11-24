@@ -26,5 +26,11 @@ int main(){try{
  check(pixel(4,3,0)==255&&pixel(5,3,0)==255,"nonuniform scale after centered rotation");
  out.assign(out.size(),0);RenderQueue alpha;alpha.image(blue,imagePlacement(1,2,1,1,0,0,0,1,1),0,255,0,0xffffff);alpha.image(red,imagePlacement(1,2,1,1,0,0,0,1,1),1,128,0,0xffffff);alpha.draw(out,8,8);
  check(pixel(1,2,0)==127&&pixel(1,2,2)==127&&pixel(1,2,3)==191,"native fixed-point alpha layering");
- std::cout<<"PASS cross-scene translation, depth pop, centered scaling/rotation, frame reset and alpha pixels\n";
+ out.assign(out.size(),0);RenderQueue nested;AnimationSample first,second,one,all;
+ first.kind=second.kind=16;first.x=1;second.x=2;one.kind=17;all.kind=15;
+ nested.control(first,0);nested.control(second,1);nested.image(red,imagePlacement(0,0,1,1,0,0,0,1,1),2,255,0,0xffffff);
+ nested.control(one,3);nested.image(red,imagePlacement(0,1,1,1,0,0,0,1,1),4,255,0,0xffffff);
+ nested.control(second,5);nested.control(all,6);nested.image(red,imagePlacement(0,2,1,1,0,0,0,1,1),7,255,0,0xffffff);nested.draw(out,8,8);
+ check(pixel(3,0,0)==255&&pixel(1,1,0)==255&&pixel(0,2,0)==255,"primitive16 push / primitive17 pop / primitive15 reset");
+ std::cout<<"PASS cross-scene translation, depth reset, nested pop, centered scaling/rotation, frame reset and alpha pixels\n";
  return 0;}catch(const std::exception&e){std::cerr<<e.what()<<"\n";return 1;}}

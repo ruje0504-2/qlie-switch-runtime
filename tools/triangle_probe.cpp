@@ -18,5 +18,9 @@ int main(){try{
  RenderQueue reversed;out.assign(out.size(),0);reversed.triangle(half,{v[2],v[1],v[0]},0,255,0,0xffffff);reversed.draw(out,8,8);if(out[(1*8+6)*4]==0)throw std::runtime_error("Reverse winding");
  RenderQueue crossing;out.assign(out.size(),0);crossing.triangle(half,{{{4,4,5,0,0},{0,0,1000,0,0},{8,0,1000,0,0}}},0,255,0,0xffffff);crossing.draw(out,8,8);
  if(std::none_of(out.begin(),out.end(),[](uint8_t v){return v!=0;}))throw std::runtime_error("Near-plane crossing discarded");
- std::cout<<"PASS perspective texture coordinates, reversed winding, no common-edge gaps/overdraw\n";return 0;
+ Image changing{1,1,{100,0,0,255}};RenderQueue stable;const auto&saved=stable.snapshotImage(changing);
+ stable.triangle(saved,{{{0,0,1000,0,0},{4,0,1000,1,0},{0,4,1000,0,1}}},0,255,0,0xffffff);
+ changing.pixels={0,100,0,255};out.assign(out.size(),0);stable.draw(out,8,8);
+ if(out[(1*8+1)*4]!=100||out[(1*8+1)*4+1]!=0)throw std::runtime_error("Queued 3D frame aliased mutable source");
+ std::cout<<"PASS perspective texture coordinates, reversed winding, no common-edge gaps/overdraw, near clipping, dynamic frame stability\n";return 0;
 }catch(const std::exception&e){std::cerr<<"FAIL "<<e.what()<<"\n";return 1;}}

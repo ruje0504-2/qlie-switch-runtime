@@ -33,7 +33,7 @@ Matrix3D placement3D(const AnimationSample&k,unsigned width,unsigned height){
  y.m[0][0]=cy;y.m[0][2]=sy;y.m[2][0]=-sy;y.m[2][2]=cy;
  z.m[0][0]=cz;z.m[0][1]=-sz;z.m[1][0]=sz;z.m[1][1]=cz;
  scale.m[0][0]=k.scaleX/100;scale.m[1][1]=k.scaleY/100;scale.m[2][2]=k.scaleZ/100;
- anchor.m[0][3]=-width*k.anchorX/100;anchor.m[1][3]=-height*k.anchorY/100;
+ anchor.m[0][3]=-float(width)*k.anchorX/100;anchor.m[1][3]=-float(height)*k.anchorY/100;
  position.m[0][3]=k.x;position.m[1][3]=k.y;position.m[2][3]=-k.z;
  // PE ea798 applies anchor, rotation, record scale, then position.
  return combine(position,combine(scale,combine(z,combine(y,combine(x,anchor)))));
@@ -117,7 +117,7 @@ struct Composite {
   }
   if(!metadata)throw std::runtime_error("Composite lacks animation metadata "+name);
   for(auto&motion:definition.motions)for(auto&layer:motion.layers){if(layer.mode>2)warn("layer-mode="+std::to_string(layer.mode));
- for(auto&k:layer.keys)if(k[4]!=0&&k[4]!=1&&k[4]!=4&&k[4]!=10&&k[4]!=15&&k[4]!=16&&k[4]!=18&&k[4]!=20)warn("primitive="+std::to_string(k[4]));
+ for(auto&k:layer.keys)if(k[4]!=0&&k[4]!=1&&k[4]!=4&&k[4]!=10&&k[4]!=15&&k[4]!=16&&k[4]!=17&&k[4]!=18&&k[4]!=20)warn("primitive="+std::to_string(k[4]));
  }
  }
  void saveIdentity(StateWriter&w)const{w.n(identity);w.n(motionIdentities.size());for(auto v:motionIdentities)w.n(v);for(auto&e:members)if(e.nested)e.nested->saveIdentity(w);}
@@ -139,7 +139,7 @@ struct Composite {
  for(auto&w:k.unsupported)if(w!="primitive=20"&&!(w=="3d-rotation"&&(k.kind==18||(k.kind==4&&k.resource<members.size()&&members[k.resource].nested))))warn(w);
  if(!motion->layers[index].flags||!k.kind)continue;
  k.alpha=int(k.alpha)*int(opacity)/255;if(messageSurface&&k.kind==4&&k.resource==0)k.alpha=int(k.alpha)*int(windowAlpha)/255;k.addColor=colorAdd(k.addColor,parentAdd);k.mulColor=colorMultiply(k.mulColor,parentMul);
- if(k.kind==15||k.kind==16){queue.control(k,depth+k.priority);continue;}
+ if(k.kind==15||k.kind==16||k.kind==17){queue.control(k,depth+k.priority);continue;}
  if(k.kind==1){
   if((k.flags&0x7f)>8){warn("rectangle-blend="+std::to_string(k.flags));continue;}
   if(std::abs(k.scaleX)>=32700||std::abs(k.scaleY)>=32700){warn("rectangle-symbolic-size");continue;}
@@ -173,7 +173,19 @@ struct Composite {
  if(k.kind==20){
   if(k.resource>=members.size())throw std::runtime_error("Particle image index "+path);
   auto&e=members[k.resource];
-  if(!e.image){warn("particle-nested-or-video pending");continue;}
+  if(e.nested){
+   auto frame=k;frame.scaleX=frame.scaleY=frame.scaleZ=100;
+   auto base=combine(parent3D?*parent3D:from2D(parent),placement3D(frame,unsigned(k.particles.extent[0]),unsigned(k.particles.extent[1])));
+   Matrix3D center;center.m[2][3]=-k.particles.extent[2]*.5f;base=combine(base,center);
+   for(auto&point:particlePoints(k.particles,randomSeed,unsigned(e.nested->definition.motions.size()))){
+    Matrix3D child;child.m[0][0]=child.m[1][1]=child.m[2][2]=point.scale;
+    child.m[0][3]=point.x-e.nested->definition.bounds[0]*.5f;child.m[1][3]=point.y-e.nested->definition.bounds[1]*.5f;child.m[2][3]=point.z;
+    child=combine(base,child);
+    e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,point.milliseconds),e.nested->definition.motions.at(point.motion).name,{},depth+k.priority,k.alpha*point.alpha/255,k.addColor,k.mulColor,k.flags&0x7f,nullptr,nullptr,255,nullptr,nullptr,&child);
+   }
+   continue;
+  }
+  if(!e.image){warn("particle-video pending");continue;}
   bool rotation3d=false;for(auto&w:k.unsupported)if(w=="3d-rotation")rotation3d=true;
   if(rotation3d){warn("particle-3d-rotation pending");continue;}
   auto seed=0x35246u^identity^motionIdentities[size_t(motion-&definition.motions[0])];
@@ -229,7 +241,7 @@ struct Composite {
     warn("video-member origin alignment unverified");
  source=&clip->at(ms);dynamic=true;
    }
-   if(source&&parent3D){auto matrix=combine(*parent3D,placement3D(k,source->width,source->height));quad(queue,*source,matrix,k,depth+k.priority);continue;}
+   if(source&&parent3D){auto matrix=combine(*parent3D,placement3D(k,source->width,source->height));quad(queue,dynamic?queue.snapshotImage(*source):*source,matrix,k,depth+k.priority);continue;}
    if(source){auto place=affine(parent,imagePlacement(k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,source->width,source->height));
  if(dynamic)queue.snapshot(*source,place,depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
  else queue.image(*source,place,depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);

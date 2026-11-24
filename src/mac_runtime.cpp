@@ -441,13 +441,18 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   },&sentenceWait);continue;
  }if(e.type=="wait"||e.type=="click-wait"){sentenceWait.native(e.type=="click-wait",e.value.empty()?0:std::stod(e.value));transition->present();warmNextScene();return;
  }if(e.type=="command"&&e.value.rfind("^savefilter",0)==0){auto fields=whj2::split(e.value,',');if(fields.size()!=2||fields[1]!="0")throw std::runtime_error("Unsupported save thumbnail filter");continue;
+ }if(e.type=="audio-clear"){
+  if(e.value.rfind("dsnd[",0)!=0||e.value.back()!=']')throw std::runtime_error("Invalid direct sound scope");
+  size_t used=0;auto index=std::stoul(e.value.substr(5,e.value.size()-6),&used);
+  if(index>=16||used!=e.value.size()-6)throw std::runtime_error("Direct sound channel out of range");
+  audio->stop(8+unsigned(index));continue;
  }if(e.type=="command"&&(audioCommand(e.value)||images->command(e.value)))continue;
  if(e.type=="create"||e.type=="free"){audio->stopAll();
  images->clear();
  transition->reset();
  sentenceWait=whj2::SentenceWait{};
  messageText->start("");
- }if(e.type=="command"||e.type=="create"||e.type=="free"||e.type=="wait"||e.type=="audio-clear"||e.type=="audio-volume"){
+ }if(e.type=="command"||e.type=="create"||e.type=="free"||e.type=="wait"||e.type=="audio-volume"){
   // Preserve every unrendered event in the frontend trace; these are explicitly
   // pending rendering work, never counted as multimedia acceptance.
   std::cerr<<"PENDING-PRESENT "<<e.type<<" "<<e.file<<":"<<e.line<<"\n";

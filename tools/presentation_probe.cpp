@@ -3,7 +3,27 @@
 #include "animation.hpp"
 #include <fstream>
 #include <iostream>
+#include <algorithm>
 int main(int argc,char**argv){try{if(argc<2)return 2;qlie::Assets a(argv[1]);
+if(argc==3&&std::string(argv[2])=="--chara-base"){
+ auto frame=[](whj2::SceneImages&images){qlie::Bytes result(1280*720*4);images.draw(result);return result;};
+ const std::string portrait="考える01:蓮華/蓮華_中_着物_2_";
+ whj2::SceneImages empty(a);empty.command("^chara01,base:motion/motion01");auto blank=frame(empty);if(std::any_of(blank.begin(),blank.end(),[](uint8_t v){return v!=0;}))throw std::runtime_error("Unassigned character slot showed placeholder");
+ whj2::SceneImages animated(a),plain(a);animated.command("^chara01,base:motion/motion01,file:"+portrait);plain.command("^chara01,file:"+portrait);
+ if(frame(animated)!=frame(plain))throw std::runtime_error("Default base portrait placement");
+ animated.update(5000);if(frame(animated)!=frame(plain))throw std::runtime_error("Base direct-key loop disappeared");
+ animated.command("^chara01,motion:頷く");animated.update(100);plain.command("^chara01,y:730");
+ if(frame(animated)!=frame(plain))throw std::runtime_error("Original nod key displacement");
+ auto state=animated.save();whj2::SceneImages restored(a);restored.restore(state);if(frame(restored)!=frame(animated))throw std::runtime_error("Replacement portrait restore");
+ animated.update(1800);restored.update(1800);plain.command("^chara01,y:720");if(frame(restored)!=frame(animated)||frame(animated)!=frame(plain))throw std::runtime_error("Nod looping hold and restored continuation");
+ animated.command("^chara01,x:500");plain.command("^chara01,x:500");if(frame(animated)!=frame(plain))throw std::runtime_error("Character next-command default reset");
+ animated.command("^chara01,motion:1");animated.update(100);plain.command("^chara01,y:730");if(frame(animated)!=frame(plain))throw std::runtime_error("Numeric motion selection");
+ animated.command("^chara01,x:300,y:720");plain.command("^chara01,x:300,y:720");
+ animated.command("^chara02,base:motion/motion01,file:通常01:蓮華/蓮華_中_着物_2_,x:950");plain.command("^chara02,file:通常01:蓮華/蓮華_中_着物_2_,x:950");
+ if(frame(animated)!=frame(plain))throw std::runtime_error("Shared base leaked portrait replacements");
+ auto pairState=animated.save();restored.restore(pairState);if(frame(restored)!=frame(plain))throw std::runtime_error("Two replacement portraits restore");
+ std::cout<<"PASS original character base slot/default, nod/hold, save continuation and command reset\n";return 0;
+}
 if(argc==3&&std::string(argv[2])=="--tween-render"){
  auto frame=[](whj2::SceneImages&images){qlie::Bytes result(1280*720*4);images.draw(result);return result;};
  whj2::SceneImages moving(a),expected(a);

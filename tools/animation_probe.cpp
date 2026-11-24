@@ -11,6 +11,16 @@ void check(const qlie::Bytes&b,const std::string&name){if(b.size()<5||!std::equa
  std::cout<<"RECT "<<name<<" motion="<<mo.name<<" t="<<ms<<" xy="<<v.x<<","<<v.y<<" size="<<v.scaleX<<","<<v.scaleY<<" alpha="<<v.alpha<<" mul="<<v.mulColor<<"\n";
 }}}}catch(const std::exception&e){throw std::runtime_error(name+": "+e.what());}}else if(m.type.rfind("abimg",0)==0)check(m.data,name+"#"+m.name);}}
 int main(int argc,char**argv){try{if(argc<2)return 2;qlie::Assets a(argv[1]);
+if(argc==4&&std::string(argv[2])=="--inspect"){
+ for(auto&part:whj2::abmp(a.read(argv[3]))){std::cout<<"MEMBER "<<part.type<<" name="<<part.name<<" bytes="<<part.data.size()<<"\n";
+ if(part.type.rfind("abdata",0)!=0)continue;auto data=whj2::animation(part.type,part.data);
+ std::cout<<"BOUNDS "<<data.bounds[0]<<","<<data.bounds[1]<<","<<data.bounds[2]<<","<<data.bounds[3]<<"\n";
+ for(auto&motion:data.motions){std::cout<<"MOTION "<<motion.name<<"\n";for(auto&layer:motion.layers){std::cout<<"LAYER "<<layer.name<<" flags="<<unsigned(layer.flags)<<" mode="<<unsigned(layer.mode)<<" keys="<<layer.keys.size()<<"\n";
+ for(auto&key:layer.keys){unsigned t=uint32_t(key[0])|(uint32_t(key[1])<<8)|(uint32_t(key[2])<<16)|(uint32_t(key[3])<<24);auto v=whj2::sampleAnimation(layer,t,{unsigned(data.bounds[0]),unsigned(data.bounds[1]),1280,720});
+ std::cout<<"KEY "<<t<<" kind="<<v.kind<<" resource="<<v.resource<<" xy="<<v.x<<","<<v.y<<" scale="<<v.scaleX<<","<<v.scaleY<<" anchor="<<v.anchorX<<","<<v.anchorY<<" alpha="<<v.alpha<<" event="<<unsigned(key.at(0x34))<<" control="<<(int16_t(uint16_t(key.at(0x89))|(uint16_t(key.at(0x8a))<<8)))<<"\n";
+ }}}
+ }return 0;
+}
 if(argc==3&&std::string(argv[2])=="--nested"){
  for(auto&part:whj2::abmp(a.read("image/cut/eyecatch01.b")))if(part.type.rfind("abdata",0)==0){
   auto data=whj2::animation(part.type,part.data);unsigned tested=0;

@@ -102,6 +102,14 @@ std::vector<AnimationSoundEvent> animationSoundEvents(const Motion&motion,double
 AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const AnimationContext&context){
  AnimationSample out;
  if(layer.keys.empty()||ms<keyU32(layer.keys.front(),0))return out;
+ // PE e6d19: direct event-1 jumps to key[0x89], preserving overshoot.
+ for(const auto&key:layer.keys)if(key.at(0x34)==1&&ms>=keyU32(key,0)){
+  if(keyI16(key,0x8d)!=0){out.unsupported.push_back("conditional-key-jump");break;}
+  int target=keyI16(key,0x89);if(target<0||size_t(target)>=layer.keys.size()){out.unsupported.push_back("invalid-key-jump");break;}
+  double start=keyU32(layer.keys[size_t(target)],0),end=keyU32(key,0);
+  if(start>=end){out.unsupported.push_back("nonbackward-key-jump");break;}
+  ms=start+std::fmod(ms-start,end-start);break;
+ }
  if(layer.version<16)throw std::runtime_error("Animation layer15 normalization pending");
  size_t i=0;
  while(i+1<layer.keys.size()&&ms>=keyU32(layer.keys[i+1],0))i++;

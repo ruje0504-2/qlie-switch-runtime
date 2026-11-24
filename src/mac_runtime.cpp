@@ -395,7 +395,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }throw std::runtime_error("Unhandled frontend event "+e.type);
  }throw std::runtime_error("Frontend event budget");
  }
- std::string slotPrefix(unsigned slot=1)const{char number[16];std::snprintf(number,sizeof(number),"/slot%02u",slot);return saveDir+number;}
+ static constexpr unsigned AutoSaveBase=121,AutoSaveCount=5;
+ std::string slotPrefix(unsigned slot=1)const{if(slot>=AutoSaveBase){if(slot>=AutoSaveBase+AutoSaveCount)throw std::runtime_error("Auto save slot range");char number[32];std::snprintf(number,sizeof(number),"/autosave/slot%02u",slot-AutoSaveBase+1);return saveDir+number;}char number[16];std::snprintf(number,sizeof(number),"/slot%02u",slot);return saveDir+number;}
  void save(unsigned slot=1){if(replayActive||menu||movie->playing())return;
  qlie::Bytes scene(1280*720*4,0);images->drawScene(scene);transition->blend(scene);if(!hidden){images->drawMessages(scene);images->drawFaces(scene);}qlie::Bytes thumb(160*90*4);for(unsigned y=0;y<90;y++)for(unsigned x=0;x<160;x++)for(unsigned c=0;c<4;c++)thumb[(y*160+x)*4+c]=scene[((y*8)*1280+x*8)*4+c];qlie::write_file(slotPrefix(slot)+".thumbnail",thumb);
  auto b=story.save();
@@ -419,6 +420,13 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }qlie::write_file(slotPrefix(slot)+".mixer",settings.bytes);
  qlie::write_file(slotPrefix(slot)+".history",whj2::saveHistory(history));
  slotPreviews.erase(slot);status="現在の状態を保存しました。";
+ }
+ void autoSaveChoice(){
+  if(replayActive||menu||movie->playing()||normalSkip||fastForward)return;
+  std::filesystem::create_directories(saveDir+"/autosave");
+  unsigned chosen=AutoSaveBase;auto oldest=std::filesystem::file_time_type::max();
+  for(unsigned i=0;i<AutoSaveCount;i++){unsigned slot=AutoSaveBase+i;auto path=slotPrefix(slot)+".story";auto time=std::filesystem::exists(path)?std::filesystem::last_write_time(path):std::filesystem::file_time_type::min();if(time<=oldest){oldest=time;chosen=slot;}}
+  auto priorStatus=status;save(chosen);status=priorStatus;std::cerr<<"AUTOSAVE slot="<<(chosen-AutoSaveBase+1)<<"\n";
  }
  void load(unsigned slot=1){if(movie->playing())return;
  if(!std::filesystem::exists(slotPrefix(slot)+".story")){status="保存データがありません。";
@@ -696,7 +704,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  else if(!opening&&menu&&!gameMenu.visible())title->update(double(now-lastUpdate));
  if(!menu&&!movie->playing()&&!gameMenu.visible()&&!upperMenu->visible()){
  images->update(double(now-lastUpdate));
- if(story.state.awaiting){if(fastForward)choiceScreen->skipConfirmation();choiceScreen->update(double(now-lastUpdate));int chosen=choiceScreen->takeConfirmed();if(chosen>=0){story.choose(unsigned(chosen));next();}}
+ if(story.state.awaiting){if(fastForward)choiceScreen->skipConfirmation();choiceScreen->update(double(now-lastUpdate));if(choiceScreen->takeAutoSaveRequest())autoSaveChoice();int chosen=choiceScreen->takeConfirmed();if(chosen>=0){story.choose(unsigned(chosen));next();}}
  messageText->update(double(now-lastUpdate));if(messageText->visible()!=lastMessageVisible)refreshMessage();
  transition->update(double(now-lastUpdate));
  autoPlay.tick(double(now-lastUpdate),messageText->visible(),settings.get("AutoTextWait"),settings.get("TextSpeed"),messageText->timedCharacters(autoPlay.countedGlyphs(),messageText->visible()));
@@ -972,7 +980,8 @@ if(game.empty()){std::cerr<<"usage: whj2-runtime GAME [SAVE_DIR] [--smoke-frames
 if(argc<3)saves="sdmc:/switch/whj2/saves";
 #endif
 std::cerr<<"INIT game="<<game<<" saves="<<saves<<"\n";
-Frontend f(game,saves);if(argc>4&&std::string(argv[3])=="--read-skip-smoke"){f.readSkipTest=true;smoke=unsigned(std::stoul(argv[4]));}
+Frontend f(game,saves);if(argc>4&&std::string(argv[3])=="--restore-autosave"){unsigned index=unsigned(std::stoul(argv[4]));if(index<1||index>Frontend::AutoSaveCount)throw std::runtime_error("Auto save index must be1..5");auto slot=Frontend::AutoSaveBase+index-1;if(!std::filesystem::exists(f.slotPrefix(slot)+".story"))throw std::runtime_error("Auto save slot is empty");f.opening=0;f.load(slot);}
+ if(argc>4&&std::string(argv[3])=="--read-skip-smoke"){f.readSkipTest=true;smoke=unsigned(std::stoul(argv[4]));}
  if(argc>4&&std::string(argv[3])=="--replay-return-smoke"){f.replayReturnTest=true;smoke=unsigned(std::stoul(argv[4]));}
  if(argc>4&&std::string(argv[3])=="--cg-loop-smoke"){f.cgLoopTest=true;smoke=unsigned(std::stoul(argv[4]));}
  if(argc>4&&std::string(argv[3])=="--cg-smoke"){f.cgTest=true;smoke=unsigned(std::stoul(argv[4]));}

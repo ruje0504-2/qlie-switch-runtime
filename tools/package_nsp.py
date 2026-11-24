@@ -70,6 +70,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--game', required=True, type=Path)
     ap.add_argument('--elf', type=Path, default=ROOT/'build-switch/whj2-runtime.elf')
+    ap.add_argument('--runtime-revision', help='Fixed source commit embedded in an existing ELF')
     ap.add_argument('--config', type=Path, default=ROOT/'config/nsp.json')
     ap.add_argument('--output', type=Path)
     ap.add_argument('--icon', required=True, type=Path)
@@ -90,7 +91,9 @@ def main():
             ap.error('Missing required game resource: '+resource)
     if not elf.is_file() or not args.keyset.is_file() or not args.hacbrewpack.is_file():
         ap.error('ELF, local keyset, or hacbrewpack is missing')
-    revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
+    revision = args.runtime_revision or subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
+    if not re.fullmatch(r'[0-9a-f]{40}', revision):
+        ap.error('Runtime revision must be a full source commit')
     if revision.encode() not in elf.read_bytes():
         ap.error('ELF does not contain the current fixed source revision; build it first')
     report = {'config': config, 'commit': revision, 'elf_sha256': digest(elf), 'phase': 'building', 'icon_sha256': digest(args.icon), 'packaging_script_sha256': digest(Path(__file__))}

@@ -333,3 +333,8 @@ int kvideo_step(KVideo *v,KImage *screen,uint8_t **pcm,size_t *bytes){
     }
     return fail(v,"video frame budget exceeded");
 }
+
+int kvideo_has_audio(const KVideo *v){return v&&v->audio!=NULL;}
+
+unsigned kvideo_source_width(const KVideo *v){return v&&v->video?(unsigned)v->video->width:0;}
+unsigned kvideo_source_height(const KVideo *v){return v&&v->video?(unsigned)v->video->height:0;}

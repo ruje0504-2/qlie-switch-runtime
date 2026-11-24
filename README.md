@@ -1,29 +1,49 @@
 # WHJ2-Switch
 
-《美少女万華鏡2》日文原版的原生运行时移植，目标为Horizon NRO，当前先在Mac验证。**开发中，尚非完整可玩版本，未通过Switch实机验收。**
+《美少女万華鏡2》日文原版的原生QLIE运行时移植，目标为Horizon NRO，先在Mac验证。**开发候选，尚非完整可玩版本，未通过Switch实机验收。**
 
-使用用户本地合法游戏数据，源码仓库不包含游戏、密钥、EXE或存档。原版文件只读；运行存档须指定独立目录。
+仓库不包含游戏资源、密钥、EXE或存档。原版数据只读；移植存档独立保存。
 
-固定参考 kisaku-switch-runtime `95d71d9bcaee9dc7ab48b4bda8d3139a817e6cc7`。QLIE与AI6WIN不同，未复用其VM。字体/媒体基础按GPL复用，来源见THIRD_PARTY.md。
+参考 kisaku-switch-runtime 固定提交 `95d71d9bcaee9dc7ab48b4bda8d3139a817e6cc7`。QLIE与AI6WIN不同，没有复用AI6WIN的VM。字体/媒体基础按GPL复用，来源见THIRD_PARTY.md。
 
-## Mac构建与运行
+## Mac构建
 
-依赖C/C++17编译器、Python3、SDL2、FreeType、libpng、libjpeg和FFmpeg开发库；默认使用Homebrew pkg-config，可用PKG_CONFIG覆盖。
+需要C/C++17编译器、Python3、SDL2、FreeType、libpng、libjpeg和FFmpeg开发库；默认使用Homebrew pkg-config，可用PKG_CONFIG覆盖。
 
 ```sh
 ./build-host.sh
 build/whj2-runtime /absolute/path/to/game /absolute/path/to/independent-saves
 ```
 
-当前前端可显示日文、推进原始剧情控制流、选择分支并保存/恢复逻辑状态；已接入SDL音乐/音效多声道输出、循环与音量淡变，首段BGM在Mac默认音频设备有非零输出证据。已接入静态背景/透明角色图层和表达切换，支持静态图层、音轨位置与淡变参数存读档；Mac窗口有实际加载与清空后像素一致性证据。复合动画、转场、影片前端、语音映射、完整动画存档尚未完成；手柄热插拔、A/B/方向键/X/Y与触摸已接线，四类SDL注入事件经Mac窗口验证，物理手柄/触摸硬件尚未验证。未呈现事件显式写入PENDING-PRESENT日志，不能用这版验证多媒体可玩性。已实现控制按键：Enter/鼠标左键推进，方向键选择，F5/F9逻辑存读档，Esc返回菜单。
+## Switch候选
 
-资源层逐条校验、全部现有媒体解码与四个结局的逻辑路径已有主机检查，但这些不替代演出、输入与实机验收。可复现探针：
+需要devkitPro、devkitA64、libnx和Switch portlibs。
 
 ```sh
-build/qlie-probe /absolute/path/to/game
-build/story-probe /absolute/path/to/game 000100
-build/media-probe /absolute/path/to/game
-build/animation-probe /absolute/path/to/game
+./build-switch.sh
 ```
 
-`./build-switch.sh`只产生资源/剧情诊断NRO并交叉编译媒体组件，尚未生成图形游戏NRO。需要devkitPro/devkitA64/libnx及Switch portlibs。源码遵循GPL-2.0-or-later；原始游戏数据不属于源码许可范围。
+生成 `build-switch/whj2-runtime.nro`。该候选直接使用libnx Joy-Con输入和SDL触摸，Switch构建不处理键盘鼠标事件。默认从 `sdmc:/switch/whj2/game` 读取原版文件，在 `sdmc:/switch/whj2/saves` 写移植存档。原版GameData、DLL/key.fkey和日文EXE必须来自本地游戏副本；不会执行EXE。
+
+Joy-Con：A推进/确认，B或＋/－返回菜单，上下方向/摇杆选择，X保存、Y读档。单侧Joy-Con另有SL确认、SR返回、L/R保存、ZL/ZR读档。触摸支持推进、菜单项和分支选择，右上角提供保存、读档与菜单。**这些入口已经接线，仍需要真实Joy-Con和Switch触摸验收。**
+
+## 实现范围
+
+已实现资源解密、日文文字、原始剧情控制流和四个结局路径、段落提交、静态背景与角色、音乐/音效、静态画面及音轨位置存读档。空存档读档会提示并留在菜单。
+
+独立Theora影片按音频采样时钟播放，Mac完整片尾自然结束已有证据。复合动画目前支持基本图像轨道、部分缓动与嵌套/影片成员；粒子、模型、部分控制/效果、嵌套时间对齐与内嵌音轨尚未完成。对白语音ID映射未闭合。未实现路径显式写入PENDING日志，不作为完整演出通过。
+
+保存格式仍为开发格式；完整动画存档和实机可玩性均未验收。
+
+## 验证入口
+
+```sh
+build/story-probe /absolute/path/to/game 000100
+build/presentation-probe /absolute/path/to/game 000100
+build/whj2-runtime /absolute/path/to/game /absolute/path/to/empty-test-saves --touch-smoke 120
+build/whj2-runtime /absolute/path/to/game /absolute/path/to/test-saves --movie movie/ed
+```
+
+触摸冒烟使用SDL注入事件，只验证事件处理和状态流程，不能替代实际触摸屏。资源/媒体/逻辑探针不能替代演出与Switch实机验收。构建输出集中在固定build目录，更新时覆盖，不生成重复版本副本。
+
+源码遵循GPL-2.0-or-later；原始游戏数据不属于源码许可范围。

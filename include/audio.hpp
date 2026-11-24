@@ -14,6 +14,6 @@ public:
  void play(unsigned,const qlie::Bytes&,bool,float,unsigned fadeMs=0,const std::string&path="");
  void volume(unsigned,float,unsigned fadeMs=0,bool stopAfter=false);
  qlie::Bytes save();void restore(const qlie::Bytes&,qlie::Assets&);
- void stopAll();AudioStats stats()const;
+ bool playing(unsigned);void stopAll();AudioStats stats()const;
 };
 }

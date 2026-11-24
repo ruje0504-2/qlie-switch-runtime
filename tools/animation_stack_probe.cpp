@@ -13,6 +13,13 @@ AnimationLayer layer(unsigned mode,int x,int sx,unsigned kind=4){
  k[0x28]=k[0x29]=k[0x2a]=255;return l;
 }
 int main(){try{
+ auto zero=layer(0,0,100,1);zero.keys[0][0x1c]=0xd7;zero.keys[0][0x1d]=0x7f;zero.keys[0][0x1e]=0xd8;zero.keys[0][0x1f]=0x7f;
+ auto zeroSample=sampleAnimation(zero,0,AnimationContext{0,0,0,0});check(zeroSample.scaleX==0&&zeroSample.scaleY==0&&zeroSample.unsupported.empty(),"zero-sized context is a value");
+ Animation looping;looping.bounds={1280,720,1000,200};
+ check(nestedAnimationTime(looping,1000)==200&&nestedAnimationTime(looping,1500)==700,"child loop wrapping");
+ check(nestedAnimationTime(looping,100)==100&&nestedAnimationTime(looping,200)==200,"child loop intro");
+ looping.bounds[2]=0;check(nestedAnimationTime(looping,1500)==1500,"unbounded child timeline");
+
  Motion m{"nested",{layer(1,10,200),layer(1,3,50),layer(0,7,100),layer(2,2,100),layer(0,7,100),layer(2,0,100),layer(0,7,100)}};
  auto s=sampleMotion(m,0);
  check(s.size()==7,"sample count");

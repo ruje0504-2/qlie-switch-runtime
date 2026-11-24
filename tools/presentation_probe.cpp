@@ -4,6 +4,17 @@
 #include <fstream>
 #include <iostream>
 int main(int argc,char**argv){try{if(argc<2)return 2;qlie::Assets a(argv[1]);
+if(argc==3&&std::string(argv[2])=="--nested-render"){
+ whj2::SceneImages im(a);im.command("^bg01,file:cut/eyecatch01");im.update(1500);
+ qlie::Bytes frame(1280*720*4),restored(frame.size());im.draw(frame);
+ auto state=im.save();whj2::SceneImages second(a);second.restore(state);second.draw(restored);
+ if(frame!=restored)throw std::runtime_error("Nested clock restore differs");
+ im.update(750);second.update(750);frame.assign(frame.size(),0);restored.assign(restored.size(),0);im.draw(frame);second.draw(restored);
+ if(frame!=restored)throw std::runtime_error("Nested clock continuation differs");
+ size_t count=0;for(auto v:frame)if(v)count++;
+ if(!count)throw std::runtime_error("Nested scene empty");
+ std::cout<<"PASS original eyecatch nested clock drawing/save/continuation pixels="<<1280*720<<" nonzero_bytes="<<count<<"\n";return 0;
+}
 if(argc==3&&std::string(argv[2])=="--particle-render"){
  whj2::SceneImages im(a);auto emptyState=im.save();im.command("^bg01,file:cut/c_冒頭イメージ,motion:c01");im.update(1234);
  qlie::Bytes first(1280*720*4),again(first.size()),restored(first.size());im.draw(first);im.draw(again);

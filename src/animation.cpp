@@ -22,6 +22,14 @@ struct AnimReader {const qlie::Bytes&b;
  while(n0<16&&b0[n0])n0++;
  return std::string(b0.begin(),b0.begin()+n0);
  }};
+// PE ec1cc wraps only when the child animation has a positive loop end.
+double nestedAnimationTime(const Animation&a,double milliseconds){
+ auto time=int64_t(milliseconds);int64_t end=a.bounds[2],start=a.bounds[3];
+ if(end>0){auto span=end-start;if(span<1)span=end;
+  time=time>start?(time-start)%span+start:time%span;
+ }
+ return double(time);
+}
 Animation animation(const std::string&type,const qlie::Bytes&b){AnimReader r{b};
  Animation a;
  a.name=r.str();
@@ -90,10 +98,11 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
  out.flags=a.at(5);
  out.resource=a.at(6);
  auto number=[&](const qlie::Bytes&key,size_t offset){
-  int v=keyI16(key,offset);unsigned bound=0;
-  switch(v){case 32727:bound=context.imageWidth;break;case 32728:bound=context.imageHeight;break;
-   case 32729:bound=context.targetWidth;break;case 32730:bound=context.targetHeight;break;}
-  if(bound)return float(bound);
+  int v=keyI16(key,offset);
+  switch(v){case 32727:if(context.imageWidth!=UINT32_MAX)return float(context.imageWidth);break;
+   case 32728:if(context.imageHeight!=UINT32_MAX)return float(context.imageHeight);break;
+   case 32729:if(context.targetWidth!=UINT32_MAX)return float(context.targetWidth);break;
+   case 32730:if(context.targetHeight!=UINT32_MAX)return float(context.targetHeight);break;default:break;}
   if((v>=32700&&v<32716)||(v>=32720&&v<32736))out.unsupported.push_back("numeric-context="+std::to_string(v));
   return float(v);
  };
@@ -106,6 +115,17 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
  out.priority=val(0x20,a.at(0x30),a.at(0x31)/100.f);
  out.rotationZ=val(0x22,a.at(0x30),a.at(0x31)/100.f);
  out.alpha=val(0x35,a.at(0x33),a.at(0x3b)/100.f);
+ if(out.kind==4||out.kind==20||out.kind==21){
+  auto timeValue=[&](const qlie::Bytes&key,size_t offset){
+   auto value=int32_t(keyU32(key,offset));
+   if((value>=32700&&value<32716)||(value>=32720&&value<32736)){
+    out.childTimeResolved=false;out.unsupported.push_back("child-time-context="+std::to_string(value));
+   }
+   return float(value);
+  };
+  out.childTime=int32_t(sampleValue(timeValue(a,0x10),timeValue(b,0x10),a.at(0x3c),a.at(0x3d)/100.f,t,out.unsupported));
+  out.childMotion=a.at(7);
+ }
  if((out.kind==20||out.kind==21)&&a.size()<152)out.unsupported.push_back("particle-layout="+std::to_string(layer.version));
  if((out.kind==20||out.kind==21)&&a.size()>=152){
   auto particleValue=[&](size_t offset){return val(offset,a.at(0x2d),a.at(0x2e)/100.f);};

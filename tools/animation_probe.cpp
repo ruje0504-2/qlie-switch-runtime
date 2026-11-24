@@ -11,6 +11,20 @@ void check(const qlie::Bytes&b,const std::string&name){if(b.size()<5||!std::equa
  std::cout<<"RECT "<<name<<" motion="<<mo.name<<" t="<<ms<<" xy="<<v.x<<","<<v.y<<" size="<<v.scaleX<<","<<v.scaleY<<" alpha="<<v.alpha<<" mul="<<v.mulColor<<"\n";
 }}}}catch(const std::exception&e){throw std::runtime_error(name+": "+e.what());}}else if(m.type.rfind("abimg",0)==0)check(m.data,name+"#"+m.name);}}
 int main(int argc,char**argv){try{if(argc<2)return 2;qlie::Assets a(argv[1]);
+if(argc==3&&std::string(argv[2])=="--nested"){
+ for(auto&part:whj2::abmp(a.read("image/cut/eyecatch01.b")))if(part.type.rfind("abdata",0)==0){
+  auto data=whj2::animation(part.type,part.data);unsigned tested=0;
+  for(auto&motion:data.motions)for(auto&layer:motion.layers)for(double time:{500.,1500.,2500.,3250.}){
+   auto k=whj2::sampleAnimation(layer,time);
+   if(k.kind!=4||k.resource!=1)continue;
+   int expected=time<=2500?int((time-500)*.75):1500;
+   if(k.childTime!=expected||k.childMotion!=0||!k.childTimeResolved)throw std::runtime_error("Original eyecatch child clock");
+   std::cout<<"PASS original eyecatch parent="<<time<<" child="<<k.childTime<<"\n";tested++;
+  }
+  if(tested!=4)throw std::runtime_error("Expected original child-clock samples");
+ }
+ return 0;
+}
 if(argc==3&&std::string(argv[2])=="--effect"){
  for(auto&part:whj2::abmp(a.read("image/effect/effect01.b"))){
   if(part.type.rfind("abdata",0)!=0)continue;

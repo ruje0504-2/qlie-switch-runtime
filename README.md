@@ -53,3 +53,5 @@ build/whj2-runtime /absolute/path/to/game /absolute/path/to/test-saves --movie m
 源码遵循GPL-2.0-or-later；原始游戏数据不属于源码许可范围。
 
 Bitmap particles (primitive 20) now use the native deterministic random table and viewport-centered depth projection. Scene state version 3 preserves generated resource identities across saves and clears stale future caches when restoring; version 2 scene saves remain readable. Nested/video particles, spherical particles, and particles with 3D rotation remain incomplete.
+
+Nested bitmap animations select their child motion and interpolate the child timeline from the parent key. Child loop bounds are respected. Zero-sized logical subcanvases are supported; missing dimension context remains reported. Symbolic child timeline inputs and embedded audio are still incomplete.

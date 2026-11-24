@@ -89,7 +89,7 @@ struct Composite {
  void warn(const std::string&s)const{if(warnings.insert(s).second)std::cerr<<"PENDING-ANIMATION "<<path<<" "<<s<<"\n";
  }
  void enqueue(RenderQueue&queue,double ms,const std::string&motionName,const Affine2D&parent,float depth,float opacity,uint32_t parentAdd,uint32_t parentMul,unsigned parentBlend=0)const{
-  if(definition.bounds[0]<=0||definition.bounds[1]<=0||definition.bounds[0]>4096||definition.bounds[1]>4096)throw std::runtime_error("Composite bounds "+path);
+  if(definition.bounds[0]<0||definition.bounds[1]<0||definition.bounds[0]>4096||definition.bounds[1]>4096)throw std::runtime_error("Composite bounds "+path);
   const Motion*motion=nullptr;
  for(auto&m:definition.motions)if(m.name==motionName)motion=&m;
  if(!motion&&(motionName.empty()||motionName=="def"||motionName=="0")&&!definition.motions.empty())motion=&definition.motions.front();
@@ -131,9 +131,11 @@ struct Composite {
  if(k.resource>=members.size())throw std::runtime_error("Composite image index "+path);
    auto&e=members[k.resource];
  const Image*source=e.image.get();
-   if(e.nested){warn("nested-motion origin alignment unverified");
+   if(e.nested){
+ if(!k.childTimeResolved){warn("nested-time context unresolved");continue;}
+ if(k.childMotion>=e.nested->definition.motions.size())throw std::runtime_error("Nested motion index "+path);
  auto local=imagePlacement(k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,unsigned(e.nested->definition.bounds[0]),unsigned(e.nested->definition.bounds[1]));
- e.nested->enqueue(queue,ms,"",affine(parent,local),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
+ e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,k.childTime),e.nested->definition.motions[k.childMotion].name,affine(parent,local),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
  continue;
  }
    else if(!e.video.empty()){

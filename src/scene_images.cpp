@@ -140,7 +140,7 @@ struct Composite {
    std::copy(src,src+4,dst);dst[3]=gradientMaskAlpha(src[3],mask->pixels[(size_t(my)*mask->width+mx)*4],k.mask.amount,k.mask.mode);
   }
   auto placement=imagePlacement(k.x,k.y,k.scaleX/100*width/source->width,k.scaleY/100*height/source->height,k.rotationZ,k.anchorX/100,k.anchorY/100,source->width,source->height);
-  queue.image(output,affine(parent,placement),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
+  queue.snapshot(output,affine(parent,placement),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
   continue;
  }
  if(k.kind==20){
@@ -162,7 +162,7 @@ struct Composite {
  if(k.kind!=4)continue;
  if(k.resource>=members.size())throw std::runtime_error("Composite image index "+path);
    auto&e=members[k.resource];
- const Image*source=replacement&&k.resource==0?replacement:e.image.get();
+ const Image*source=replacement&&k.resource==0?replacement:e.image.get();bool dynamic=false;
    if(replacement&&k.resource==0){
     queue.image(*source,affine(parent,imagePlacement(k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,source->width,source->height)),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);continue;
    }
@@ -179,9 +179,12 @@ struct Composite {
  if(kvideo_has_audio(clip->video))warn("video-audio requires mixer binding");
  }
     warn("video-member origin alignment unverified");
- source=&clip->at(ms);
+ source=&clip->at(ms);dynamic=true;
    }
-   if(source)queue.image(*source,affine(parent,imagePlacement(k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,source->width,source->height)),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
+   if(source){auto place=affine(parent,imagePlacement(k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,source->width,source->height));
+ if(dynamic)queue.snapshot(*source,place,depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
+ else queue.image(*source,place,depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
+ }
   }
  }
 };

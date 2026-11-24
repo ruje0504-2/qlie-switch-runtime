@@ -5,6 +5,21 @@
 #include <iostream>
 #include <algorithm>
 int main(int argc,char**argv){try{if(argc<2)return 2;qlie::Assets a(argv[1]);
+if(argc==3&&std::string(argv[2])=="--dynamic-instances"){
+ unsigned failures=0;
+ for(const std::string resource:{"cut/eyecatch01","cut/c_万華鏡"}){
+  auto command=[&](const std::string&layer,int x){return "^"+layer+",file:"+resource+",x:"+std::to_string(x)+",y:360,scalex:20,scaley:20";};
+  whj2::SceneImages left(a),right(a),different(a);left.command(command("bg01",160));left.update(700);right.command(command("bg01",1120));right.update(2100);
+  different.command(command("bg01",160));different.update(2100);qlie::Bytes early(1280*720*4),late(early.size());left.draw(early);different.draw(late);if(early==late)throw std::runtime_error("Dynamic test times did not produce distinct frames "+resource);
+  auto bounds=[](const qlie::Bytes&im){int lo=1280,hi=-1;for(int y=0;y<720;y++)for(int x=0;x<1280;x++)if(im[(size_t(y)*1280+x)*4+3]){lo=std::min(lo,x);hi=std::max(hi,x);}return std::to_string(lo)+":"+std::to_string(hi);};
+  qlie::Bytes rightOnly(early.size());right.draw(rightOnly);std::cout<<"BOUNDS "<<resource<<" left="<<bounds(early)<<" right="<<bounds(rightOnly)<<"\n";
+  qlie::Bytes expected(early.size());left.draw(expected);right.draw(expected);
+  for(bool reverse:{false,true}){whj2::SceneImages combined(a);combined.command(command(reverse?"bg01":"bg02",1120));combined.update(1400);combined.command(command(reverse?"bg02":"bg01",160));combined.update(700);
+   qlie::Bytes actual(expected.size());combined.draw(actual);size_t mismatches=0,leftDiff=0,rightDiff=0;for(size_t i=0;i<actual.size();++i)if(actual[i]!=expected[i]){++mismatches;if((i/4)%1280<640)++leftDiff;else ++rightDiff;} std::cout<<"HALVES "<<leftDiff<<","<<rightDiff<<"\n";
+   std::cout<<(mismatches?"FAIL":"PASS")<<" dynamic instances "<<resource<<" reverse="<<reverse<<" different_bytes="<<mismatches<<"\n";if(mismatches)++failures;
+  }
+ }if(failures)throw std::runtime_error("Dynamic image lifetime aliasing");return 0;
+}
 if(argc==3&&std::string(argv[2])=="--chara-base"){
  auto frame=[](whj2::SceneImages&images){qlie::Bytes result(1280*720*4);images.draw(result);return result;};
  const std::string portrait="考える01:蓮華/蓮華_中_着物_2_";

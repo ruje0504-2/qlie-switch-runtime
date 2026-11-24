@@ -36,6 +36,9 @@ uint8_t blendChannel(unsigned mode,uint8_t source,uint8_t destination,uint8_t al
 void RenderQueue::image(const Image&i,const Affine2D&m,float pri,float alpha,uint32_t add,uint32_t mul,unsigned blend){
  Command c;c.image=&i;c.placement=m;c.priority=pri;c.state.alpha=alpha;c.state.addColor=add;c.state.mulColor=mul;c.state.flags=blend;commands.push_back(c);
 }
+void RenderQueue::snapshot(const Image&i,const Affine2D&m,float pri,float alpha,uint32_t add,uint32_t mul,unsigned blend){
+ snapshots.push_back(i);image(snapshots.back(),m,pri,alpha,add,mul,blend);
+}
 void RenderQueue::control(const AnimationSample&s,float pri){Command c;c.state=s;c.priority=pri;commands.push_back(c);}
 namespace {
 void raster(qlie::Bytes&out,unsigned w,unsigned h,const Image&im,const Affine2D&m,float alpha,uint32_t add,uint32_t mul,unsigned blend){

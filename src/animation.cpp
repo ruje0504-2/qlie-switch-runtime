@@ -77,7 +77,7 @@ float sampleValue(float a,float b,unsigned mode,float power,double t,std::vector
  return float(a+(b-a)*q);
 }
 }
-AnimationSample sampleAnimation(const AnimationLayer&layer,double ms){
+AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const AnimationContext&context){
  AnimationSample out;
  if(layer.keys.empty()||ms<keyU32(layer.keys.front(),0))return out;
  if(layer.version<16)throw std::runtime_error("Animation layer15 normalization pending");
@@ -89,7 +89,15 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms){
  out.kind=a.at(4);
  out.flags=a.at(5);
  out.resource=a.at(6);
- auto val=[&](size_t offset,unsigned mode,float power){return sampleValue(float(keyI16(a,offset)),float(keyI16(b,offset)),mode,power,t,out.unsupported);
+ auto number=[&](const qlie::Bytes&key,size_t offset){
+  int v=keyI16(key,offset);unsigned bound=0;
+  switch(v){case 32727:bound=context.imageWidth;break;case 32728:bound=context.imageHeight;break;
+   case 32729:bound=context.targetWidth;break;case 32730:bound=context.targetHeight;break;}
+  if(bound)return float(bound);
+  if((v>=32700&&v<32716)||(v>=32720&&v<32736))out.unsupported.push_back("numeric-context="+std::to_string(v));
+  return float(v);
+ };
+ auto val=[&](size_t offset,unsigned mode,float power){return sampleValue(number(a,offset),number(b,offset),mode,power,t,out.unsupported);
  };
  out.x=val(0x18,a.at(0x30),a.at(0x31)/100.f);
  out.y=val(0x1a,a.at(0x30),a.at(0x31)/100.f);
@@ -98,8 +106,8 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms){
  out.priority=val(0x20,a.at(0x30),a.at(0x31)/100.f);
  out.rotationZ=val(0x22,a.at(0x30),a.at(0x31)/100.f);
  out.alpha=val(0x35,a.at(0x33),a.at(0x3b)/100.f);
- out.anchorX=float(keyI16(a,0x85));
- out.anchorY=float(keyI16(a,0x87));
+ out.anchorX=number(a,0x85);
+ out.anchorY=number(a,0x87);
  auto color=[&](size_t p){uint32_t z=0;
  auto ca=keyU32(a,p),cb=keyU32(b,p);
  for(int n=0;n<3;n++){auto v=sampleValue(float((ca>>(8*n))&255),float((cb>>(8*n))&255),a.at(0x33),a.at(0x3b)/100.f,t,out.unsupported);
@@ -154,7 +162,7 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms){
 // Original PE ea267/ea29c: push before applying the top state, pop after.
 // f6cfc/f6e5c add translation/rotation, multiply scale, saturate additive
 // color and multiply tint/alpha. The stack is reset for each motion draw.
-std::vector<AnimationSample> sampleMotion(const Motion&motion,double ms,unsigned width,unsigned height,bool applyRenderState){
+std::vector<AnimationSample> sampleMotion(const Motion&motion,double ms,unsigned width,unsigned height,bool applyRenderState,const AnimationContext&context){
  std::vector<AnimationSample> result,stack;
  auto compose=[](AnimationSample value,const AnimationSample&parent){
   value.x+=parent.x;value.y+=parent.y;
@@ -171,7 +179,7 @@ std::vector<AnimationSample> sampleMotion(const Motion&motion,double ms,unsigned
   value.addColor=add;value.mulColor=mul;return value;
  };
  for(const auto&layer:motion.layers){
-  auto value=sampleAnimation(layer,ms);
+  auto value=sampleAnimation(layer,ms,context);
   if(value.kind){
    if(layer.mode==1&&stack.size()<31){
     auto parent=value;

@@ -57,5 +57,14 @@ int main(){try{
  wave.keys[0][0x51]=10;check(near(sampleAnimation(wave,1039).x,-4)&&near(sampleAnimation(wave,1040).x,4),"square edge");
  wave.keys[0][0x51]=4;check(near(sampleAnimation(wave,1020).x,-4),"constant track");
  wave.keys[0][0x51]=1;check(!sampleAnimation(wave,1020).unsupported.empty(),"unimplemented random stays visible");
+ auto symbolic=layer(0,0,100,1);
+ auto putSymbol=[&](size_t at,int v){symbolic.keys[0][at]=v&255;symbolic.keys[0][at+1]=(v>>8)&255;};
+ putSymbol(0x1c,32727);putSymbol(0x1e,32728);
+ auto resolved=sampleAnimation(symbolic,0,AnimationContext{320,180,1280,720});
+ check(resolved.scaleX==320&&resolved.scaleY==180,"symbols refer to image bounds");
+ putSymbol(0x1c,32729);putSymbol(0x1e,32730);
+ resolved=sampleAnimation(symbolic,0,AnimationContext{320,180,1920,1080});
+ check(resolved.scaleX==1920&&resolved.scaleY==1080,"target symbols use target bounds");
+ check(!sampleAnimation(symbolic,0).unsupported.empty(),"missing context is explicit");
  std::cout<<"PASS nested push/apply/pop, inactive keys, empty pop, tint, alpha, primitive3\n";
  return 0;}catch(const std::exception&e){std::cerr<<e.what()<<"\n";return 1;}}

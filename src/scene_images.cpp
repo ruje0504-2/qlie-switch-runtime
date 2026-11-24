@@ -89,7 +89,7 @@ struct Composite {
  for(auto&m:definition.motions)if(m.name==motionName)motion=&m;
  if(!motion&&(motionName.empty()||motionName=="def"||motionName=="0")&&!definition.motions.empty())motion=&definition.motions.front();
  if(!motion)throw std::runtime_error("Missing motion "+motionName+" in "+path);
-  auto samples=sampleMotion(*motion,ms,1280,720,false);
+  auto samples=sampleMotion(*motion,ms,1280,720,false,AnimationContext{unsigned(definition.bounds[0]),unsigned(definition.bounds[1]),1280,720});
   for(size_t index=0;index<samples.size();index++){
  auto&k=samples[index];
  for(auto&w:k.unsupported)warn(w);

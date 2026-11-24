@@ -15,6 +15,16 @@ if(argc==3&&std::string(argv[2])=="--effect"){
  for(auto&part:whj2::abmp(a.read("image/effect/effect01.b"))){
   if(part.type.rfind("abdata",0)!=0)continue;
   auto data=whj2::animation(part.type,part.data);
+  for(auto&motion:data.motions)if(motion.name=="フラッシュ"){
+   unsigned rectangles=0;
+   for(auto&layer:motion.layers)if(layer.flags)for(auto&key:layer.keys)if(key.at(4)==1){
+    double ms=uint32_t(key[0])|(uint32_t(key[1])<<8)|(uint32_t(key[2])<<16)|(uint32_t(key[3])<<24);
+    auto k=whj2::sampleAnimation(layer,ms,whj2::AnimationContext{unsigned(data.bounds[0]),unsigned(data.bounds[1]),1280,720});
+    if(k.scaleX!=data.bounds[0]||k.scaleY!=data.bounds[1])throw std::runtime_error("Original flash symbolic dimensions");
+    rectangles++;std::cout<<"PASS original flash symbolic size="<<k.scaleX<<"x"<<k.scaleY<<" at="<<ms<<"\n";
+   }
+   if(!rectangles)throw std::runtime_error("No enabled flash rectangle");
+  }
   for(auto&motion:data.motions)if(motion.name=="縦衝撃"){
    if(motion.layers.empty())throw std::runtime_error("Missing effect layers");
    const auto&l=motion.layers.front();

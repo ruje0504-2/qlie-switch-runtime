@@ -1,6 +1,6 @@
 # 来源与许可
 
-本工程新代码以 GPL-2.0-or-later 分发。原游戏数据、密钥、EXE 和存档不属于此许可，不得公开上传。
+本工程新代码以 GNU GPL 第 2 版或任何后续版本（GPL-2.0-or-later）分发，完整协议见 [LICENSE](LICENSE)。原游戏数据、密钥、EXE 和存档不属于此许可，不得公开上传。
 
 参考 kisaku-switch-runtime，固定提交 95d71d9bcaee9dc7ab48b4bda8d3139a817e6cc7（GPL-2.0-or-later）。仅复用适用的平台构建、字体和音视频基础；AI6WIN VM 和游戏专用系统不适用。
 

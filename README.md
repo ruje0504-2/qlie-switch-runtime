@@ -1,5 +1,7 @@
 # WHJ2-Switch
 
+[![GPL-2.0-or-later](https://img.shields.io/badge/license-GPL--2.0--or--later-blue)](LICENSE)
+
 《美少女万華鏡2》日文原版的原生QLIE运行时移植，目标为Nintendo Switch/Horizon NRO，使用Mac作为开发验证平台。**当前是开发候选，尚非完整可玩版本，未通过Switch实机验收。**
 
 仓库只包含技术源码、构建脚本和许可。原版游戏资源、EXE、密钥及存档不属于本仓库；游戏数据只读，移植存档单独保存。
@@ -98,7 +100,7 @@ build/whj2-runtime /absolute/path/to/game /absolute/path/to/empty-test-saves --t
 
 参考kisaku-switch-runtime固定提交`95d71d9bcaee9dc7ab48b4bda8d3139a817e6cc7`。本作QLIE与参考项目AI6WIN不同，没有复用其VM；适用字体、媒体和构建基础的来源见THIRD_PARTY.md。
 
-源码遵循GPL-2.0-or-later。原版游戏数据不在源码许可范围内。
+本项目源码按 GNU GPL 第 2 版或任何后续版本（GPL-2.0-or-later）分发。原版游戏数据仍受相应权利人的条款约束。完整协议和第三方声明见 [LICENSE](LICENSE) 和 [THIRD_PARTY.md](THIRD_PARTY.md)。
 
 ### Controller and touch navigation
 

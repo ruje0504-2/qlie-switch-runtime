@@ -13,6 +13,14 @@ Mac需要C/C++17编译器、Python3、SDL2、FreeType、libpng、libjpeg与FFmpe
 build/whj2-runtime /absolute/path/to/game /absolute/path/to/independent-saves
 ```
 
+Mac应用入口可在构建后生成，复用同一运行时文件：
+
+```sh
+python3 tools/package_mac_app.py --game /absolute/path/to/game --saves /absolute/path/to/independent-saves
+```
+
+输出`build/WHJ2-Mac.app`。目录读取被系统拒绝时，使用标准目录选择框授权游戏目录。
+
 Switch需要devkitPro、devkitA64、libnx和Switch portlibs：
 
 ```sh

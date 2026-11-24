@@ -90,7 +90,6 @@ struct Frontend {
  unsigned selectedSlot=1;unsigned skipStart=0;unsigned autoPhase=0,autoPhaseFrame=0,titlePhase=0;
  bool manualSlotsScanned=false;unsigned latestManualSlot=1;int saveThumbnailPriority=999;
  bool fingerActive=false,fingerUiDrag=false;SDL_FingerID fingerId=0;float fingerX=0,fingerY=0;qlie::Bytes gestureStory;
- bool captureReadback=false;
  bool startTransitionTest=false,skipTitleExitForTest=false,titleStarting=false,startMidCaptured=false,startEndCaptured=false;double titleStartElapsed=0;
  bool movieOnly=false,movieCaptured=false,touchOnlyTest=false,settingsTest=false,autoTest=false,fpsTest=false,titleTest=false,extraTest=false,musicTest=false,openingTest=false,viewTest=false,replayTest=false,cgTest=false,cgLoopTest=false,replayReturnTest=false,readSkipTest=false;
  unsigned opening=0;double openingElapsed=0;bool openingLogoCaptured=false;uint64_t openingTitleStarted=0;unsigned openingTitleCaptures=0;float titleAxis=0,titleAxisY=0,titlePointer=640;
@@ -695,7 +694,6 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  recordShown();if(fpsVisible)fpsDisplay.draw(*frameTarget);frameTarget=nullptr;
  // FIFO presentation supplies the native 60 Hz limit. A second software sleep
  // before acquisition can miss the next vblank and halve the frame rate.
- if(captureReadback){vulkan->end(pixels);return;}
  if(auto stamp=vulkan->present(fpsVisible))fpsDisplay.presented(*stamp);
  }
 #endif
@@ -726,11 +724,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(gameMenu.visible())drawPanel();
  present();
  }
- void snapshot(const std::string&name){
-#ifdef WHJ2_WITH_VULKAN
- if(vulkan&&vulkan->nativePresentation()){captureReadback=true;drawNative();captureReadback=false;}
-#endif
- SDL_Surface*surface=SDL_CreateRGBSurfaceFrom(pixels.data(),1280,720,32,1280*4,0x00ff0000,0x0000ff00,0x000000ff,0xff000000);
+ void snapshot(const std::string&name){SDL_Surface*surface=SDL_CreateRGBSurfaceFrom(pixels.data(),1280,720,32,1280*4,0x00ff0000,0x0000ff00,0x000000ff,0xff000000);
  if(!surface||SDL_SaveBMP(surface,(saveDir+"/"+name).c_str()))throw std::runtime_error("Cannot save screenshot");
  SDL_FreeSurface(surface);
  std::cerr<<"SCREENSHOT "<<saveDir<<"/"<<name<<"\n";
@@ -866,10 +860,7 @@ else if(e.type==SDL_FINGERDOWN){if(!fingerActive){fingerActive=true;fingerId=e.t
  if(i!=controllers.end()){SDL_GameControllerClose(i->second);
  controllers.erase(i);
  }}else if(e.type==SDL_CONTROLLERBUTTONDOWN){std::cerr<<"INPUT controller button="<<unsigned(e.cbutton.button)<<"\n";
-#ifdef __SWITCH__
-// Only explicit diagnostics inject SDL button events on the native input path.
-if(smoke)controllerKey(e.cbutton.button);
-#else
+#ifndef __SWITCH__
 controllerKey(e.cbutton.button);
 #endif
 }}recordCurrentRead();if(normalSkip&&!menu&&!gameMenu.visible()&&!upperMenu->visible()&&!movie->playing()&&!story.state.awaiting){hidden=false;messageText->reveal();refreshMessage();auto action=sentenceWait.force();if(action==whj2::SentenceWait::Next)next();else if(action==whj2::SentenceWait::Resume)next(true);}
@@ -1109,29 +1100,7 @@ if(argc<3)saves="sdmc:/switch/whj2/saves";
 #endif
 std::cerr<<"BUILD revision="<<WHJ2_BUILD_REV<<"\n";
 std::cerr<<"INIT game="<<game<<" saves="<<saves<<"\n";
-#ifdef __SWITCH__
- const std::string validationRequest="sdmc:/switch/whj2/validation.request";
- if(argc==1&&std::filesystem::exists(validationRequest)){
-  auto request=qlie::file(validationRequest);
-  if(std::string(request.begin(),request.end())!="WHJ2-VALIDATION-1\n")throw std::runtime_error("Unrecognized validation request");
-  std::filesystem::remove(validationRequest);
-  const std::string validationRoot=std::string("sdmc:/switch/whj2/validation/")+WHJ2_BUILD_REV;
-  if(std::filesystem::exists(validationRoot))throw std::runtime_error("Validation result directory already exists");
-  std::filesystem::create_directories(validationRoot);
-  struct ValidationCase{const char*name;bool Frontend::*flag;unsigned frames;};
-  const ValidationCase cases[]={{"opening",&Frontend::openingTest,1800},{"start-cloud",&Frontend::startTransitionTest,360},{"touch",&Frontend::touchOnlyTest,100},{"read-skip",&Frontend::readSkipTest,60},{"settings",&Frontend::settingsTest,50},{"auto",&Frontend::autoTest,600}};
-  for(const auto&test:cases){
-   std::cerr<<"VALIDATION begin case="<<test.name<<" revision="<<WHJ2_BUILD_REV<<"\n";
-   {Frontend check(game,validationRoot+"/"+test.name);check.*(test.flag)=true;if(check.run(test.frames)!=0)throw std::runtime_error(std::string("Validation failed: ")+test.name);}
-   std::cerr<<"VALIDATION passed case="<<test.name<<"\n";
-  }
-  const std::string complete=std::string("PASS revision=")+WHJ2_BUILD_REV+"\n";
-  qlie::write_file(validationRoot+"/complete.txt",qlie::Bytes(complete.begin(),complete.end()));
-  std::cerr<<"VALIDATION complete result=PASS revision="<<WHJ2_BUILD_REV<<"\n";
-  return 0;
- }
-#endif
- Frontend f(game,saves);if(argc>4&&std::string(argv[3])=="--restore-autosave"){unsigned index=unsigned(std::stoul(argv[4]));if(index<1||index>Frontend::AutoSaveCount)throw std::runtime_error("Auto save index must be1..5");auto slot=Frontend::AutoSaveBase+index-1;if(!std::filesystem::exists(f.slotPrefix(slot)+".story"))throw std::runtime_error("Auto save slot is empty");f.opening=0;f.load(slot);}
+Frontend f(game,saves);if(argc>4&&std::string(argv[3])=="--restore-autosave"){unsigned index=unsigned(std::stoul(argv[4]));if(index<1||index>Frontend::AutoSaveCount)throw std::runtime_error("Auto save index must be1..5");auto slot=Frontend::AutoSaveBase+index-1;if(!std::filesystem::exists(f.slotPrefix(slot)+".story"))throw std::runtime_error("Auto save slot is empty");f.opening=0;f.load(slot);}
  if(argc>4&&std::string(argv[3])=="--start-transition-smoke"){f.startTransitionTest=true;smoke=unsigned(std::stoul(argv[4]));}
  if(argc>4&&std::string(argv[3])=="--read-skip-smoke"){f.readSkipTest=true;smoke=unsigned(std::stoul(argv[4]));}
  if(argc>4&&std::string(argv[3])=="--replay-return-smoke"){f.replayReturnTest=true;smoke=unsigned(std::stoul(argv[4]));}

@@ -11,10 +11,10 @@ class GameMenu {
  void put(RenderQueue&,const std::string&,float,float,bool center=false);
 public:
  enum Panel {None,Save,Load,History,Settings};
- enum Action {Nothing,Close,Slot,Quit,Title,Yes,No,SettingsChanged,ResetSettings};
+ enum Action {Nothing,Close,Slot,Quit,Title,Yes,No,SettingsChanged,ResetSettings,SceneReturn};
  Panel panel=None;int focus=0,page=0,historyOffset=0;bool asking=false;
  Action requested=Nothing;
- bool settingsDirty=false;
+ bool settingsDirty=false,allowSceneReturn=false;
  explicit GameMenu(qlie::Assets&a,whj2::Settings&s):assets(a),settings(s){}
  void open(Panel p){panel=p;focus=p==Settings?3:0;asking=false;historyOffset=0;}
  void close(){panel=None;asking=false;draggedSlider=-1;}

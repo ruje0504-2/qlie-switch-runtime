@@ -24,19 +24,19 @@ bool SceneTransition::command(const std::string&line,const qlie::Bytes&scene,Sen
    auto mode=fields.size()>1?fields[1]:"cut";
    waitFadeTime=fields.size()>2&&!fields[2].empty()?(fields[2][0]=='$'?double(std::stoul(fields[2].substr(1),nullptr,16)):std::stod(fields[2])):0;
    if(mode=="cut"){reset();continue;}
-   if(mode=="catch"){previous={1280,720,scene};staged=false;active=false;caught=true;continue;}
+   if(mode=="catch"){previous={1280,720,scene};previous.version.publish();staged=false;active=false;caught=true;continue;}
    if(mode!="overlap"&&mode!="rule"){std::cerr<<"PENDING-SENTENCE fade="<<mode<<"\n";continue;}
    rule={};rulePath.clear();ruleMode=4;
    if(mode=="rule"&&fields.size()>3&&!fields[3].empty()&&fields[3]!="none"){
     rulePath="fade/"+fields[3];if(!assets.exists(rulePath)&&assets.exists(rulePath+".png"))rulePath+=".png";
-    rule=image(assets.read(rulePath));if(!rule.width||!rule.height)throw std::runtime_error("Empty transition rule");
+    rule=image(assets.read(rulePath));rule.version.publish();if(!rule.width||!rule.height)throw std::runtime_error("Empty transition rule");
     if(fields.size()>4&&!fields[4].empty())ruleMode=unsigned(std::stoul(fields[4][0]=='$'?fields[4].substr(1):fields[4],nullptr,fields[4][0]=='$'?16:10));
     if(ruleMode>255)throw std::runtime_error("Transition rule mode range");
    }
    duration=waitFadeTime;
    if(duration<=0){reset();continue;}
    if(scene.size()!=1280*720*4)throw std::runtime_error("Transition scene dimensions");
-   if(!caught){previous={1280,720,scene};}
+   if(!caught){previous={1280,720,scene};previous.version.publish();}
    caught=false;elapsed=0;staged=true;active=false;
   }else if(fields[0]=="clear"&&fields.size()>1&&fields[1]=="def")reset();
   else if(fields[0]!="")std::cerr<<"PENDING-SENTENCE property="<<fields[0]<<"\n";
@@ -58,6 +58,6 @@ void SceneTransition::blend(RenderTarget&target)const{if(!active||previous.pixel
 qlie::Bytes SceneTransition::save()const{StateWriter w;w.str("WHJ2-transition-2");w.n(uint64_t(elapsed*1000));w.n(uint64_t(duration*1000));w.n(staged);w.n(active);w.n(caught);w.str(rulePath);w.n(ruleMode);w.n(previous.pixels.size());w.bytes.insert(w.bytes.end(),previous.pixels.begin(),previous.pixels.end());return w.bytes;}
 void SceneTransition::restore(const qlie::Bytes&bytes){StateReader r{bytes};auto version=r.str();if(version!="WHJ2-transition-1"&&version!="WHJ2-transition-2")throw std::runtime_error("Transition state version");
  auto time=r.n()/1000.,span=r.n()/1000.;bool waiting=r.n()!=0,running=r.n()!=0,captured=r.n()!=0;std::string savedRule;unsigned savedMode=4;if(version=="WHJ2-transition-2"){savedRule=r.str();auto mode=r.n();if(mode>255)throw std::runtime_error("Saved rule mode");savedMode=unsigned(mode);}auto size=r.n();if(size!=0&&size!=1280*720*4)throw std::runtime_error("Transition saved dimensions");if(size!=bytes.size()-r.p||time>span)throw std::runtime_error("Transition state bounds");
- Image savedImage;if(!savedRule.empty()){savedImage=image(assets.read(savedRule));if(!savedImage.width||!savedImage.height)throw std::runtime_error("Empty saved rule");}rule=std::move(savedImage);rulePath=savedRule;ruleMode=savedMode;previous={size?1280u:0u,size?720u:0u,qlie::Bytes(bytes.begin()+r.p,bytes.end())};elapsed=time;duration=span;staged=waiting;active=running;caught=captured;
+ Image savedImage;if(!savedRule.empty()){savedImage=image(assets.read(savedRule));if(!savedImage.width||!savedImage.height)throw std::runtime_error("Empty saved rule");}rule=std::move(savedImage);rule.version.publish();rulePath=savedRule;ruleMode=savedMode;previous={size?1280u:0u,size?720u:0u,qlie::Bytes(bytes.begin()+r.p,bytes.end())};previous.version.publish();elapsed=time;duration=span;staged=waiting;active=running;caught=captured;
 }
 }

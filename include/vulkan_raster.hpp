@@ -2,6 +2,7 @@
 #pragma once
 #include "render_queue.hpp"
 #include <memory>
+#include <optional>
 namespace whj2 {
 class VulkanRaster final:public RenderTarget {
  struct Impl;std::unique_ptr<Impl> impl;
@@ -10,7 +11,9 @@ public:
  bool nativePresentation()const;
  void begin(const qlie::Bytes&);void end(qlie::Bytes&);
  void begin(uint32_t clearColor);
- void present();void presentPixels(const qlie::Bytes&);
+ void beginVideo(const Image&);
+ void finishPresentation();
+ std::optional<uint64_t> present(bool refreshUnchanged=true);std::optional<uint64_t> presentPixels(const qlie::Bytes&);
  void beginBatch()override;void endBatch()override;
  bool supportsMasks()const override{return true;}
  void maskedImage(const Image&,const Image&,const AnimationSample::Mask&,const Affine2D&,float,uint32_t,uint32_t,unsigned,unsigned)override;

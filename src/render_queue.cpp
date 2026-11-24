@@ -10,7 +10,7 @@
 #include <exception>
 #include <cstdlib>
 #ifdef __SWITCH__
-#include <switch.h>
+#include "switch_threads.hpp"
 #endif
 namespace whj2 {
 Affine2D affine(const Affine2D&p,const Affine2D&q){return {
@@ -52,12 +52,13 @@ void RenderQueue::snapshot(const Image&i,const Affine2D&m,float pri,float alpha,
  image(snapshotImage(i),m,pri,alpha,add,mul,blend,filter);
 }
 void RenderQueue::triangle(const Image&i,const std::array<TextureVertex,3>&vertices,float pri,float alpha,uint32_t add,uint32_t mul,unsigned blend,unsigned filter){
- std::vector<TextureVertex> clipped;
+  std::array<TextureVertex,4> clipped;
+  unsigned count=0;
  for(unsigned n=0;n<3;n++){const auto&a=vertices[n];const auto&b=vertices[(n+1)%3];bool ai=a.depth>=10,bi=b.depth>=10;
-  if(ai)clipped.push_back(a);
-  if(ai!=bi){float t=(10-a.depth)/(b.depth-a.depth);clipped.push_back({a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t,10,a.u+(b.u-a.u)*t,a.v+(b.v-a.v)*t});}
+  if(ai)clipped[count++]=a;
+  if(ai!=bi){float t=(10-a.depth)/(b.depth-a.depth);clipped[count++]={a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t,10,a.u+(b.u-a.u)*t,a.v+(b.v-a.v)*t};}
  }
- for(size_t n=1;n+1<clipped.size();n++){Command c;c.image=&i;c.triangle={clipped[0],clipped[n],clipped[n+1]};c.polygon=true;c.priority=pri;c.state.alpha=alpha;c.state.addColor=add;c.state.mulColor=mul;c.state.flags=blend;c.state.textureFilter=filter;commands.push_back(c);if(alpha>0&&i.width&&i.height)visibleImages++;}
+ for(unsigned n=1;n+1<count;n++){Command c;c.image=&i;c.triangle={clipped[0],clipped[n],clipped[n+1]};c.polygon=true;c.priority=pri;c.state.alpha=alpha;c.state.addColor=add;c.state.mulColor=mul;c.state.flags=blend;c.state.textureFilter=filter;commands.push_back(c);if(alpha>0&&i.width&&i.height)visibleImages++;}
 }
 void RenderQueue::control(const AnimationSample&s,float pri){Command c;c.state=s;c.priority=pri;commands.push_back(c);}
 namespace {
@@ -116,7 +117,7 @@ void raster(qlie::Bytes&out,unsigned w,unsigned h,const Image&im,const Affine2D&
 }
 void RenderQueue::drawRows(qlie::Bytes&out,unsigned w,unsigned h,unsigned rowBegin,unsigned rowEnd,RenderTarget*target)const{
  if(!target&&out.size()!=size_t(w)*h*4)throw std::runtime_error("Render canvas size");
- std::vector<const Command*>order;for(auto&c:commands)order.push_back(&c);
+ std::vector<const Command*>order;order.reserve(commands.size());for(auto&c:commands)order.push_back(&c);
  std::stable_sort(order.begin(),order.end(),[](auto*a,auto*b){return a->priority<b->priority;});
  std::vector<AnimationSample>stack;
  for(auto*c:order){const auto&s=c->state;
@@ -158,25 +159,32 @@ class RasterWorkers {
  std::mutex mutex;std::condition_variable start,finished;
  std::thread workers[2];std::function<void(unsigned,unsigned)> job;
  std::exception_ptr errors[3];unsigned generation=0,remaining=0,height=0;bool stop=false;
+ unsigned coreCount=3;
  void worker(unsigned index){
 #ifdef __SWITCH__
-  u64 allowed=0;
-  if(R_SUCCEEDED(svcGetInfo(&allowed,InfoType_CoreMask,CUR_PROCESS_HANDLE,0))&&(allowed&(1ull<<index)))
-   svcSetThreadCoreMask(CUR_THREAD_HANDLE,int(index),1u<<index);
+  logSwitchThread(index==1?"cpu-raster-1":"cpu-raster-2",bindSwitchThread(index));
 #endif
   unsigned seen=0;std::unique_lock<std::mutex> lock(mutex);
   while(true){start.wait(lock,[&]{return stop||generation!=seen;});if(stop)return;seen=generation;
-   unsigned begin=height*index/3,end=height*(index+1)/3;lock.unlock();
+   unsigned begin=height*index/coreCount,end=height*(index+1)/coreCount;lock.unlock();
    try{job(begin,end);}catch(...){errors[index]=std::current_exception();}
    lock.lock();if(--remaining==0)finished.notify_one();
   }
  }
 public:
- RasterWorkers(){workers[0]=std::thread([this]{worker(1);});workers[1]=std::thread([this]{worker(2);});}
- ~RasterWorkers(){{std::lock_guard<std::mutex> lock(mutex);stop=true;}start.notify_all();for(auto&t:workers)t.join();}
+ RasterWorkers(){
+#ifdef __SWITCH__
+  u64 mask=0;
+  if(R_SUCCEEDED(svcGetInfo(&mask,InfoType_CoreMask,CUR_PROCESS_HANDLE,0))&&mask)
+   coreCount=std::min(3u,unsigned(__builtin_popcountll(mask)));
+#endif
+  for(unsigned i=1;i<coreCount;++i)workers[i-1]=std::thread([this,i]{worker(i);});
+ }
+ ~RasterWorkers(){{std::lock_guard<std::mutex> lock(mutex);stop=true;}start.notify_all();for(auto&t:workers)if(t.joinable())t.join();}
  void run(unsigned h,const std::function<void(unsigned,unsigned)>&fn){
-  {std::lock_guard<std::mutex> lock(mutex);job=fn;height=h;remaining=2;for(auto&e:errors)e=nullptr;++generation;}
-  start.notify_all();try{fn(0,h/3);}catch(...){errors[0]=std::current_exception();}
+  if(coreCount==1){fn(0,h);return;}
+  {std::lock_guard<std::mutex> lock(mutex);job=fn;height=h;remaining=coreCount-1;for(auto&e:errors)e=nullptr;++generation;}
+  start.notify_all();try{fn(0,h/coreCount);}catch(...){errors[0]=std::current_exception();}
   {std::unique_lock<std::mutex> lock(mutex);finished.wait(lock,[&]{return remaining==0;});job={};}
   for(auto&e:errors)if(e)std::rethrow_exception(e);
  }

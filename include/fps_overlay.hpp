@@ -9,6 +9,7 @@ class FpsOverlay {
  void rebuild();
 public:
  void presented(uint64_t milliseconds);
+ void restartSample(){started=false;value=0;frames=0;}
  unsigned fps()const{return value;}
  void draw(RenderTarget&);
  void draw(qlie::Bytes&);

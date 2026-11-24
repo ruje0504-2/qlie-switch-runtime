@@ -15,7 +15,7 @@ struct KVideo {
     AVFormatContext *format;AVIOContext *io;
     AVCodecContext *video,*audio;AVFrame *frame,*sound;AVPacket *packet;
     struct SwsContext *scale;SwrContext *resample;
-    int vi,ai,eof,pending,finished,range_first;int64_t range_start,range_end;int64_t origin,pts,repeat_until;uint64_t ticks,decoded;
+    int vi,ai,eof,pending,finished,range_first;int64_t range_start,range_end;int64_t origin,pts,repeat_until;uint64_t ticks,decoded,written;
     AVFrame *cache[128];int64_t cache_pts[128];
     unsigned cache_count,cache_at;size_t cache_bytes;
     int cache_first,cache_last,cache_enabled,cache_complete,cache_playing,seek_check;
@@ -163,6 +163,7 @@ void kvideo_close(KVideo *v){if(!v)return;
     cache_clear(v);av_frame_free(&v->download);av_packet_free(&v->packet);av_frame_free(&v->frame);av_frame_free(&v->sound);sws_freeContext(v->scale);swr_free(&v->resample);avcodec_free_context(&v->video);avcodec_free_context(&v->audio);avformat_close_input(&v->format);if(v->io){av_freep(&v->io->buffer);avio_context_free(&v->io);}free(v);}
 const char *kvideo_error(KVideo *v){return v->error;}
 uint64_t kvideo_decoded_frames(KVideo *v){return v->decoded;}
+uint64_t kvideo_written_frames(const KVideo *v){return v->written;}
 static int audio_frames(KVideo *v,uint8_t **pcm,size_t *bytes){
     int rc;while((rc=avcodec_receive_frame(v->audio,v->sound))>=0){
         int samples=swr_get_out_samples(v->resample,v->sound->nb_samples);
@@ -286,6 +287,7 @@ static int present(KVideo *v,AVFrame *frame,KImage *screen){
     if(!v->scale)return fail(v,"video scaler failed");
     uint8_t *dst[]={screen->pixels,NULL,NULL,NULL};int stride[]={(int)screen->stride,0,0,0};
     if(sws_scale(v->scale,(const uint8_t *const*)frame->data,frame->linesize,0,frame->height,dst,stride)<0)return fail(v,"video conversion failed");
+    ++v->written;
     return 0;
 }
 static void cache_frame(KVideo *v){

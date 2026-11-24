@@ -21,6 +21,7 @@ void kvideo_close(KVideo *v);
 /* One 60 Hz tick. 0 playing, 1 EOF, -1 decode error. */
 int kvideo_step(KVideo *v,KImage *screen,uint8_t **pcm,size_t *pcm_size);
 uint64_t kvideo_decoded_frames(KVideo *v);
+uint64_t kvideo_written_frames(const KVideo *v);
 int kvideo_has_audio(const KVideo *v);
 unsigned kvideo_source_width(const KVideo *v);
 unsigned kvideo_source_height(const KVideo *v);

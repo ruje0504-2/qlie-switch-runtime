@@ -47,19 +47,13 @@ uint blend(uint mode,uint source,uint dest,uint alpha){
 float divide(float a,float b){precise float z=a/b;precise float residual=fma(-z,b,a);precise float result=z+residual/b;return result;}
 float edge(vec2 a,vec2 b,vec2 q){precise float e=(b.x-a.x)*(q.y-a.y)-(b.y-a.y)*(q.x-a.x);return e;}
 bool included(vec2 a,vec2 b){return b.y<a.y||(b.y==a.y&&b.x>a.x);}
-void main(){
- ivec2 q=ivec2(gl_GlobalInvocationID.xy);if(any(greaterThanEqual(q,ivec2(frame.meta.xy))))return;
- uint index=uint(q.y)*frame.meta.x+uint(q.x);
- // One invocation owns the pixel for the entire ordered command stream. Keep
- // its accumulated color in registers: no inter-draw storage reads or barriers.
- uvec4 color=unpack(frame.meta.w!=0u?frame.colors.x:destination[index]);
- uint tile=gl_WorkGroupID.y*frame.meta.z+gl_WorkGroupID.x;
- uint first=tiles[tile*2u],last=first+tiles[tile*2u+1u];
- for(uint item=first;item<last;item++){
- Draw p=draws[tiles[item]];
- if(any(lessThan(q,p.rect.xy))||any(greaterThanEqual(q,p.rect.zw)))continue;
+// Apply one paint operation to a pixel. The caller owns its final and cached
+// prefix colors, including when an operation covers only part of the tile.
+void applyDraw(Draw p,ivec2 q,uint index,inout uvec4 color){
+ if(any(lessThan(q,p.rect.xy))||any(greaterThanEqual(q,p.rect.zw)))return;
  uint operation=p.meta.z>>20;
- if(operation==2u){color.rgb=color.rgb*p.meta.x/p.meta.y;continue;}
+ if(operation==4u){color=unpack(source[p.colors.z+index]);return;}
+ if(operation==2u){color.rgb=color.rgb*p.meta.x/p.meta.y;return;}
  if(operation==3u){
   uvec4 old=unpack(source[p.colors.z+index]);
   if((p.meta.z&131072u)==0u){
@@ -76,31 +70,52 @@ void main(){
    }
    color=uvec4(blend(0u,old.r,color.r,alpha),blend(0u,old.g,color.g,alpha),blend(0u,old.b,color.b,alpha),blend(0u,old.a,color.a,alpha));
   }
-  continue;
+  return;
  }
  if(operation==1u){
-  uvec4 s=pixel(p,q-ivec2(p.p1.xy));if(s.a==0u)continue;
+  uvec4 s=pixel(p,q-ivec2(p.p1.xy));if(s.a==0u)return;
   uint alpha=s.a+color.a*(255u-s.a)/255u;
-  color=uvec4((s.rgb*s.a+color.rgb*color.a*(255u-s.a)/255u)/alpha,alpha);continue;
+  color=uvec4((s.rgb*s.a+color.rgb*color.a*(255u-s.a)/255u)/alpha,alpha);return;
  }
+ uvec4 s;
+ if((p.meta.z&524288u)!=0u){
+  s=pixel(p,q-ivec2(p.p1.xy));
+ }else{
  precise vec2 uv;
- if((p.meta.z&65536u)==0u){precise vec2 d=vec2(q)+.5-p.p1.xy;uv=vec2(divide(p.p0.w*d.x-p.p0.y*d.y,p.p1.z),divide(-p.p0.z*d.x+p.p0.x*d.y,p.p1.z));if(any(lessThan(uv,vec2(0)))||any(greaterThanEqual(uv,vec2(p.meta.xy))))continue;}
+ if((p.meta.z&65536u)==0u){precise vec2 d=vec2(q)+.5-p.p1.xy;uv=vec2(divide(p.p0.w*d.x-p.p0.y*d.y,p.p1.z),divide(-p.p0.z*d.x+p.p0.x*d.y,p.p1.z));if(any(lessThan(uv,vec2(0)))||any(greaterThanEqual(uv,vec2(p.meta.xy))))return;}
  else{
   vec2 a=p.p0.xy,b=p.p1.xy,c=p.p2.xy,point=vec2(q)+.5;
   precise vec3 e=vec3(edge(b,c,point),edge(c,a,point),edge(a,b,point));
-  if(any(lessThan(e,vec3(0)))||(e.x==0&&!included(b,c))||(e.y==0&&!included(c,a))||(e.z==0&&!included(a,b)))continue;
+  if(any(lessThan(e,vec3(0)))||(e.x==0&&!included(b,c))||(e.y==0&&!included(c,a))||(e.z==0&&!included(a,b)))return;
   precise vec3 t=vec3(divide(divide(e.x,p.p3.w),p.p3.x),divide(divide(e.y,p.p3.w),p.p3.y),divide(divide(e.z,p.p3.w),p.p3.z));precise float inverse=t.x+t.y+t.z;
   precise float u=t.x*p.p0.z+t.y*p.p1.z+t.z*p.p2.z;
   precise float v=t.x*p.p0.w+t.y*p.p1.w+t.z*p.p2.w;uv=vec2(divide(u,inverse),divide(v,inverse));
  }
- uvec4 s=samplePixel(p,uv);uint alpha=s.a*p.meta.w/255u;if(alpha==0)continue;
+ s=samplePixel(p,uv);
+ }
+ uint alpha=s.a*p.meta.w/255u;if(alpha==0)return;
  if(p.colors.x!=0u||p.colors.y!=0xffffffu)s.rgb=min(uvec3(255),s.rgb*unpack(p.colors.y).rgb/255u+unpack(p.colors.x).rgb);
  uint mode=(p.meta.z>>8)&255u;
  if(mode<2u){
-  if(alpha==255u){color=uvec4(s.rgb,alpha);continue;}
+  if(alpha==255u){color=uvec4(s.rgb,alpha);return;}
   ivec4 sourceColor=ivec4(s.rgb,alpha),d=ivec4(color);int factor=int((alpha+(alpha>>7))>>1);
   color=uvec4(d+((sourceColor-d)*factor>>7));
  }else color=uvec4(blend(mode,s.r,color.r,alpha),blend(mode,s.g,color.g,alpha),blend(mode,s.b,color.b,alpha),blend(mode,alpha,color.a,alpha));
+}
+
+void main(){
+ uint header=gl_WorkGroupID.x*4u;
+ uint origin=tiles[header],first=tiles[header+1u],count=tiles[header+2u],control=tiles[header+3u];
+ ivec2 q=ivec2(origin&65535u,origin>>16)+ivec2(gl_LocalInvocationID.xy);
+ uint index=uint(q.y)*frame.meta.x+uint(q.x);
+ uint prefixIndex=frame.meta.x*frame.meta.y+index;
+ uvec4 color;
+ if((control&0x80000000u)!=0u)color=unpack(destination[prefixIndex]);
+ else color=unpack(frame.meta.w!=0u?frame.colors.x:destination[index]);
+ uint saveAfter=control&0x7fffffffu;
+ for(uint item=0;item<count;++item){
+  applyDraw(draws[tiles[first+item]],q,index,color);
+  if(item+1u==saveAfter)destination[prefixIndex]=pack(color);
  }
  destination[index]=pack(color);
 }

@@ -29,10 +29,22 @@ Audio::Audio(){SDL_AudioSpec wanted{},got{};
 Audio::~Audio(){if(device)SDL_CloseAudioDevice(device);
  }
 void Audio::callback(void*context,Uint8*stream,int bytes){auto&a=*static_cast<Audio*>(context);
+#ifdef __SWITCH__
+ if(!a.mixerBindingReady.load(std::memory_order_relaxed)){
+  a.mixerBinding=bindSwitchThread(2);
+  a.mixerBindingReady.store(true,std::memory_order_release);
+ }
+#endif
  auto*out=reinterpret_cast<int16_t*>(stream);
  unsigned count=unsigned(bytes)/4;
+ std::array<Channel*,ChannelCount> active;
+ unsigned activeCount=0;
+ for(auto&channel:a.channels){
+  if(!channel.pcm.empty())active[activeCount++]=&channel;
+ }
+ unsigned audibleFrames=0;
  for(unsigned i=0;i<count;i++){float left=0,right=0;
- for(auto&c:a.channels){if(c.pcm.empty())continue;
+ for(unsigned channel=0;channel<activeCount;++channel){auto&c=*active[channel];
  if(c.pos+1>=c.pcm.size()){if(c.loop)c.pos=0;
  else continue;
  }if(c.fade){c.gain+=c.step;
@@ -43,9 +55,17 @@ void Audio::callback(void*context,Uint8*stream,int bytes){auto&a=*static_cast<Au
  }int l=std::clamp(int(left),-32768,32767),r=std::clamp(int(right),-32768,32767);
  out[2*i]=int16_t(l);
  out[2*i+1]=int16_t(r);
- if(l||r)a.nonzero.fetch_add(1,std::memory_order_relaxed);
- }a.frames.fetch_add(count,std::memory_order_relaxed);
+ audibleFrames+=l!=0||r!=0;
+ }a.nonzero.fetch_add(audibleFrames,std::memory_order_relaxed);a.frames.fetch_add(count,std::memory_order_relaxed);
  }
+#ifdef __SWITCH__
+void Audio::reportMixerBinding(){
+ if(!mixerBindingReported&&mixerBindingReady.load(std::memory_order_acquire)){
+  logSwitchThread("audio",mixerBinding);
+  mixerBindingReported=true;
+ }
+}
+#endif
 void Audio::play(unsigned ch,const qlie::Bytes&bytes,bool loop,float gain,unsigned ms,const std::string&path,unsigned category){if(ch>=channels.size())throw std::runtime_error("Audio channel out of range");
  uint8_t*raw=nullptr;
  size_t n=0;

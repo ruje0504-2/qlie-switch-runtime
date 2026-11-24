@@ -5,6 +5,7 @@
 // Incremental native frontend: graphics/audio integration remains in progress.
 #include "story.hpp"
 #include "audio.hpp"
+#include "switch_threads.hpp"
 #include "scene_images.hpp"
 #include "message_text.hpp"
 #include "scene_transition.hpp"
@@ -188,7 +189,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  void drawGlyph(uint32_t cp,int x,int y,unsigned width,unsigned height,uint32_t color){
  if(!frameTarget){kfont_draw(font,newImage(),cp,x,y,width,height,color);return;}
  auto key=std::make_tuple(cp,width,height,color);auto at=uiGlyphs.find(key);
- if(at==uiGlyphs.end()){CachedGlyph glyph;if(kfont_glyph_bounds(font,cp,width,height,&glyph.bounds))return;auto&b=glyph.bounds;glyph.image={b.width,b.height,qlie::Bytes(size_t(b.width)*b.height*4)};if(b.width&&b.height){KImage dst{0,0,b.width,b.height,size_t(b.width)*4,glyph.image.pixels.data()};kfont_draw(font,&dst,cp,-b.left,-b.top,width,height,color);}at=uiGlyphs.emplace(key,std::move(glyph)).first;}
+ if(at==uiGlyphs.end()){CachedGlyph glyph;if(kfont_glyph_bounds(font,cp,width,height,&glyph.bounds))return;auto&b=glyph.bounds;glyph.image={b.width,b.height,qlie::Bytes(size_t(b.width)*b.height*4)};if(b.width&&b.height){KImage dst{0,0,b.width,b.height,size_t(b.width)*4,glyph.image.pixels.data()};kfont_draw(font,&dst,cp,-b.left,-b.top,width,height,color);}glyph.image.version.publish();at=uiGlyphs.emplace(key,std::move(glyph)).first;}
  auto&glyph=at->second;frameTarget->font(glyph.image,x+glyph.bounds.left,y+glyph.bounds.top);
  }
  void line(const std::string&s,int x,int y,int size=26,uint32_t color=0xffffff){
@@ -419,7 +420,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  SlotPreview&slotPreview(unsigned slot){
  auto at=slotPreviews.find(slot);if(at!=slotPreviews.end())return at->second;
  SlotPreview preview;preview.exists=std::filesystem::exists(slotPrefix(slot)+".story");
- if(preview.exists){if(std::filesystem::exists(slotPrefix(slot)+".thumbnail")){preview.thumbnail={160,90,qlie::file(slotPrefix(slot)+".thumbnail")};if(preview.thumbnail.pixels.size()!=160*90*4)throw std::runtime_error("Thumbnail size");}auto content=qlie::file(slotPrefix(slot)+".text");preview.excerpt=utf8(std::string(content.begin(),content.end()));}
+ if(preview.exists){if(std::filesystem::exists(slotPrefix(slot)+".thumbnail")){preview.thumbnail={160,90,qlie::file(slotPrefix(slot)+".thumbnail")};if(preview.thumbnail.pixels.size()!=160*90*4)throw std::runtime_error("Thumbnail size");preview.thumbnail.version.publish();}auto content=qlie::file(slotPrefix(slot)+".text");preview.excerpt=utf8(std::string(content.begin(),content.end()));}
  return slotPreviews.emplace(slot,std::move(preview)).first->second;
  }
  void drawPanel(){++panelDraws;using UI=whj2::GameMenu;if(frameTarget)gameMenu.draw(*frameTarget);else gameMenu.draw(pixels);
@@ -434,7 +435,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  void recordShown(){auto shown=images->takeShownFiles();auto cgShown=cgScreen->takeShownFiles();shown.insert(cgShown.begin(),cgShown.end());if(progress.captureFiles(shown))qlie::write_file(saveDir+"/system.progress",progress.save());}
  void present(){recordShown();if(fpsVisible)fpsDisplay.draw(pixels);
 #ifdef WHJ2_WITH_VULKAN
- if(vulkan&&vulkan->nativePresentation()){framePacer.wait();vulkan->presentPixels(pixels);fpsDisplay.presented(SDL_GetTicks64());return;}
+ if(vulkan&&vulkan->nativePresentation()){framePacer.wait();if(auto stamp=vulkan->presentPixels(pixels))fpsDisplay.presented(*stamp);return;}
 #endif
  SDL_UpdateTexture(texture,nullptr,pixels.data(),1280*4);SDL_RenderClear(renderer);SDL_RenderCopy(renderer,texture,nullptr,nullptr);framePacer.wait();SDL_RenderPresent(renderer);fpsDisplay.presented(SDL_GetTicks64());}
 #ifdef WHJ2_WITH_VULKAN
@@ -445,7 +446,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  else if(replayScreen->visible()){vulkan->begin(0u);replayScreen->draw(*frameTarget);}
  else if(opening==1){vulkan->begin(0u);images->draw(*frameTarget);}
  else if(musicScreen->visible()){vulkan->begin(0u);musicScreen->draw(*frameTarget);}
- else if(movie->playing()){vulkan->begin(movie->image().pixels);upperMenu->draw(*frameTarget);if(gameMenu.visible())drawPanel();}
+ else if(movie->playing()){vulkan->beginVideo(movie->image());upperMenu->draw(*frameTarget);if(gameMenu.visible())drawPanel();}
  else{
   vulkan->begin(menu?0xff000000u:0xff141923u);
   if(menu)title->draw(*frameTarget);
@@ -463,7 +464,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  recordShown();if(fpsVisible)fpsDisplay.draw(*frameTarget);frameTarget=nullptr;
  // FIFO presentation supplies the native 60 Hz limit. A second software sleep
  // before acquisition can miss the next vblank and halve the frame rate.
- vulkan->present();fpsDisplay.presented(SDL_GetTicks64());
+ if(auto stamp=vulkan->present(fpsVisible))fpsDisplay.presented(*stamp);
  }
 #endif
  void draw(){panelDraws=0;
@@ -535,7 +536,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  std::cerr<<"INPUT controller connected id="<<id<<"\n";
  }
  void controllerKey(Uint8 button){using UI=whj2::GameMenu;
- if(button==SDL_CONTROLLER_BUTTON_BACK){fpsVisible=!fpsVisible;return;}
+ if(button==SDL_CONTROLLER_BUTTON_BACK){fpsVisible=!fpsVisible;if(fpsVisible)fpsDisplay.restartSample();return;}
  if(opening){if(button==SDL_CONTROLLER_BUTTON_A)activate();return;}
  if(cgScreen->visible()){if(button==SDL_CONTROLLER_BUTTON_B)back();else if(button==SDL_CONTROLLER_BUTTON_A)cgAction(cgScreen->confirm());else if(button==SDL_CONTROLLER_BUTTON_X)cgScreen->toggleZoom();else if(button==SDL_CONTROLLER_BUTTON_DPAD_UP)cgScreen->move(0,-1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_DOWN)cgScreen->move(0,1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_LEFT)cgScreen->move(-1,0);else if(button==SDL_CONTROLLER_BUTTON_DPAD_RIGHT)cgScreen->move(1,0);return;}
  if(replayScreen->visible()){if(button==SDL_CONTROLLER_BUTTON_B)back();else if(button==SDL_CONTROLLER_BUTTON_A)replayAction(replayScreen->confirm());else if(button==SDL_CONTROLLER_BUTTON_DPAD_UP)replayScreen->move(0,-1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_DOWN)replayScreen->move(0,1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_LEFT)replayScreen->move(-1,0);else if(button==SDL_CONTROLLER_BUTTON_DPAD_RIGHT)replayScreen->move(1,0);return;}
@@ -556,6 +557,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }}
  int run(unsigned smoke){
 #ifdef __SWITCH__
+ whj2::logSwitchThread("main",whj2::bindSwitchThread(0));
  std::cerr<<"INPUT libnx Joy-Con and "<<(window?"SDL":"libnx")<<" touch\n";
 #else
  std::cerr<<"INPUT physical joysticks="<<SDL_NumJoysticks()<<"\n";
@@ -565,6 +567,9 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(smoke&&!openingTest&&!movieOnly){if(opening)showTitle();if(!titleTest)title->skipIntro();}
  uint64_t lastUpdate=SDL_GetTicks64();
  while(!done){auto now=SDL_GetTicks64();
+#ifdef __SWITCH__
+ audio->reportMixerBinding();
+#endif
  if(opening==1){openingElapsed+=double(now-lastUpdate);images->update(double(now-lastUpdate));if(openingElapsed>=4500)makerLogo();}
  if(titleViewActive()&&!fingerActive){titlePointer=std::clamp(titlePointer+titleAxis*double(now-lastUpdate)*.6,0.,1280.);title->view(titlePointer);}
  if(cgScreen->visible()){cgScreen->update(double(now-lastUpdate));if(cgScreen->inView()&&!fingerActive)cgScreen->panDelta(titleAxis*double(now-lastUpdate)*.6,titleAxisY*double(now-lastUpdate)*.6);}
@@ -816,7 +821,11 @@ controllerKey(e.cbutton.button);
  done=true;
  }}else {frames++;
 
- }}auto ast=audio->stats();
+ }}
+#ifdef WHJ2_WITH_VULKAN
+ if(vulkan&&vulkan->nativePresentation())vulkan->finishPresentation();
+#endif
+ auto ast=audio->stats();
  std::cerr<<"AUDIO output_frames="<<ast.frames<<" nonzero_frames="<<ast.nonzero<<"\n";
  std::cerr<<"FRAME cap="<<whj2::FramePacer::Limit<<" min_interval_ms="<<framePacer.minimumMilliseconds()<<"\n";
  std::cerr<<"EXIT normal text_advances="<<advances<<" frames="<<frames<<"\n";

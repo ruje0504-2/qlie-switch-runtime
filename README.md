@@ -103,12 +103,16 @@ backend from [danfromtico/mesa-switch](https://github.com/danfromtico/mesa-switc
 Mesa 26.2.4, commit `0ff52079ca9e9e837ed27eb95a8d239f439a1864`.
 The authored flower particles, sky mesh, texture sampling, ordered integer
 blending and left-stick/touch viewpoint remain in the same scene graph.
-One compute dispatch processes ordered draw lists for 16x16 screen tiles. Each
-invocation owns one pixel, keeps its accumulated color in registers and applies
-the original sampling and integer blend equations in scene order. This replaces
-the old dispatch and global memory barrier after every primitive. A shared
-texture arena retains uploads; each immutable queue checks a source image once
-instead of comparing its complete pixels for every particle or mesh triangle.
+The compositor compares the ordered draw list and source texture versions for
+each 16x16 tile. Unchanged tiles keep their final pixels. For a changed tile
+the compositor can also reuse the exact color of an unchanged prefix of layers.
+One dispatch updates the dirty tiles in scene order. Camera motion, reordered
+or removed layers, a new texture upload and a different clear color all take
+part in the comparison. Movie playback publishes a frame version when the decoder writes to the display
+surface. Repeated ticks can reuse the same pixels.
+Immutable scene images publish a version after decoding or replacement. Other
+image producers use byte comparison against a CPU copy while their GPU upload
+is cached. The arena keeps earlier versions alive until the GPU fence completes.
 A Vulkan fullscreen pass presents directly through the native NWindow
 swapchain, including the FPS overlay.
 On this path, SDL provides audio/events only; Joy-Con and touchscreen input use
@@ -120,6 +124,18 @@ upload its frame directly; overlays are composed on the GPU. Transition/save
 snapshots still use the CPU reference renderer when requested by game logic.
 Save-panel metadata and thumbnails are cached while the panel is open; glyph
 bitmaps are cached separately from their GPU placement.
+
+On Horizon, the main loop, the Vulkan submit/present thread and the audio mixer
+request the first, second and third CPU cores allowed for the process. CPU
+raster workers use the remaining allowed slots when rendering CPU snapshots.
+Each role logs its requested core and the affinity mask read back from Horizon.
+The presenter holds one frame in flight. Input and scene preparation can overlap
+that frame. When every tile is unchanged and the FPS counter is hidden, the
+screen retains the last presentation and the input loop runs at up to 60 Hz.
+With the counter visible the application continues presenting through FIFO so
+the counter measures completed presentations. Command buffers and mapped memory wait for its fence before
+reuse. Periodic logs identify dirty tiles, uploads, CPU preparation, fence wait
+and GPU raster time on queues supporting timestamps.
 
 Native FIFO presentation supplies the console's 60 Hz limit, without a second
 software sleep before swapchain acquisition. The CPU/host presentation path

@@ -15,7 +15,7 @@ void setPosition(whj2::Settings&s,int i,int step){step=std::clamp(step,0,20);s.s
 }
 const Image& GameMenu::resource(const std::string&path){auto it=cache.find(path);if(it==cache.end()){auto hash=path.find('#');Image decoded;
  if(hash==path.npos)decoded=image(assets.read(path));else {unsigned wanted=unsigned(std::stoul(path.substr(hash+1))),index=0;bool found=false;for(auto&member:abmp(assets.read(path.substr(0,hash))))if(member.type.rfind("abimg",0)==0){if(index++==wanted){decoded=image(member.data);found=true;break;}}if(!found)throw std::runtime_error("UI image member missing "+path);}
- it=cache.emplace(path,std::move(decoded)).first;}return it->second;}
+ decoded.version.publish();it=cache.emplace(path,std::move(decoded)).first;}return it->second;}
 
 void GameMenu::put(RenderQueue&q,const std::string&path,float x,float y,bool center){auto&im=resource(path);q.image(im,imagePlacement(x,y,1,1,0,center?.5f:0,center?.5f:0,im.width,im.height),0,255,0,0xffffff);}
 void GameMenu::move(int dx,int dy){if(asking){if(dx||dy)focus=1-focus;return;}

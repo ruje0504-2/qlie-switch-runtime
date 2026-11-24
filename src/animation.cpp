@@ -200,8 +200,13 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
   float value=0;bool known=true;
   auto trig=[](float radians,bool cosine){
    // a18c4 quantizes the phase to the engine's 1024-entry sine table.
+   static const auto sine=[]{
+    std::array<float,1024> table{};
+    for(size_t i=0;i<table.size();++i)table[i]=float(std::sin(i*2.0*3.14159265358979323846/1024));
+    return table;
+   }();
    int phase=int(radians*512.f/3.14159265f)+(cosine?256:0);
-   return float(std::sin((phase&1023)*2.0*3.14159265358979323846/1024));
+   return sine[phase&1023];
   };
   if(op==5){
    // PE f0f90: table index uses the time quotient, not the remainder.
@@ -247,6 +252,7 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
 // color and multiply tint/alpha. The stack is reset for each motion draw.
 std::vector<AnimationSample> sampleMotion(const Motion&motion,double ms,unsigned width,unsigned height,bool applyRenderState,const AnimationContext&context){
  std::vector<AnimationSample> result,stack;
+ result.reserve(motion.layers.size());
  auto compose=[](AnimationSample value,const AnimationSample&parent){
   value.x+=parent.x;value.y+=parent.y;value.z+=parent.z;
   if(value.kind!=3){value.scaleX*=parent.scaleX/100;value.scaleY*=parent.scaleY/100;value.scaleZ*=parent.scaleZ/100;}

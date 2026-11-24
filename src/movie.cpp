@@ -26,10 +26,12 @@ void Movie::openBytes(qlie::Bytes b,const std::string&name){stop();
  tick=0;
  ended=false;
  std::fill(frame.pixels.begin(),frame.pixels.end(),0);
+ frame.version.publish();
  std::cerr<<"MOVIE start "<<name<<" audio="<<hasAudio<<" audio_clock="<<origin<<"\n";
  }
 void Movie::update(){if(!video)return;
  auto target=(audio.stats().frames-origin)*60/44100;
+ const auto before=kvideo_written_frames(video);
  KImage dst{0,0,1280,720,1280*4,frame.pixels.data()};
  while(!ended&&tick<=target){uint8_t*pcm=nullptr;
  size_t size=0;
@@ -40,6 +42,7 @@ void Movie::update(){if(!video)return;
  stop();
  throw std::runtime_error("Movie decode: "+error);
  }if(rc==1)ended=true;
- }if(ended&&(!hasAudio||!audio.playing(7)))stop();
+ }if(kvideo_written_frames(video)!=before)frame.version.publish();
+ if(ended&&(!hasAudio||!audio.playing(7)))stop();
  }
 }

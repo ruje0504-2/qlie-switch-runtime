@@ -36,11 +36,17 @@ std::vector<ParticlePoint> particlePoints(const ParticleParameters&p,uint32_t la
  std::vector<ParticlePoint> result;
  if(p.count<.001f)return result;
  if(!std::isfinite(p.count)||p.count>32767)throw std::runtime_error("Invalid particle count");
- static const auto table=particleRandomTable();
- auto random=[&](uint32_t index){return float(double(table[index&1023]&0xffffff)/16777215.);};
+ static const auto table=[]{
+  const auto bits=particleRandomTable();
+  std::array<float,1024> normalized{};
+  for(size_t i=0;i<bits.size();++i)normalized[i]=float(double(bits[i]&0xffffff)/16777215.);
+  return normalized;
+ }();
+ auto random=[&](uint32_t index){return table[index&1023];};
  int divisions=std::max(1,rounded(p.divisions));
  int whole=int(p.count);float fraction=p.count-whole;
  if(fraction<.001f){fraction=1;whole--;}
+ result.reserve(size_t(whole+1));
  auto seed=(layerSeed&0xffff)*777u;
  int phaseBase=(100-100%divisions)*100;
  float phase[3];

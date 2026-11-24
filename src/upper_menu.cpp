@@ -4,8 +4,9 @@
 #include <cmath>
 namespace whj2 {
 UpperMenu::UpperMenu(qlie::Assets&assets):frame(image(assets.read("avg/uppermenu/メニューバー.png"))){
+ frame.version.publish();
  const char*names[]={"ゲームの終了","タイトルへ戻る","画面の切り替え"};
- for(unsigned i=0;i<3;i++){off[i]=image(assets.read(std::string("avg/uppermenu/")+names[i]+"_off.png"));on[i]=image(assets.read(std::string("avg/uppermenu/")+names[i]+"_on.png"));}
+ for(unsigned i=0;i<3;i++){off[i]=image(assets.read(std::string("avg/uppermenu/")+names[i]+"_off.png"));on[i]=image(assets.read(std::string("avg/uppermenu/")+names[i]+"_on.png"));off[i].version.publish();on[i].version.publish();}
 }
 void UpperMenu::move(int direction){if(shown)selected=(selected+direction%3+3)%3;}
 UpperMenu::Action UpperMenu::confirm(){return shown?Action(selected+1):None;}

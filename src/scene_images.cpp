@@ -20,6 +20,11 @@ namespace {
 float numeric(const std::string&s){return !s.empty()&&s[0]=='$'?float(std::stoul(s.substr(1),nullptr,16)):std::stof(s);
  }
 
+// Scene asset and UI-slot owners replace the entire image on change.
+std::shared_ptr<const Image> sceneBitmap(Image pixels){
+ pixels.version.publish();
+ return std::make_shared<const Image>(std::move(pixels));
+}
 struct Matrix3D {
  float m[3][4]={{1,0,0,0},{0,1,0,0},{0,0,1,0}};
  Vec3 point(Vec3 v)const{return {m[0][0]*v.x+m[0][1]*v.y+m[0][2]*v.z+m[0][3],m[1][0]*v.x+m[1][1]*v.y+m[1][2]*v.z+m[1][3],m[2][0]*v.x+m[2][1]*v.y+m[2][2]*v.z+m[2][3]};}
@@ -90,7 +95,7 @@ struct EmbeddedVideo {
  }
 };
 struct Composite {
- struct Element {std::shared_ptr<Image>image;std::shared_ptr<Model>mesh;std::string name;
+ struct Element {std::shared_ptr<const Image>image;std::shared_ptr<Model>mesh;std::string name;
  std::shared_ptr<Composite>nested;
  qlie::Bytes video;
  };
@@ -116,7 +121,7 @@ struct Composite {
     else if(m.data.size()>=4&&std::equal(m.data.begin(),m.data.begin()+4,"OggS")){e.video=std::move(m.data);
  }
     else if(m.data.size()>=12&&std::equal(m.data.begin(),m.data.begin()+12,"ARGBModel1.0"))e.mesh=std::make_shared<Model>(model(m.data));
-    else e.image=std::make_shared<Image>(image(m.data));
+    else e.image=sceneBitmap(image(m.data));
    }members.push_back(std::move(e));
  }
    else if(m.type.rfind("absnd",0)==0)sounds.push_back(std::move(m.data));
@@ -150,7 +155,7 @@ struct Composite {
   if((k.flags&0x7f)>8){warn("rectangle-blend="+std::to_string(k.flags));continue;}
   if(std::abs(k.scaleX)>=32700||std::abs(k.scaleY)>=32700){warn("rectangle-symbolic-size");continue;}
   // PE eaff0/ea798: rectangle dimensions are pixels, not image scale percentages.
-  static const Image white{1,1,{255,255,255,255}};
+  static const Image white=[]{Image pixel{1,1,{255,255,255,255}};pixel.version.publish();return pixel;}();
   auto shape=imagePlacement(k.x,k.y,k.scaleX,k.scaleY,k.rotationZ,k.anchorX/100,k.anchorY/100,1,1);
   queue.image(white,affine(parent,shape),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,k.textureFilter);
   continue;
@@ -290,11 +295,11 @@ std::string SceneImages::expand(std::string s,const std::string&type){auto&map=t
 void SceneImages::loadReplacement(Layer&layer,const std::string&path){
  layer.params["@replacement"]=path;
  if(path.empty()){layer.scriptReplacement=std::make_shared<Image>();return;}
- auto at=cache.find(path);if(at==cache.end())at=cache.emplace(path,std::make_shared<Image>(image(assets.read(path)))).first;
+ auto at=cache.find(path);if(at==cache.end())at=cache.emplace(path,sceneBitmap(image(assets.read(path)))).first;
  layer.scriptReplacement=at->second;
 }
-void SceneImages::uiSlot(const std::string&name,unsigned slot,const std::string&path){if(name.rfind("ui_",0)!=0)throw std::runtime_error("UI slot owner");auto i=cache.find(path);if(i==cache.end())i=cache.emplace(path,std::make_shared<Image>(image(assets.read(path)))).first;layers.at(name).uiSlots[slot]=i->second;}
-void SceneImages::uiSlot(const std::string&name,unsigned slot,const Image&value){if(name.rfind("ui_",0)!=0)throw std::runtime_error("UI slot owner");layers.at(name).uiSlots[slot]=std::make_shared<Image>(value);}
+void SceneImages::uiSlot(const std::string&name,unsigned slot,const std::string&path){if(name.rfind("ui_",0)!=0)throw std::runtime_error("UI slot owner");auto i=cache.find(path);if(i==cache.end())i=cache.emplace(path,sceneBitmap(image(assets.read(path)))).first;layers.at(name).uiSlots[slot]=i->second;}
+void SceneImages::uiSlot(const std::string&name,unsigned slot,const Image&value){if(name.rfind("ui_",0)!=0)throw std::runtime_error("UI slot owner");layers.at(name).uiSlots[slot]=sceneBitmap(value);}
 bool SceneImages::uiHit(const std::string&name,float x,float y)const{
  if(name.rfind("ui_",0)!=0)throw std::runtime_error("UI hit owner");
  auto found=layers.find(name);if(found==layers.end())return false;const auto&l=found->second;
@@ -450,7 +455,7 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  l.audioMilliseconds=-1;
  return true;
  }auto it=cache.find(path);
- if(it==cache.end())it=cache.emplace(path,std::make_shared<Image>(image(assets.read(path)))).first;
+ if(it==cache.end())it=cache.emplace(path,sceneBitmap(image(assets.read(path)))).first;
  l.pixels=it->second;
  if(loadBase())return true;
  l.composite.reset();
@@ -490,7 +495,7 @@ MessageStyle SceneImages::messageStyle()const{MessageStyle style;auto it=layers.
  pair("textarea",style.width,style.height);pair("fontsize",style.fontWidth,style.fontHeight);auto color=params.find("fontcolor");if(color!=params.end())style.color=uint32_t(numeric(color->second));return style;
 }
 bool SceneImages::messageVisible()const{auto it=layers.find("message");return it!=layers.end()&&it->second.params.at("show")=="true";}
-void SceneImages::setMessageImage(const Image&image,bool show){if(!layers.count("message"))command("^message,$window01");auto&layer=layers.at("message");layer.pixels=std::make_shared<Image>(image);
+void SceneImages::setMessageImage(const Image&image,bool show){if(!layers.count("message"))command("^message,$window01");auto&layer=layers.at("message");layer.pixels=sceneBitmap(image);
  if(show&&(layer.params["show"]!="true"||layer.params.count("@hiding"))){if(layer.composite&&findMotion(layer.composite->definition,"*Enable")){layer.params["motion"]="*Enable";layer.milliseconds=0;layer.audioMilliseconds=-1;}layer.params["show"]="true";layer.params.erase("@hiding");}
 }
 
@@ -571,9 +576,9 @@ void SceneImages::restore(const qlie::Bytes&b){StateReader r{b};
  if(it==composites.end())it=composites.emplace(l.path,std::make_shared<Composite>(assets.read(l.path),l.path,particleState)).first;
  l.composite=it->second;
  }else if(!l.path.empty()){auto it=cache.find(l.path);
- if(it==cache.end())it=cache.emplace(l.path,std::make_shared<Image>(image(assets.read(l.path)))).first;
+ if(it==cache.end())it=cache.emplace(l.path,sceneBitmap(image(assets.read(l.path)))).first;
  l.pixels=it->second;
- }if(l.composite&&l.params.count("@portrait")&&l.path!=l.params.at("@portrait")){auto portrait=l.params.at("@portrait");auto it=cache.find(portrait);if(it==cache.end())it=cache.emplace(portrait,std::make_shared<Image>(image(assets.read(portrait)))).first;l.pixels=it->second;}
+ }if(l.composite&&l.params.count("@portrait")&&l.path!=l.params.at("@portrait")){auto portrait=l.params.at("@portrait");auto it=cache.find(portrait);if(it==cache.end())it=cache.emplace(portrait,sceneBitmap(image(assets.read(portrait)))).first;l.pixels=it->second;}
  if(v3&&l.composite)l.composite->restoreIdentity(r);
  if(l.params.count("@replacement"))loadReplacement(l,l.params.at("@replacement"));
  next[name]=std::move(l);

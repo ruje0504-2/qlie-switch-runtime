@@ -3,6 +3,7 @@
 #include <SDL.h>
 #include <array>
 #include <atomic>
+#include "switch_threads.hpp"
 namespace whj2 {
 struct AudioStats {uint64_t frames,nonzero;};
 struct AudioPosition {uint64_t frame=0,length=0;bool loop=false,playing=false;};
@@ -14,6 +15,11 @@ private:
  std::array<float,6> userGains{{1,1,1,1,1,1}};
  SDL_AudioDeviceID device=0;std::array<Channel,ChannelCount>channels;std::atomic<uint64_t>frames{0},nonzero{0};
  static void callback(void*,Uint8*,int);
+#ifdef __SWITCH__
+ ThreadBinding mixerBinding;
+ std::atomic<bool> mixerBindingReady{false};
+ bool mixerBindingReported=false;
+#endif
 public:
  Audio();~Audio();Audio(const Audio&)=delete;Audio&operator=(const Audio&)=delete;
  void play(unsigned,const qlie::Bytes&,bool,float,unsigned fadeMs=0,const std::string&path="",unsigned category=6);
@@ -23,5 +29,8 @@ public:
  qlie::Bytes save();void restore(const qlie::Bytes&,qlie::Assets&);
  AudioPosition position(unsigned);void seek(unsigned,uint64_t milliseconds);void setLoop(unsigned,bool);void stop(unsigned);
  bool playing(unsigned);void stopAll();AudioStats stats()const;
+#ifdef __SWITCH__
+ void reportMixerBinding();
+#endif
 };
 }

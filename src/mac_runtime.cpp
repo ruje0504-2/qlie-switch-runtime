@@ -82,6 +82,10 @@ struct Frontend {
  whj2::Settings settings{assets};
  whj2::GameMenu gameMenu{assets,settings};
  std::vector<whj2::HistoryEntry>history;bool historyVoicePlayed=false;int historyVoiceCacheOffset=-1;
+ std::array<std::unique_ptr<whj2::MessageText>,4> historyText;
+ std::array<whj2::Image,4> historyTextImages;
+ std::array<int,4> historyRenderedLine{{-1,-1,-1,-1}};
+ unsigned fontGeneration=0,historyFontGeneration=UINT32_MAX;size_t historyEntryCount=SIZE_MAX;
  bool normalSkip=false,skipReadOnly=true,leftTrigger=false,rightTrigger=false,currentPageWasRead=false;std::string currentPageKey;
  unsigned selectedSlot=1;unsigned skipStart=0;unsigned autoPhase=0,autoPhaseFrame=0,titlePhase=0;
  bool manualSlotsScanned=false;unsigned latestManualSlot=1;
@@ -237,6 +241,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   title->reset(false,progress.extras());audio->stopAll();audio->playFile(assets,0,"music/wbgm06.ogg",true,255.f/256,0,0);warmNextScene(true);
  }
  void refreshFontPreviews(){
+  ++fontGeneration;
   whj2::MessageText preview(assets);whj2::MessageStyle style{400,50,20,20,0xffffff};
   preview.start("[spd,0]   美 少 女 万 華 鏡");auto sample=preview.render(font,style);
   preview.start("[spd,0]「サンプルテキスト」");gameMenu.setTextPreviews(std::move(sample),preview.render(font,style));
@@ -605,12 +610,17 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   gameMenu.historyOffset=std::clamp(gameMenu.historyOffset,0,gameMenu.historyMaxOffset);
   gameMenu.historyRows=int(std::min<size_t>(4,history.size()-size_t(gameMenu.historyOffset)));
   gameMenu.focus=std::clamp(gameMenu.focus,0,std::max(0,gameMenu.historyRows-1));
-  if(historyVoiceCacheOffset!=gameMenu.historyOffset){
-   historyVoiceCacheOffset=gameMenu.historyOffset;gameMenu.historyVoices.fill(false);
-   for(size_t row=0;row<4&&row+size_t(gameMenu.historyOffset)<history.size();row++){
+  if(historyVoiceCacheOffset!=gameMenu.historyOffset||historyEntryCount!=history.size()||historyFontGeneration!=fontGeneration){
+   historyVoiceCacheOffset=gameMenu.historyOffset;historyEntryCount=history.size();historyFontGeneration=fontGeneration;gameMenu.historyVoices.fill(false);gameMenu.historyTextOffset.fill(0);gameMenu.historyTextMax.fill(0);historyRenderedLine.fill(-1);
+   for(size_t row=0;row<4;row++){historyText[row].reset();historyTextImages[row]={};if(row+size_t(gameMenu.historyOffset)>=history.size())continue;
     auto&entry=history[history.size()-1-size_t(gameMenu.historyOffset)-row];
     gameMenu.historyVoices[row]=!entry.voice.empty()&&bool(voices->resolve(entry.voice));
+    historyText[row]=std::make_unique<whj2::MessageText>(assets,true);historyText[row]->start(entry.text);historyText[row]->reveal();
+    auto lines=historyText[row]->lineCount(whj2::MessageStyle{920,104,26,26,0xffffff});gameMenu.historyTextMax[row]=int(lines>4?lines-4:0);
    }
+  }
+  for(int row=0;row<gameMenu.historyRows;row++)if(historyRenderedLine[row]!=gameMenu.historyTextOffset[row]){
+   historyTextImages[row]=historyText[row]->render(font,whj2::MessageStyle{920,104,26,26,0xffffff},size_t(gameMenu.historyTextOffset[row]));historyTextImages[row].version.publish();historyRenderedLine[row]=gameMenu.historyTextOffset[row];
   }
  }
  refreshSlotFlags();if(frameTarget)gameMenu.draw(*frameTarget);else gameMenu.draw(pixels);
@@ -625,7 +635,11 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(gameMenu.panel==UI::Settings&&gameMenu.allowSceneReturn)line("回想を終了",520,680,26,gameMenu.focus==16?0xffff88:0xffffff);
  if(gameMenu.panel==UI::Save||gameMenu.panel==UI::Load){for(int i=0;i<8;i++){unsigned slot=unsigned(gameMenu.page*8+i+1);int x=i<4?198:834,y=136+(i%4)*135;line("No."+std::to_string(slot),x,y,16,0xff5555);auto&preview=slotPreview(slot);if(preview.exists){if(!preview.thumbnail.pixels.empty()){whj2::RenderQueue queue;queue.image(preview.thumbnail,whj2::imagePlacement(i<4?27:660,137+(i%4)*135,1,1,0,0,0,160,90),0,255,0,0xffffff);if(frameTarget)queue.draw(*frameTarget,1280,720);else queue.draw(pixels,1280,720);}auto&chars=preview.excerpt;int px=x;for(size_t n=0;n<chars.size()&&n<23;n++){drawGlyph(chars[n],px,y+22,18,18,0xffffff);px+=chars[n]<128?9:18;}}else line("NO DATA",x,y+24,18,0x999999);}
  if(!status.empty())line(status,30,677,18);}
- if(gameMenu.panel==UI::History){size_t offset=std::min(size_t(gameMenu.historyOffset),history.size());for(size_t row=0;row<4&&row+offset<history.size();row++){auto&entry=history[history.size()-1-offset-row];int y=64+int(3-row)*149;line(whj2::messageDisplayName(entry.speaker),230,y,24);int x=230,cy=y+30;for(auto cp:utf8(entry.text)){int width=cp<128?12:24;if(cp==10||x+width>1140){x=230;cy+=30;if(cp==10)continue;}if(cy>=y+140)break;drawGlyph(cp,x,cy,width,24,0xffffff);x+=width;}}}
+ if(gameMenu.panel==UI::History){size_t offset=size_t(gameMenu.historyOffset);whj2::RenderQueue queue;for(int row=0;row<gameMenu.historyRows;row++){
+  auto&entry=history[history.size()-1-offset-size_t(row)];int y=64+(3-row)*149;line(whj2::messageDisplayName(entry.speaker),230,y,26,0x69faff);
+  auto&body=historyTextImages[row];queue.image(body,whj2::imagePlacement(230,y+30,1,1,0,0,0,body.width,body.height),0,255,0,0xffffff);
+ }if(frameTarget)queue.draw(*frameTarget,1280,720);else queue.draw(pixels,1280,720);}
+
  }
 
  KImage*newImage(){static KImage dst;dst={0,0,1280,720,1280*4,pixels.data()};return &dst;}
@@ -824,7 +838,7 @@ else if(e.type==SDL_FINGERDOWN){if(!fingerActive){fingerActive=true;fingerId=e.t
  else if(e.type==SDL_FINGERMOTION&&fingerActive&&e.tfinger.fingerId==fingerId&&fingerUiDrag){touchDrag(e.tfinger.x,e.tfinger.y,false);}
  else if(e.type==SDL_FINGERUP&&fingerActive&&e.tfinger.fingerId==fingerId){fingerActive=false;
  float dx=(e.tfinger.x-fingerX)*1280,dy=(e.tfinger.y-fingerY)*720;
- if(fingerUiDrag){touchDrag(e.tfinger.x,e.tfinger.y,false);gameMenu.endDrag();fingerUiDrag=false;applySettings();}
+ if(fingerUiDrag){touchDrag(e.tfinger.x,e.tfinger.y,false);gameMenu.endDrag();fingerUiDrag=false;if(gameMenu.panel==whj2::GameMenu::Settings)applySettings();}
  else if(!menu&&!gameMenu.visible()&&upperMenu->swipe(dx,dy)){std::cerr<<"INPUT downward swipe upper menu\n";}
  else if(std::abs(dx)<24&&std::abs(dy)<24){int w,h;windowSize(&w,&h);std::cerr<<"INPUT touch\n";pointer(int(e.tfinger.x*w),int(e.tfinger.y*h));}
  }else if(e.type==SDL_CONTROLLERAXISMOTION&&e.caxis.axis==SDL_CONTROLLER_AXIS_LEFTY){titleAxisY=std::abs(e.caxis.value)>6000?e.caxis.value/32767.f:0;}else if(e.type==SDL_CONTROLLERAXISMOTION&&e.caxis.axis==SDL_CONTROLLER_AXIS_LEFTX){titleAxis=std::abs(e.caxis.value)>6000?e.caxis.value/32767.f:0;}else if(e.type==SDL_CONTROLLERAXISMOTION&&e.caxis.axis==SDL_CONTROLLER_AXIS_TRIGGERLEFT){bool held=e.caxis.value>16000;if(held&&!leftTrigger)toggleAuto();leftTrigger=held;}else if(e.type==SDL_CONTROLLERAXISMOTION&&e.caxis.axis==SDL_CONTROLLER_AXIS_TRIGGERRIGHT){bool held=e.caxis.value>16000;if(held&&!rightTrigger)toggleSkip(true);rightTrigger=held;}else if(e.type==SDL_CONTROLLERDEVICEADDED)controllerAdded(e.cdevice.which);

@@ -50,7 +50,9 @@ size_t MessageText::visible()const{return size_t(std::upper_bound(glyphs.begin()
 size_t MessageText::timedCharacters(size_t first,size_t last)const{first=std::min(first,glyphs.size());last=std::min(last,glyphs.size());size_t count=0;for(size_t i=first;i<last;++i)count+=glyphs[i].codepoint!='\n';return count;}
 bool MessageText::finished()const{return visible()==glyphs.size();}
 bool MessageText::reveal(){if(finished())return false;elapsed=glyphs.empty()?0:glyphs.back().deadline;return true;}
-Image MessageText::render(KFont*font,const MessageStyle&style)const{if(!style.width||!style.height)throw std::runtime_error("Message surface dimensions");Image out{style.width,style.height,qlie::Bytes(size_t(style.width)*style.height*4)};KImage dst{0,0,out.width,out.height,size_t(out.width)*4,out.pixels.data()};unsigned x=0,y=0;size_t count=visible();bool paragraphStart=true;
+std::vector<MessageText::PositionedGlyph> MessageText::layout(const MessageStyle&style)const{
+ if(!style.width||!style.fontWidth||!style.fontHeight)throw std::runtime_error("Message layout dimensions");
+ std::vector<PositionedGlyph> positions;unsigned x=0,y=0;size_t count=visible();bool paragraphStart=true;
  for(size_t i=0;i<count;++i){uint32_t cp=glyphs[i].codepoint;
   if(cp=='\n'){x=0;y+=style.fontHeight;paragraphStart=true;continue;}
   if(glyphs[i].centeredRun){unsigned width=0;for(size_t j=i;j<i+glyphs[i].centeredRun;++j)width+=glyphs[j].codepoint<128?std::max(1u,style.fontWidth/2):style.fontWidth;x=style.width>width?(style.width-width)/2:0;paragraphStart=false;}
@@ -61,9 +63,16 @@ Image MessageText::render(KFont*font,const MessageStyle&style)const{if(!style.wi
   const unsigned remaining=(style.width-std::min(x,style.width))/std::max(1u,style.fontWidth);
   const bool earlyWrap=storyLineBreaking&&!startForbidden&&remaining<=lineReserve+unsigned(endForbidden);
   if(x+width>style.width||(x&&earlyWrap)){x=storyLineBreaking?style.fontWidth:0;y+=style.fontHeight;}
-  if(y+style.fontHeight>style.height)break;
-  kfont_draw_outline(font,&dst,cp,int(x),int(y),width,style.fontHeight,style.color);x+=width;
- }return out;
+  positions.push_back({cp,x,y,width});x+=width;
+ }return positions;
+}
+size_t MessageText::lineCount(const MessageStyle&style)const{auto positions=layout(style);return positions.empty()?0:size_t(positions.back().y/style.fontHeight)+1;}
+Image MessageText::render(KFont*font,const MessageStyle&style,size_t firstLine)const{
+ if(!style.width||!style.height)throw std::runtime_error("Message surface dimensions");
+ Image out{style.width,style.height,qlie::Bytes(size_t(style.width)*style.height*4)};KImage dst{0,0,out.width,out.height,size_t(out.width)*4,out.pixels.data()};
+ const size_t top=firstLine*style.fontHeight;
+ for(auto&glyph:layout(style)){if(glyph.y<top||size_t(glyph.y)-top+style.fontHeight>style.height)continue;kfont_draw_outline(font,&dst,glyph.codepoint,int(glyph.x),int(size_t(glyph.y)-top),glyph.width,style.fontHeight,style.color);}
+ return out;
 }
 qlie::Bytes MessageText::save()const{StateWriter w;w.str("WHJ2-message-1");w.str(text);w.f(float(elapsed));w.f(float(speed));return w.bytes;}
 void MessageText::restore(const qlie::Bytes&b){StateReader r{b};if(r.str()!="WHJ2-message-1")throw std::runtime_error("Message state version");text=r.str();elapsed=r.f();speed=r.f();r.end();index();}

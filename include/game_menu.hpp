@@ -11,6 +11,7 @@ class GameMenu {
  int volumeTestAt(float,float);
  int qualityAt(float,float);
  int draggedSlider=-1;
+ int historyDragRow=-1,historyDragOffset=0;float historyDragY=0;
  int promptFocus=0;
  std::array<Image,2> textPreviews;
  void put(RenderQueue&,const std::string&,float,float,bool center=false,unsigned opacity=255);
@@ -23,14 +24,15 @@ public:
  Action requested=Nothing;
  bool settingsDirty=false,allowSceneReturn=false;
  std::array<bool,4> historyVoices{};
+ std::array<int,4> historyTextOffset{},historyTextMax{};
  std::array<bool,8> populatedSlots{};
  int historyVoiceRow=-1,historyMaxOffset=0,historyRows=0;
  unsigned testVolumeCategory=0;
  int fontCount=1;
  explicit GameMenu(qlie::Assets&a,whj2::Settings&s):assets(a),settings(s){}
  void setTextPreviews(Image font,Image window){font.version.publish();window.version.publish();textPreviews[0]=std::move(font);textPreviews[1]=std::move(window);}
- void open(Panel p){panel=p;focus=p==Settings?3:0;asking=false;historyOffset=0;historyVoiceRow=-1;historyVoices.fill(false);}
- void close(){panel=None;asking=false;draggedSlider=-1;}
+ void open(Panel p){historyDragRow=-1;panel=p;focus=p==Settings?3:0;asking=false;historyOffset=0;historyVoiceRow=-1;historyVoices.fill(false);historyTextOffset.fill(0);historyTextMax.fill(0);}
+ void close(){panel=None;asking=false;draggedSlider=-1;historyDragRow=-1;}
  bool visible()const{return panel!=None||asking;}
  void ask(Action a){requested=a;promptFocus=focus;asking=true;focus=0;draggedSlider=-1;}
  void dismissPrompt(){asking=false;focus=promptFocus;}
@@ -38,7 +40,7 @@ public:
  void move(int dx,int dy);
  Action confirm();
  Action tap(float,float);
- bool beginDrag(float,float);bool drag(float,float);void endDrag(){draggedSlider=-1;}
+ bool beginDrag(float,float);bool drag(float,float);void endDrag(){draggedSlider=-1;historyDragRow=-1;}
  void draw(qlie::Bytes&);void drawAutoButton(qlie::Bytes&,bool);void drawSkipButton(qlie::Bytes&,bool);
  void draw(RenderTarget&);void drawAutoButton(RenderTarget&,bool);void drawSkipButton(RenderTarget&,bool);
 };

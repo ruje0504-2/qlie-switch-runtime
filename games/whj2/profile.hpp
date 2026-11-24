@@ -80,10 +80,12 @@ inline const StoryProfile story{
 inline void applySentenceTiming(Event& event){
  if(event.line==476&&event.file=="scenario/本編/w03_01.s"&&
     event.value=="^sentence,$overlap,wait:click")
-  event.value="^sentence,fade:overlap:1500,wait:click:1500";
+  event.value="^sentence,fade:overlap:1000,wait:click:1000";
  if(event.file!="scenario/本編/w@16_03.s")return;
+ if(event.line==905&&event.value=="^sentence,$overlap_long")
+  event.value="^sentence,fade:overlap:2000";
  if(event.line==913&&event.value=="^sentence,wait:click:1000")
-  event.value="^sentence,wait:click:1500";
+  event.value="^sentence,wait:click:2000";
  if(event.line==915&&event.value=="^sentence,$overlap_long")
   event.value="^sentence,$overlap_long,wait:click:1500";
 }

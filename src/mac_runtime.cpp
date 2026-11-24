@@ -870,7 +870,8 @@ controllerKey(e.cbutton.button);
   if(titleStarting&&titleStartElapsed>=900&&!startMidCaptured){snapshot("start-cloud-middle.bmp");if(pixels==touchSavedStory)throw std::runtime_error("Cloud transition did not change pixels");startMidCaptured=true;}
   if(titleStarting&&titleStartElapsed>=2100&&!startEndCaptured){snapshot("start-cloud-black.bmp");for(size_t i=0;i<pixels.size();i++)if(i%4!=3&&pixels[i])throw std::runtime_error("Cloud transition did not reach black");startEndCaptured=true;}
   if(frames>1&&!titleStarting){if(!startMidCaptured||!startEndCaptured||menu||currentPageKey.empty())throw std::runtime_error("Start transition sequence incomplete");snapshot("start-story.bmp");showTitle();title->skipIntro();activate();if(!titleStarting)throw std::runtime_error("Second start transition absent");activate();if(titleStarting||menu)throw std::runtime_error("Confirm did not skip title exit");std::cerr<<"TITLE START PASS cloud/middle/black/2500ms/story/confirm-skip\n";done=true;}
-  if(++frames>=smoke&&!done)throw std::runtime_error("Start transition timeout");continue;
+  if(++frames>=smoke&&!done)throw std::runtime_error("Start transition timeout");
+  continue;
  }
  if(smoke&&gameMenu.visible()&&panelDraws!=1)throw std::runtime_error("Panel composited more than once");
  if(movieOnly&&!movieCaptured&&movie->elapsedMs()>=1000){snapshot("movie.bmp");

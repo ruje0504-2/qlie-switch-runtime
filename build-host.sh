@@ -65,7 +65,7 @@ $cxx -std=c++17 $common $($pc --cflags sdl2 libpng libjpeg) src/qlie.cpp src/sto
 
 $cxx -std=c++17 $common $($pc --cflags libpng libjpeg) src/qlie.cpp src/story.cpp src/image.cpp src/animation.cpp src/particles.cpp src/scene_images.cpp src/model.cpp src/scene_transition.cpp src/sentence_wait.cpp src/gradient_mask.cpp src/render_queue.cpp tools/transition_probe.cpp build/video.o $($pc --libs libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -o build/transition-probe
 
-$cxx -std=c++17 $common src/qlie.cpp src/story.cpp src/scene_transition.cpp src/sentence_wait.cpp tools/wait_probe.cpp -o build/wait-probe
+$cxx -std=c++17 $common $($pc --cflags libpng libjpeg) src/qlie.cpp src/story.cpp src/scene_transition.cpp src/sentence_wait.cpp src/image.cpp src/gradient_mask.cpp src/render_queue.cpp tools/wait_probe.cpp $($pc --libs libpng libjpeg) -o build/wait-probe
 
 $cxx -std=c++17 $common $($pc --cflags freetype2 libpng libjpeg) src/qlie.cpp src/story.cpp src/image.cpp src/animation.cpp src/particles.cpp src/scene_images.cpp src/model.cpp src/message_text.cpp src/gradient_mask.cpp src/render_queue.cpp tools/message_probe.cpp build/font.o build/video.o $($pc --libs freetype2 libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -o build/message-probe
 

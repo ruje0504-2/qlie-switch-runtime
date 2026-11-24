@@ -5,7 +5,7 @@ class SentenceWait {
  enum class Stage {Idle,Delay,Message,Ready};
  Stage stage=Stage::Idle;
  std::string mode="message";
- double duration=0,remaining=0;
+ double duration=0,remaining=0,skipDuration=0,skipRemaining=0;
  bool automatic=false,interruptible=false,message=false,continuation=false,voiceBound=false;
  int finishDelay();
 public:
@@ -13,6 +13,8 @@ public:
  bool property(const std::vector<std::string>&);
  void fromFade(double);void page(bool hasText=true,bool voicePlaying=false);void native(bool clickable,double milliseconds);
  Action tick(double milliseconds,bool voicePlaying=false);Action confirm();Action force();void cancel();
+ void elapseSkip(double milliseconds);
+ Action skip();
  bool waitingForMessage()const{return stage==Stage::Message;}
  bool blocksClick()const{return stage==Stage::Delay&&!interruptible;}
  bool prewaiting()const{return stage==Stage::Delay;}

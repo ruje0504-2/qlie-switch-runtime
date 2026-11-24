@@ -866,11 +866,12 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  else if(!opening&&menu&&!titleStarting&&!gameMenu.visible())title->update(double(now-lastUpdate));
  if(!menu&&!movie->playing()&&!gameMenu.visible()&&!upperMenu->visible()){
  images->update(double(now-lastUpdate));
+ sentenceWait.elapseSkip(double(now-lastUpdate));
  if(story.state.awaiting){choiceScreen->update(double(now-lastUpdate));if(choiceScreen->takeAutoSaveRequest())autoSaveChoice();int chosen=choiceScreen->takeConfirmed();if(chosen>=0){story.choose(unsigned(chosen));next();}}
  messageText->update(double(now-lastUpdate));if(messageText->visible()!=lastMessageVisible)refreshMessage();
  transition->update(double(now-lastUpdate));
  autoPlay.tick(double(now-lastUpdate),messageText->visible(),settings.get("AutoTextWait"),settings.get("TextSpeed"),messageText->timedCharacters(autoPlay.countedGlyphs(),messageText->visible()));
- auto waitAction=sentenceWait.tick(double(now-lastUpdate),audio->playing(3));
+ auto waitAction=normalSkip?whj2::SentenceWait::None:sentenceWait.tick(double(now-lastUpdate),audio->playing(3));
  if(waitAction==whj2::SentenceWait::None&&sentenceWait.waitingForMessage()&&autoPlay.ready(messageText->finished(),audio->playing(3),settings.get("AutoPlayVoiceWait")))waitAction=sentenceWait.force();
  if(waitAction==whj2::SentenceWait::Next)next();else if(waitAction==whj2::SentenceWait::Resume)next(true);
  playSceneSounds();
@@ -917,7 +918,7 @@ else if(e.type==SDL_FINGERDOWN){if(!fingerActive){fingerActive=true;fingerId=e.t
 #ifndef __SWITCH__
 controllerKey(e.cbutton.button);
 #endif
-}}recordCurrentRead();if(normalSkip&&!menu&&!gameMenu.visible()&&!upperMenu->visible()&&!movie->playing()&&!story.state.awaiting){hidden=false;messageText->reveal();refreshMessage();auto action=sentenceWait.force();if(action==whj2::SentenceWait::Next)next();else if(action==whj2::SentenceWait::Resume)next(true);}
+}}recordCurrentRead();if(normalSkip&&!menu&&!gameMenu.visible()&&!upperMenu->visible()&&!movie->playing()&&!story.state.awaiting){hidden=false;if(messageText->reveal())refreshMessage();auto action=sentenceWait.skip();if(action==whj2::SentenceWait::Next)next();else if(action==whj2::SentenceWait::Resume)next(true);}
  draw();
  if(smoke&&startTransitionTest){
   if(frames==1){activate();if(!titleStarting||!menu)throw std::runtime_error("Start bypassed cloud transition");snapshot("start-cloud-begin.bmp");touchSavedStory=pixels;}
@@ -933,15 +934,19 @@ controllerKey(e.cbutton.button);
  std::cerr<<"MOVIE screenshot audio_clock_ms="<<movie->elapsedMs()<<"\n";
  }if(smoke){if(readSkipTest){
  if(frames==1){activate();if(currentPageKey.empty()||currentPageWasRead)throw std::runtime_error("Read skip needs fresh progress");settings.set("SkipMode",1);toggleSkip();if(normalSkip)throw std::runtime_error("Unread page allowed read-only skip");messageText->reveal();hidden=true;recordCurrentRead();if(progress.wasRead(currentPageKey))throw std::runtime_error("Hidden text marked read");hidden=false;recordCurrentRead();auto key=currentPageKey;whj2::Progress restored;restored.restore(qlie::file(saveDir+"/system.progress"));if(!restored.wasRead(key))throw std::runtime_error("Read page not persisted");for(unsigned version=1;version<=2;version++){whj2::StateWriter old;old.str("WHJ2-progress-"+std::to_string(version));old.n(0);old.n(0);if(version==2)old.n(0);restored.restore(old.bytes);if(restored.wasRead(key))throw std::runtime_error("Legacy progress invented read history");}save(1);skipStart=advances;SDL_Event left{};left.type=SDL_CONTROLLERAXISMOTION;left.caxis.axis=SDL_CONTROLLER_AXIS_TRIGGERRIGHT;left.caxis.value=32767;SDL_PushEvent(&left);}
- if(frames==3){if(normalSkip||advances<=skipStart)throw std::runtime_error("Fresh-read ZR did not start and stop at unread page");load(1);if(!currentPageWasRead)throw std::runtime_error("Read page lost on load");toggleSkip();if(!normalSkip)throw std::runtime_error("Read page refused skip");}
- if(frames==10){if(normalSkip||advances<=skipStart||currentPageWasRead)throw std::runtime_error("Read skip did not stop at unseen page");messageText->reveal();recordCurrentRead();pointer(1200,700);if(!normalSkip)throw std::runtime_error("Fresh-read touch skip did not enable without load");skipStart=advances;}
+ if(frames==3){
+  if(!normalSkip||advances!=skipStart)throw std::runtime_error("Fast-forward bypassed the opening transition wait");
+  sentenceWait.elapseSkip(10000); // Advance the test clock before checking the input mappings.
+ }
+ if(frames==4){if(normalSkip||advances<=skipStart)throw std::runtime_error("Fresh-read ZR did not start and stop at unread page");load(1);if(!currentPageWasRead)throw std::runtime_error("Read page lost on load");toggleSkip();if(!normalSkip)throw std::runtime_error("Read page refused skip");sentenceWait.elapseSkip(10000);}
+ if(frames==10){if(normalSkip||advances<=skipStart||currentPageWasRead)throw std::runtime_error("Read skip did not stop at unseen page");messageText->reveal();recordCurrentRead();pointer(1200,700);if(!normalSkip)throw std::runtime_error("Fresh-read touch skip did not enable without load");sentenceWait.elapseSkip(10000);skipStart=advances;}
  if(frames==12){if(normalSkip||advances<=skipStart)throw std::runtime_error("Fresh-read touch skip did not stop at unread page");skipStart=advances;rightTrigger=false;SDL_Event e{};e.type=SDL_CONTROLLERAXISMOTION;e.caxis.axis=SDL_CONTROLLER_AXIS_TRIGGERRIGHT;e.caxis.value=32767;SDL_PushEvent(&e);}
  if(frames==14){SDL_Event e{};e.type=SDL_CONTROLLERAXISMOTION;e.caxis.axis=SDL_CONTROLLER_AXIS_TRIGGERRIGHT;SDL_PushEvent(&e);if(advances!=skipStart||normalSkip)throw std::runtime_error("ZR skipped unread page");}
  if(frames==17){settings.set("SkipMode",0);SDL_Event e{};e.type=SDL_CONTROLLERAXISMOTION;e.caxis.axis=SDL_CONTROLLER_AXIS_TRIGGERRIGHT;e.caxis.value=32767;SDL_PushEvent(&e);skipStart=advances;}
- if(frames==18&&!normalSkip)throw std::runtime_error("ZR all-text skip refused");
+ if(frames==18){if(!normalSkip)throw std::runtime_error("ZR all-text skip refused");sentenceWait.elapseSkip(10000);}
  if(frames==22){draw();snapshot("read-skip-scene.bmp");}
- if(frames==23){if(advances<=skipStart)throw std::runtime_error("All-text skip did not advance");back();if(normalSkip)throw std::runtime_error("B did not cancel skip");openPanel(whj2::GameMenu::Settings);performUi(gameMenu.tap(410,442));if(settings.get("SkipMode")!=1)throw std::runtime_error("Read-only setting touch");whj2::Settings copy(assets);copy.restore(qlie::file(saveDir+"/settings.cfg"));if(copy.get("SkipMode")!=1)throw std::runtime_error("Skip mode not persisted");draw();snapshot("read-skip-settings.bmp");gameMenu.close();load(1);pointer(1200,700);if(!normalSkip)throw std::runtime_error("Original skip button did not activate");}
- if(frames==45){if(normalSkip)throw std::runtime_error("Touch skip did not stop at unread text");std::cerr<<"READ SKIP PASS fresh-read ZR and touch without reload / persisted pages / progress1-2 migration / flow2 restore / unread stop / ZR unread stop / all mode / B cancel / original touch button\n";done=true;}
+ if(frames==23){if(advances<=skipStart)throw std::runtime_error("All-text skip did not advance");back();if(normalSkip)throw std::runtime_error("B did not cancel skip");openPanel(whj2::GameMenu::Settings);performUi(gameMenu.tap(410,442));if(settings.get("SkipMode")!=1)throw std::runtime_error("Read-only setting touch");whj2::Settings copy(assets);copy.restore(qlie::file(saveDir+"/settings.cfg"));if(copy.get("SkipMode")!=1)throw std::runtime_error("Skip mode not persisted");draw();snapshot("read-skip-settings.bmp");gameMenu.close();load(1);pointer(1200,700);if(!normalSkip)throw std::runtime_error("Original skip button did not activate");sentenceWait.elapseSkip(10000);}
+ if(frames==45){if(normalSkip)throw std::runtime_error("Touch skip did not stop at unread text");std::cerr<<"READ SKIP PASS opening transition wait / fresh-read ZR and touch without reload / persisted pages / progress1-2 migration / flow2 restore / unread stop / ZR unread stop / all mode / B cancel / original touch button\n";done=true;}
  if(++frames>=smoke&&!done){throw std::runtime_error("Read skip test timeout");}continue;
  }if(replayReturnTest){
  if(frames==1){openReplay(0);replayScreen->update(300);replayAction(replayScreen->confirm());if(!replayActive)throw std::runtime_error("Return test needs unlocked replay entry");}

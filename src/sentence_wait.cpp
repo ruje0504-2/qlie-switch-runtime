@@ -24,6 +24,9 @@ void SentenceWait::page(bool hasText,bool voicePlaying){cancel();
  skipRemaining=std::max(0.,skipDuration);skipDuration=0;message=hasText&&(mode=="message"||mode=="click"||mode=="wait");interruptible=mode=="click"||mode=="clickonly"||mode=="voice";
  remaining=mode=="message"||mode=="skip"?0:std::max(0.,duration);voiceBound=mode=="voice"&&voicePlaying;if(mode=="voice"&&!voicePlaying)remaining=250;
  stage=remaining>0?Stage::Delay:message?Stage::Message:Stage::Ready;
+ // Each sentence starts from the script's default unless it set its own wait.
+ mode="message";
+ duration=0;
 }
 void SentenceWait::native(bool clickable,double ms){cancel();continuation=true;interruptible=clickable;remaining=std::max(0.,ms);stage=remaining>0?Stage::Delay:Stage::Ready;}
 int SentenceWait::finishDelay(){if(message){stage=Stage::Message;return None;}auto action=continuation?Resume:Next;cancel();return action;}
@@ -37,5 +40,8 @@ void SentenceWait::elapseSkip(double milliseconds){
 }
 SentenceWait::Action SentenceWait::skip(){return skipRemaining>0?None:force();}
 qlie::Bytes SentenceWait::save()const{StateWriter w;w.str("WHJ2-wait-2");w.str(mode);w.f(float(duration));w.f(float(remaining));w.n(unsigned(stage));w.n(automatic);w.n(interruptible);w.n(message);w.n(continuation);w.n(voiceBound);w.f(float(skipDuration));w.f(float(skipRemaining));return w.bytes;}
-void SentenceWait::restore(const qlie::Bytes&b){StateReader r{b};auto version=r.str();if(version!="WHJ2-wait-1"&&version!="WHJ2-wait-2")throw std::runtime_error("Wait state version");mode=r.str();duration=r.f();remaining=r.f();auto value=r.n();if(value>3)throw std::runtime_error("Wait stage");stage=Stage(value);automatic=r.n()!=0;interruptible=r.n()!=0;message=r.n()!=0;continuation=r.n()!=0;voiceBound=r.n()!=0;skipDuration=skipRemaining=0;if(version=="WHJ2-wait-2"){skipDuration=r.f();skipRemaining=r.f();}r.end();}
+void SentenceWait::restore(const qlie::Bytes&b){StateReader r{b};auto version=r.str();if(version!="WHJ2-wait-1"&&version!="WHJ2-wait-2")throw std::runtime_error("Wait state version");mode=r.str();duration=r.f();remaining=r.f();auto value=r.n();if(value>3)throw std::runtime_error("Wait stage");stage=Stage(value);automatic=r.n()!=0;interruptible=r.n()!=0;message=r.n()!=0;continuation=r.n()!=0;voiceBound=r.n()!=0;skipDuration=skipRemaining=0;if(version=="WHJ2-wait-2"){skipDuration=r.f();skipRemaining=r.f();}r.end();
+ // Older snapshots also kept the already-applied page parameters here.
+ if(!continuation&&stage!=Stage::Idle){mode="message";duration=0;}
+}
 }

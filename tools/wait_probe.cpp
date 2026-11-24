@@ -2,6 +2,7 @@
 #include "sentence_wait.hpp"
 #include "scene_transition.hpp"
 #include "story.hpp"
+#include "state_io.hpp"
 #include <iostream>
 #include <stdexcept>
 void require(bool ok,const char*message){if(!ok)throw std::runtime_error(message);}
@@ -26,6 +27,21 @@ int main(int argc,char**argv){try{if(argc!=2)return 2;qlie::Assets assets(argv[1
  auto legacy=skipState;legacy[8+std::string("WHJ2-wait-1").size()-1]='1';legacy.resize(legacy.size()-16);
  restored.restore(legacy);require(restored.skip()==wait.Next,"Legacy wait state did not restore");
  wait.page();require(wait.skip()==wait.Next,"Skip duration persisted into the next unconfigured page");
+ fade.command("^sentence,wait:clickonly:7000:0",frame,&wait);wait.page();
+ require(wait.confirm()==wait.Next,"Original click-only wait did not consume its click");
+ wait.page();
+ require(wait.waitingForMessage()&&wait.tick(7000)==wait.None&&wait.confirm()==wait.Next,
+         "Unconfigured page inherited the previous click-only wait");
+ whj2::StateWriter oldPage;
+ oldPage.str("WHJ2-wait-1");oldPage.str("clickonly");oldPage.f(7000);oldPage.f(2000);
+ for(auto v:{1,0,1,0,0,0})oldPage.n(v);
+ restored.restore(oldPage.bytes);
+ require(restored.tick(1999)==wait.None&&restored.tick(1)==wait.Next,"Legacy active wait lost its remaining delay");
+ restored.page();require(restored.waitingForMessage(),"Legacy page parameters leaked into its successor");
+ wait.property({"wait","waitonly","300"});wait.native(true,20);
+ require(wait.confirm()==wait.Resume,"Native wait did not resume");
+ wait.page();require(wait.tick(299)==wait.None&&wait.tick(1)==wait.Next,
+                     "Native continuation lost the pending sentence wait");
  wait.property({"wait","skip"});wait.page();require(wait.tick(0)==wait.Next,"Skip did not continue");
  wait.native(false,1000);require(wait.confirm()==wait.None&&wait.tick(1000)==wait.Resume,"Native fixed continuation");wait.native(true,1000);require(wait.confirm()==wait.Resume,"Native click continuation");
  wait.property({"wait","voice","5000"});wait.page(true,false);require(wait.tick(249)==wait.None&&wait.tick(1)==wait.Next,"Missing voice fallback");

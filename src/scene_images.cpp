@@ -4,6 +4,7 @@
 #include "state_io.hpp"
 #include "animation.hpp"
 #include "render_queue.hpp"
+#include "gradient_mask.hpp"
 #include <set>
 extern "C" {
 #include "video.h"
@@ -60,6 +61,7 @@ struct Composite {
  std::string path;
  mutable std::set<std::string>warnings;
  mutable std::map<size_t,std::unique_ptr<EmbeddedVideo>>clips;
+ mutable std::map<size_t,Image>maskedImages;
  explicit Composite(const qlie::Bytes&bytes,const std::string&name,uint32_t&randomState):path(name){
   identity=particleRandomNext(randomState);
   bool metadata=false;
@@ -81,7 +83,7 @@ struct Composite {
   }
   if(!metadata)throw std::runtime_error("Composite lacks animation metadata "+name);
   for(auto&motion:definition.motions)for(auto&layer:motion.layers){if(layer.mode>2)warn("layer-mode="+std::to_string(layer.mode));
- for(auto&k:layer.keys)if(k[4]!=0&&k[4]!=1&&k[4]!=4&&k[4]!=15&&k[4]!=16&&k[4]!=20)warn("primitive="+std::to_string(k[4]));
+ for(auto&k:layer.keys)if(k[4]!=0&&k[4]!=1&&k[4]!=4&&k[4]!=10&&k[4]!=15&&k[4]!=16&&k[4]!=20)warn("primitive="+std::to_string(k[4]));
  }
  }
  void saveIdentity(StateWriter&w)const{w.n(identity);w.n(motionIdentities.size());for(auto v:motionIdentities)w.n(v);for(auto&e:members)if(e.nested)e.nested->saveIdentity(w);}
@@ -111,6 +113,27 @@ struct Composite {
   static const Image white{1,1,{255,255,255,255}};
   auto shape=imagePlacement(k.x,k.y,k.scaleX,k.scaleY,k.rotationZ,k.anchorX/100,k.anchorY/100,1,1);
   queue.image(white,affine(parent,shape),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
+  continue;
+ }
+ if(k.kind==10){
+  if(k.resource>=members.size()||k.childMotion>=members.size())throw std::runtime_error("Mask image index "+path);
+  const auto&source=members[k.resource].image;const auto&mask=members[k.childMotion].image;
+  if(!source||!mask){warn("mask-nonbitmap-resource");continue;}
+  bool rotated=false;for(auto&w:k.unsupported)if(w=="3d-rotation")rotated=true;
+  if(rotated){warn("mask-3d-rotation");continue;}
+  auto&output=maskedImages[index];output.width=source->width;output.height=source->height;output.pixels.resize(source->pixels.size());
+  float width=k.mask.width?k.mask.width:source->width,height=k.mask.height?k.mask.height:source->height;
+  float maskWidth=k.mask.maskWidth?k.mask.maskWidth:mask->width,maskHeight=k.mask.maskHeight?k.mask.maskHeight:mask->height;
+  auto pixel=[](float value,unsigned size){return unsigned(std::clamp(int(std::floor(value)),0,int(size)-1));};
+  for(unsigned y=0;y<output.height;y++)for(unsigned x=0;x<output.width;x++){
+   float u=(x+.5f)/output.width,v=(y+.5f)/output.height;
+   unsigned sx=pixel(k.mask.sourceX-width*k.mask.alignX+u*width,source->width),sy=pixel(k.mask.sourceY-height*k.mask.alignY+v*height,source->height);
+   unsigned mx=pixel(k.mask.x-maskWidth*k.mask.alignX+u*maskWidth,mask->width),my=pixel(k.mask.y-maskHeight*k.mask.alignY+v*maskHeight,mask->height);
+   auto src=source->pixels.data()+(size_t(sy)*source->width+sx)*4;auto dst=output.pixels.data()+(size_t(y)*output.width+x)*4;
+   std::copy(src,src+4,dst);dst[3]=gradientMaskAlpha(src[3],mask->pixels[(size_t(my)*mask->width+mx)*4+2],k.mask.amount,k.mask.mode);
+  }
+  auto placement=imagePlacement(k.x,k.y,k.scaleX/100*width/source->width,k.scaleY/100*height/source->height,k.rotationZ,k.anchorX/100,k.anchorY/100,source->width,source->height);
+  queue.image(output,affine(parent,placement),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f);
   continue;
  }
  if(k.kind==20){

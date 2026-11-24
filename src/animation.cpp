@@ -115,6 +115,14 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
  out.priority=val(0x20,a.at(0x30),a.at(0x31)/100.f);
  out.rotationZ=val(0x22,a.at(0x30),a.at(0x31)/100.f);
  out.alpha=val(0x35,a.at(0x33),a.at(0x3b)/100.f);
+ if(out.kind==10){
+  auto input=[&](size_t offset){return val(offset,a.at(0x2d),a.at(0x2e)/100.f);};
+  out.mask.sourceX=input(8);out.mask.sourceY=input(0xa);out.mask.width=input(0xc);out.mask.height=input(0xe);
+  out.mask.x=input(0x40);out.mask.y=input(0x42);out.mask.maskWidth=input(0x44);out.mask.maskHeight=input(0x46);
+  out.mask.alignX=number(a,0x81)/100;out.mask.alignY=number(a,0x83)/100;
+  out.mask.amount=uint8_t(std::clamp(int(std::round(val(0x37,a.at(0x33),a.at(0x3b)/100.f))),0,255));out.mask.mode=a.at(0x3a);
+  out.childMotion=a.at(7);
+ }
  if(out.kind==4||out.kind==20||out.kind==21){
   auto timeValue=[&](const qlie::Bytes&key,size_t offset){
    auto value=int32_t(keyU32(key,offset));
@@ -193,7 +201,7 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
  }
  if(keyI16(a,0x48)||keyI16(a,0x4a))out.unsupported.push_back("3d-rotation");
  if(out.kind==4&&(out.flags&0x7f)>8)out.unsupported.push_back("bitmap-blend="+std::to_string(out.flags&0x7f));
- if(out.kind!=0&&out.kind!=1&&out.kind!=4&&out.kind!=15&&out.kind!=16)out.unsupported.push_back("primitive="+std::to_string(out.kind));
+ if(out.kind!=0&&out.kind!=1&&out.kind!=4&&out.kind!=10&&out.kind!=15&&out.kind!=16)out.unsupported.push_back("primitive="+std::to_string(out.kind));
  if(layer.mode>2)out.unsupported.push_back("layer-mode="+std::to_string(layer.mode));
  return out;
 }

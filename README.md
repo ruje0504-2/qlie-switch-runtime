@@ -57,3 +57,5 @@ Bitmap particles (primitive 20) now use the native deterministic random table an
 Nested bitmap animations select their child motion and interpolate the child timeline from the parent key. Child loop bounds are respected. Zero-sized logical subcanvases are supported; missing dimension context remains reported. Symbolic child timeline inputs and embedded audio are still incomplete.
 
 Procedural function 5 uses the native time-quotient random-table lookup and restored per-scene identity seed. Other random functions and primitive 10 texture composition remain incomplete.
+
+Primitive 10 bitmap gradient masks now use independent source/mask coordinates and native blue-channel threshold arithmetic, including inverse masks and fixed-point edge behavior. Non-bitmap and 3D mask variants remain incomplete; sampling currently follows the CPU renderer’s nearest-neighbor path.

@@ -61,7 +61,7 @@ struct Frontend {
  SDL_Renderer*renderer=nullptr;
  SDL_Texture*texture=nullptr;
  qlie::Bytes pixels;
- std::string text,name,status="画面・音声の接続は開発中です。",saveDir;
+ std::string text,name,status="",saveDir;
  bool menu=true,done=false,hidden=false;
  int focus=0;
  unsigned advances=0;
@@ -71,7 +71,7 @@ struct Frontend {
  subsystems|=SDL_INIT_GAMECONTROLLER;
 #endif
  if(SDL_Init(subsystems))throw std::runtime_error(SDL_GetError());
- window=SDL_CreateWindow("WHJ2 native runtime - development",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,1280,720,SDL_WINDOW_RESIZABLE);
+ window=SDL_CreateWindow("美少女万華鏡２",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,1280,720,SDL_WINDOW_RESIZABLE);
  if(!window)throw std::runtime_error(SDL_GetError());
  renderer=SDL_CreateRenderer(window,-1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);
  if(!renderer)renderer=SDL_CreateRenderer(window,-1,SDL_RENDERER_SOFTWARE);
@@ -232,7 +232,7 @@ struct Frontend {
  settings.n(loops[i]);
  settings.n(audioTimes[i]);
  }qlie::write_file(saveDir+"/slot01.mixer",settings.bytes);
- status="現在の状態を保存しました（演出状態の復元は開発中）。";
+ status="現在の状態を保存しました。";
  }
  void load(){if(movie->playing())return;
  if(!std::filesystem::exists(saveDir+"/slot01.story")){status="保存データがありません。";
@@ -285,20 +285,14 @@ struct Frontend {
  pixels[i+2]=20;
  pixels[i+3]=255;
  }if(!menu){images->drawScene(pixels);transition->blend(pixels);}
- if(menu){line("美少女万華鏡２　日本語版 開発版",45,30,32);
+ if(menu){line("美少女万華鏡２",45,30,32);
  line(status,45,90,20,0xffd58b);
- }else {for(int hy=0;hy<64;hy++){for(int hx=920;hx<1280;hx++){auto*pixel=pixels.data()+(size_t(hy)*1280+hx)*4;for(int c=0;c<3;c++){pixel[c]=uint8_t(unsigned(pixel[c])*60/255);}}}
- line("WHJ2 開発版・演出未完成",20,15,18,0xffd58b);
- line("保存",940,20,24);
- line("読込",1050,20,24);
- line("メニュー",1150,20,22);
  }if(menu){std::vector<std::string>items={"はじめから","ロード","終了"};
  for(int i=0;i<3;i++)line((focus==i?"▶ ":"　 ")+items[size_t(i)],100,210+i*70,30,focus==i?0xffd58b:0xffffff);
  }else if(!hidden){images->drawMessages(pixels);
- line(whj2::messageDisplayName(name),200,570,26,0xffffff);
+ if(images->messageVisible())line(whj2::messageDisplayName(name),200,570,26,0xffffff);
  if(story.state.awaiting)for(size_t i=0;i<story.state.choices.size();i++)line((focus==int(i)?"▶ ":"　 ")+story.state.choices[i],80,220+int(i)*50,26,focus==int(i)?0xffd58b:0xffffff);
  }if(!menu&&!hidden)images->drawFaces(pixels);
- line("A: 次へ　B / ＋: メニュー　上下: 選択　X: 保存　Y: 読込　タッチ操作対応",45,675,19,0xb0becf);
  SDL_UpdateTexture(texture,nullptr,pixels.data(),1280*4);
  SDL_RenderClear(renderer);
  SDL_RenderCopy(renderer,texture,nullptr,nullptr);
@@ -311,13 +305,7 @@ struct Frontend {
  }
  void pointer(int px,int py){float x,y;
  SDL_RenderWindowToLogical(renderer,px,py,&x,&y);
- if(!menu&&y<70&&x>=920){if(x<1030)save();
- else if(x<1140)load();
- else {if(movie->playing())movie->stop();
- menu=true;
- focus=0;
- }return;
- }if(menu){if(y<210||y>=420)return;
+ if(menu){if(y<210||y>=420)return;
  focus=int((y-210)/70);
  }else if(story.state.awaiting){if(y<220||y>=220+50*story.state.choices.size())return;
  focus=int((y-220)/50);
@@ -331,25 +319,15 @@ struct Frontend {
  else controllers[id]=c;
  std::cerr<<"INPUT controller connected id="<<id<<"\n";
  }
- void controllerKey(Uint8 button){SDL_Keycode k=0;
- switch(button){case SDL_CONTROLLER_BUTTON_A:k=SDLK_RETURN;
- break;
- case SDL_CONTROLLER_BUTTON_B:k=SDLK_ESCAPE;
- break;
- case SDL_CONTROLLER_BUTTON_DPAD_UP:k=SDLK_UP;
- break;
- case SDL_CONTROLLER_BUTTON_DPAD_DOWN:k=SDLK_DOWN;
- break;
- case SDL_CONTROLLER_BUTTON_X:k=SDLK_F5;
- break;
- case SDL_CONTROLLER_BUTTON_Y:k=SDLK_F9;
- break;
- default:return;
- }SDL_Event e{};
- e.type=SDL_KEYDOWN;
- e.key.keysym.sym=k;
- if(SDL_PushEvent(&e)<0)throw std::runtime_error(SDL_GetError());
- }
+ void controllerKey(Uint8 button){int count=menu?3:int(story.state.choices.size());
+ switch(button){case SDL_CONTROLLER_BUTTON_A:activate();break;
+ case SDL_CONTROLLER_BUTTON_B:if(movie->playing())movie->stop();menu=true;focus=0;if(movieOnly)done=true;break;
+ case SDL_CONTROLLER_BUTTON_DPAD_UP:if(count)focus=(focus+count-1)%count;break;
+ case SDL_CONTROLLER_BUTTON_DPAD_DOWN:if(count)focus=(focus+1)%count;break;
+ case SDL_CONTROLLER_BUTTON_X:save();break;
+ case SDL_CONTROLLER_BUTTON_Y:load();break;
+ default:break;
+ }}
  int run(unsigned smoke){
 #ifdef __SWITCH__
  std::cerr<<"INPUT libnx Joy-Con and SDL touch\n";
@@ -428,18 +406,21 @@ controllerKey(e.cbutton.button);
  std::cerr<<"MOVIE screenshot audio_clock_ms="<<movie->elapsedMs()<<"\n";
  }if(smoke){if(touchOnlyTest){
  auto touch=[](float x,float y){SDL_Event ev{};ev.type=SDL_FINGERDOWN;ev.tfinger.x=x;ev.tfinger.y=y;if(SDL_PushEvent(&ev)<0)throw std::runtime_error(SDL_GetError());};
+ auto controller=[](Uint8 button){SDL_Event ev{};ev.type=SDL_CONTROLLERBUTTONDOWN;ev.cbutton.button=button;if(SDL_PushEvent(&ev)<0)throw std::runtime_error(SDL_GetError());};
  if(frames==1)touch(0.2f,0.44f);
  if(frames==3&&(!menu||std::filesystem::exists(saveDir+"/slot01.story")))throw std::runtime_error("Empty touch load changed state");
  if(frames==5||frames==60)touch(0.2f,0.34f);
  if(frames==12||frames==36)touch(0.5f,0.5f);
- if(frames==24)touch(0.76f,0.04f);
+ if(frames==14)touch(0.76f,0.04f);
+ if(frames==16&&(menu||std::filesystem::exists(saveDir+"/slot01.story")))throw std::runtime_error("Removed HUD hotspot is still active");
+ if(frames==24)controller(SDL_CONTROLLER_BUTTON_X);
  if(frames==26){touchSavedStory=qlie::file(saveDir+"/slot01.story");touchSavedText=text;}
- if(frames==38)touch(0.85f,0.04f);
+ if(frames==38)controller(SDL_CONTROLLER_BUTTON_Y);
  if(frames==40&&(story.save()!=touchSavedStory||text!=touchSavedText))throw std::runtime_error("Touch load mismatch");
- if(frames==48)touch(0.94f,0.04f);
+ if(frames==48)controller(SDL_CONTROLLER_BUTTON_B);
  if(frames==50&&!menu)throw std::runtime_error("Touch menu did not open");
  if(frames==62&&menu)throw std::runtime_error("Touch new game did not activate");
- if(++frames>=smoke){snapshot("touch.bmp");std::cerr<<"TOUCH PASS next/save/load/menu/new-game\n";done=true;}continue;
+ if(++frames>=smoke){snapshot("touch.bmp");std::cerr<<"TARGET INPUT PASS touch advance / controller save-load-menu / new-game\n";done=true;}continue;
  }if(frames==1 || (frames>=12 && frames%12==0)){SDL_Event input{};
  switch((frames/12)%4){case 0:input.type=SDL_KEYDOWN;
  input.key.keysym.sym=SDLK_RETURN;

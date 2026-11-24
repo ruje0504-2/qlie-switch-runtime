@@ -39,7 +39,8 @@ int main(){try{
  check(s[4].x==17&&s[4].scaleX==200,"parent group after pop");
  check(s[6].x==7&&s[6].scaleX==100,"stack empty after second pop");
  auto hidden=layer(1,100,200,0);m.layers={hidden,layer(2,3,100),layer(0,4,100)};
- s=sampleMotion(m,0);check(s[1].x==3&&s[2].x==4,"inactive group and empty pop");
+ s=sampleMotion(m,0);check(s[1].x==103&&s[2].x==4,"zero primitive still controls transform group");
+ m.layers[0].flags=0;s=sampleMotion(m,0);check(s[1].x==3&&s[2].x==4,"disabled group and empty pop");
  m.layers={layer(1,0,100),layer(0,0,100)};
  for(auto&l:m.layers){l.keys[0][0x24]=200;l.keys[0][0x28]=128;l.keys[0][0x35]=128;}
  s=sampleMotion(m,0);check((s[1].addColor&255)==255,"saturating add");

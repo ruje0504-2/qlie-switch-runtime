@@ -262,6 +262,7 @@ void SceneImages::update(double ms){for(auto&entry:layers){auto&layer=entry.seco
  double speed=layer.params.count("speed")?numeric(layer.params.at("speed")):100;
  layer.milliseconds+=ms*std::max(0.,speed)/100;
  for(auto&t:layer.tweens)t.second.elapsed=std::min(t.second.duration,t.second.elapsed+ms);
+ if(layer.params.count("@hiding")&&layer.params.at("@hiding")=="true"&&layer.composite){auto*motion=findMotion(layer.composite->definition,"*Disable");if(motion){auto samples=sampleMotion(*motion,layer.milliseconds);if(std::none_of(samples.begin(),samples.end(),[](auto&sample){return sample.kind!=0;})){layer.params["show"]="false";layer.params.erase("@hiding");}}}
  }}
 bool SceneImages::command(const std::string&line){auto p=line.find(44);
  auto cmd=line.substr(1,p-1);
@@ -274,7 +275,7 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  if(l.params.empty())l.params={{"x","640"},{"y",chara?"720":"360"},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri",chara?"500":"0"},{"show","true"},{"align",chara?"center:bottom":cmd=="effect"?"left:top":"center:center"}};
  if(chara){auto motion=l.params.find("motion");if(motion!=l.params.end()&&motion->second!="def"&&motion->second!="0"&&motion->second.find('+')==std::string::npos){motion->second="def";l.milliseconds=0;l.audioMilliseconds=-1;}}
  auto args=split(expand(p==line.npos?"":line.substr(p+1),chara?"chara":face?"face":message?"message":"image"),44);
- Layer before=l;bool file=false,baseChanged=false,position=false,color=false;
+ Layer before=l;bool file=false,baseChanged=false,position=false,color=false,messageShow=false;
  for(auto&s:args){if(s.empty())continue;
  auto c=s.find(58);
  if(c==s.npos)throw std::runtime_error("Unknown image template "+s);
@@ -286,6 +287,7 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  l.params["show"]="false";
  continue;
  }l.params[key]=v;
+ if(message&&key=="show")messageShow=true;
  if(key=="file"){file=true;if(face)l.params["@face-active"]="true";}
  if((chara||face)&&key=="base")baseChanged=true;
  if(key=="x"||key=="y"||key=="ax"||key=="ay"||key=="scalex"||key=="scaley"||key=="rotz"||key=="pri")position=true;
@@ -293,6 +295,11 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  if(key=="vol"&&std::stof(v)==0)l.audioStopPending=true;
  if(key=="motion"){l.milliseconds=0;l.audioMilliseconds=-1;}
  if(key!="textarea"&&key!="fontsize"&&key!="fontcolor"&&key!="fontno"&&key!="trans"&&key!="id"&&key!="mode"&&key!="disp"&&key!="base"&&key!="time"&&key!="speed"&&key!="move"&&key!="movepow"&&key!="ax"&&key!="ay"&&key!="vol"&&key!="dchannel"&&key!="motion"&&key!="file"&&key!="x"&&key!="y"&&key!="scalex"&&key!="scaley"&&key!="alpha"&&key!="show"&&key!="pri"&&key!="align"&&key!="texfilter"&&key!="rotz"&&key!="mulcolor"&&key!="addcolor")std::cerr<<"PENDING-IMAGE-PROPERTY "<<cmd<<" "<<key<<"="<<v<<"\n";
+ }
+ if(messageShow&&l.composite){const std::string mode=l.params["show"]=="true"?"*Enable":"*Disable";
+  if(findMotion(l.composite->definition,mode)){l.params["motion"]=mode;l.milliseconds=0;l.audioMilliseconds=-1;
+   if(mode=="*Disable"){l.params["show"]="true";l.params["@hiding"]="true";}else l.params.erase("@hiding");
+  }
  }
  transition(l,before,position,color);
  auto loadBase=[&](){auto base=l.params.find("base");if((!chara&&!face)||base==l.params.end()||base->second=="none"||base->second.empty())return false;
@@ -362,7 +369,10 @@ MessageStyle SceneImages::messageStyle()const{MessageStyle style;auto it=layers.
  auto pair=[&](const std::string&key,unsigned&a,unsigned&b){auto found=params.find(key);if(found==params.end())return;auto values=split(found->second,':');a=unsigned(numeric(values[0]));b=values.size()>1?unsigned(numeric(values[1])):a;};
  pair("textarea",style.width,style.height);pair("fontsize",style.fontWidth,style.fontHeight);auto color=params.find("fontcolor");if(color!=params.end())style.color=uint32_t(numeric(color->second));return style;
 }
-void SceneImages::setMessageImage(const Image&image,bool show){if(!layers.count("message"))command("^message,$window01");auto&layer=layers.at("message");layer.pixels=std::make_shared<Image>(image);if(show)layer.params["show"]="true";}
+bool SceneImages::messageVisible()const{auto it=layers.find("message");return it!=layers.end()&&it->second.params.at("show")=="true";}
+void SceneImages::setMessageImage(const Image&image,bool show){if(!layers.count("message"))command("^message,$window01");auto&layer=layers.at("message");layer.pixels=std::make_shared<Image>(image);
+ if(show&&(layer.params["show"]!="true"||layer.params.count("@hiding"))){if(layer.composite&&findMotion(layer.composite->definition,"*Enable")){layer.params["motion"]="*Enable";layer.milliseconds=0;layer.audioMilliseconds=-1;}layer.params["show"]="true";layer.params.erase("@hiding");}
+}
 
 void SceneImages::render(qlie::Bytes&out,unsigned pass)const{
  if(out.size()!=1280*720*4)throw std::runtime_error("Scene canvas size");

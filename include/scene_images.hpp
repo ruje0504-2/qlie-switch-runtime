@@ -25,6 +25,6 @@ public:
  qlie::Bytes save()const;void restore(const qlie::Bytes&);
  std::vector<SceneSoundEvent> takeSoundEvents();
  void update(double milliseconds);bool command(const std::string&);void clear();void beginPage();void selectFace(const std::string&speaker,const std::string&voice);void draw(qlie::Bytes&)const;void drawScene(qlie::Bytes&)const;void drawFaces(qlie::Bytes&)const;void drawMessages(qlie::Bytes&)const;
- MessageStyle messageStyle()const;void setMessageImage(const Image&,bool show=false);
+ bool messageVisible()const;MessageStyle messageStyle()const;void setMessageImage(const Image&,bool show=false);
 };
 }

@@ -249,7 +249,7 @@ std::vector<AnimationSample> sampleMotion(const Motion&motion,double ms,unsigned
  };
  for(const auto&layer:motion.layers){
   auto value=sampleAnimation(layer,ms,context);
-  if(value.kind){
+  if(layer.flags&&!layer.keys.empty()&&ms>=keyU32(layer.keys.front(),0)){
    if(layer.mode==1&&stack.size()<31){
     auto parent=value;
     // The push operation always multiplies scale, including primitive 3.

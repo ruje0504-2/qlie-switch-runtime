@@ -128,10 +128,11 @@ unsigned imageBlend(const std::string&mode){
 struct JpegAnimation {
  qlie::Bytes data;
  std::vector<std::pair<size_t,size_t>> frames;
+ bool loop;
  unsigned duration=0;
  size_t frameIndex=0;
  std::shared_ptr<const Image> decoded;
- explicit JpegAnimation(qlie::Bytes bytes):data(std::move(bytes)){
+ JpegAnimation(qlie::Bytes bytes,bool repeat):data(std::move(bytes)),loop(repeat){
   auto number=[&](size_t p){return uint32_t(data[p])|(uint32_t(data[p+1])<<8)|(uint32_t(data[p+2])<<16)|(uint32_t(data[p+3])<<24);};
   if(data.size()<64||std::memcmp(data.data()+12,"SOUND",5)||std::memcmp(data.data()+32,"MOVIE",5)||number(24)||number(28))
    throw std::runtime_error("Unsupported IMOAVI header");
@@ -160,7 +161,9 @@ struct JpegAnimation {
   }
  }
  const std::shared_ptr<const Image>&at(double ms){
-  const auto index=std::min(frames.size()-1,size_t(std::fmod(std::max(0.,ms),duration)*frames.size()/duration));
+  double elapsed=std::max(0.,ms);
+  if(elapsed>=duration)elapsed=loop?std::fmod(elapsed,duration):duration;
+  const auto index=std::min(frames.size()-1,size_t(elapsed*frames.size()/duration));
   if(!decoded||frames[index]!=frames[frameIndex]){
    const auto [start,length]=frames[index];
    decoded=sceneBitmap(image(qlie::Bytes(data.begin()+start,data.begin()+start+length)));
@@ -424,7 +427,11 @@ struct Composite {
     else if(kvideo_is_container(m.data.data(),m.data.size())){e.video=std::make_shared<const qlie::Bytes>(std::move(m.data));
  }
     else if(m.data.size()>=12&&std::equal(m.data.begin(),m.data.begin()+12,"ARGBModel1.0"))e.mesh=std::make_shared<Model>(model(m.data));
-    else if(m.data.size()>=8&&std::memcmp(m.data.data(),"IMOAVI\0\0",8)==0)e.jpegAnimation=std::make_shared<JpegAnimation>(std::move(m.data));
+    else if(m.data.size()>=8&&std::memcmp(m.data.data(),"IMOAVI\0\0",8)==0){
+     // The title's still layer takes over after the opening clip ends.
+     const bool hold=game_profile::title.holdIntroLastFrame&&members.empty()&&path==game_profile::title.back[0];
+     e.jpegAnimation=std::make_shared<JpegAnimation>(std::move(m.data),!hold);
+    }
     // The story cards supply a portrait for slot zero. Keep the embedded
     // bitmap compressed until a caller draws the card without a replacement.
     else if(path==eyecatchPath&&members.empty())eyecatchFallback=std::move(m.data);

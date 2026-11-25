@@ -70,7 +70,7 @@ inline constexpr whj2::TitleLayout title{
  nullptr,"_off.png","_on.png","script/title/bm1_title_button.b",
  {"script/title/bm1_title_button.b","script/title/bm1_title_button.b"},
  {"start","load","album","option","quit"},
- {"cg_mode","memory_mode","sound_mode","back"},{},{},0,0,false,0,0,0,true,true
+ {"cg_mode","memory_mode","sound_mode","back"},{},{},0,0,false,0,0,0,true,true,true
 };
 inline constexpr whj2::SettingsLayout settingsLayout{{{
  {355,198,245,-6,-10,5},{355,314,245,-6,-10,5},

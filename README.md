@@ -55,7 +55,7 @@ QLIE_GAME=whj5 QLIE_SWITCH_VULKAN=0 ./build-switch.sh
 
 | 游戏 | `game/` 下的资源 | 各作配置 |
 | --- | --- | --- |
-| WHJ1 | 3.0 格式的 `GameData/data0.pack`、`data1.pack`、`data7.pack`，`DLL/key.fkey`、`DLL/icon.key`，以及 `movie/` 内原版日文名的三个影片。可选中文 `patch.dat` | 初代 AVG 剧本、双结局与额外章、日文本体和独立中文更新 |
+| WHJ1 | 3.0 格式的 `GameData/data0.pack`、`data1.pack`、`data7.pack`，`DLL/key.fkey`、`DLL/icon.key`，以及 `movie/` 内的 `logo.ogv`、`kaleidoscope.ogv` 和 `ndou99_1_01.ogv`。可选中文 `patch.dat` | 初代 AVG 剧本、双结局与额外章、日文本体和独立中文更新 |
 | WHJ2 | `GameData/`、`DLL/key.fkey`、`DLL/icon.key` | 原标题花海、按钮位置与剧本指定的幕间节拍 |
 | WHJ2.5 | 九个 3.0 分卷、上述两份 DLL 目录密钥，可选 `patch.dat` | 标题按钮依次出现、单页鉴赏、历史叠行与片尾镜头拉远 |
 | WHJ3 | 十个 3.0 分卷、上述两份 DLL 目录密钥，可选 `patch.dat` | 双标题背景、序章马车与风声、指定图层的影片及运行时截图替换 |

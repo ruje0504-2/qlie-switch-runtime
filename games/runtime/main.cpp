@@ -439,7 +439,7 @@ struct Frontend {
  }}
  if(readAhead){
   movie->setReadAhead(readAhead.get());
-  movie->warmFile("script/makerlogo/omegastar.ogv");
+  movie->warmFile(makerLogoFile());
   if(game_profile::secondMakerLogo[0])movie->warmFile(game_profile::secondMakerLogo);
   preparedTitleAlternate=title->prepareOpening(readAhead.get(),progress.extras());
   constexpr auto intro=game_profile::title.audio;
@@ -494,7 +494,11 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   if(!cautionLeaving)return 255;
   return unsigned(255*(1-std::clamp(openingElapsed/game_profile::cautionFade,0.,1.)));
  }
- void makerLogo(){cautionLeaving=false;opening=2;images->clear();movie->open("script/makerlogo/omegastar.ogv");QLIE_LOG_LINE(<<"OPENING maker-logo\n");}
+ const char* makerLogoFile()const{
+  const auto* legacy=game_profile::story.legacyAvg;
+  return legacy?legacy->makerLogo:"script/makerlogo/omegastar.ogv";
+ }
+ void makerLogo(){cautionLeaving=false;opening=2;images->clear();movie->open(makerLogoFile());QLIE_LOG_LINE(<<"OPENING maker-logo\n");}
  void nextMakerLogo(){
   if(opening==2&&game_profile::secondMakerLogo[0]){
    opening=3;

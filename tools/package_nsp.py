@@ -79,7 +79,7 @@ def main():
     if game_profile == 'whj1':
         resources = [f'GameData/data{i}.pack' for i in (0, 1, 7)] + [
             'DLL/key.fkey', 'DLL/icon.key',
-            'movie/ロゴ.ogv', 'movie/万華鏡.ogv', 'movie/ndou99_1_01.ogv',
+            'movie/logo.ogv', 'movie/kaleidoscope.ogv', 'movie/ndou99_1_01.ogv',
         ]
     elif game_profile == 'whj3':
         resources = [f'GameData/data{i}.pack' for i in range(10)] + ['DLL/key.fkey']

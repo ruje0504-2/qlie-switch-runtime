@@ -15,7 +15,9 @@ inline const qlie::ArchiveLayout archives{
   {"script/memorymode/fade.png","script/replaymode/fadeimage.png"},
   {"script/albummode/viewquit_n.png","script/albummode/viewback_n.png"},
   {"script/caution/caution.b","script/makerlogo/caution.b"},
-  {"script/makerlogo/omegastar.ogv","movie/ロゴ.ogv"},
+  {"movie/logo.ogv","movie/ロゴ.ogv"},
+  {"movie/kaleidoscope.ogv","movie/万華鏡.ogv"},
+  {"movie/万華鏡.ogv","movie/kaleidoscope.ogv"},
   {"system/font/外字.of","system/font/外字登録.of"},
   {"misc/sys_onclick.wav","misc/sys_onclick.ogg"},
   {"misc/sys_onmouse.wav","misc/sys_onmouse.ogg"},
@@ -33,6 +35,7 @@ inline constexpr whj2::LegacyAvgLayout legacyLayout{
  "^face,x:200,y:720,align:center:bottom,mode:auto,pri:1015",
  "5",0x00b6,0x01f7,
  {{{"#1_route_a_f","#game_aclearflag"},{"#1_route_b_f","#game_bclearflag"}}},
+ "movie/logo.ogv",{"movie/万華鏡.ogv","movie/kaleidoscope.ogv"},
  "movie/ndou99_1_01.ogv",5000,81000
 };
 inline const whj2::StoryProfile story{

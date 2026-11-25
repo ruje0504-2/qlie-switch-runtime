@@ -11,8 +11,8 @@ inline void layoutSettingsBackground(whj2::Image& image){
  if(image.width!=1920||image.height!=1080)return;
  // The labels are painted into BG1. Borrow the repeating pattern from a
  // nearby column and match the local shading along the four edges.
- struct Label {int left,top,right,bottom,patternOffset;};
- constexpr Label labels[]={
+ struct Patch {int left,top,right,bottom,patternX,patternY=0;};
+ constexpr Patch labels[]={
   {473,346,599,369,170},{895,346,936,369,-170},
   {199,205,305,237,340},{199,245,256,277,340},
   {199,284,407,317,340},{199,324,402,356,340}
@@ -20,55 +20,55 @@ inline void layoutSettingsBackground(whj2::Image& image){
  auto pixel=[&](int x,int y,int channel)->uint8_t&{
   return image.pixels[(size_t(y)*image.width+x)*4+channel];
  };
- for(const auto& label:labels)for(int channel=0;channel<3;++channel){
-  auto difference=[&](int x,int y){
-   return int(pixel(x,y,channel))-pixel(x+label.patternOffset,y,channel);
-  };
-  auto vertical=[&](int x,float t){
-   return difference(x,label.top-1)*(1-t)+difference(x,label.bottom)*t;
-  };
-  for(int y=label.top;y<label.bottom;++y){
-   const float t=float(y-label.top+1)/(label.bottom-label.top+1);
-   const float left=difference(label.left-1,y)-vertical(label.left-1,t);
-   const float right=difference(label.right,y)-vertical(label.right,t);
-   for(int x=label.left;x<label.right;++x){
-    const float u=float(x-label.left+1)/(label.right-label.left+1);
-    const float shade=vertical(x,t)+left*(1-u)+right*u;
-    const float value=pixel(x+label.patternOffset,y,channel)+shade;
-    pixel(x,y,channel)=uint8_t(std::clamp(value+.5f,0.f,255.f));
+ auto repair=[&](const Patch& label){
+  for(int channel=0;channel<3;++channel){
+   auto difference=[&](int x,int y){
+    return int(pixel(x,y,channel))-pixel(x+label.patternX,y+label.patternY,channel);
+   };
+   auto vertical=[&](int x,float t){
+    return difference(x,label.top-1)*(1-t)+difference(x,label.bottom)*t;
+   };
+   for(int y=label.top;y<label.bottom;++y){
+    const float t=float(y-label.top+1)/(label.bottom-label.top+1);
+    const float left=difference(label.left-1,y)-vertical(label.left-1,t);
+    const float right=difference(label.right,y)-vertical(label.right,t);
+    for(int x=label.left;x<label.right;++x){
+     const float u=float(x-label.left+1)/(label.right-label.left+1);
+     const float shade=vertical(x,t)+left*(1-u)+right*u;
+     const float value=pixel(x+label.patternX,y+label.patternY,channel)+shade;
+     pixel(x,y,channel)=uint8_t(std::clamp(value+.5f,0.f,255.f));
+    }
    }
   }
- }
- // Keep the typography and preview at 1:1 scale. Only stretch the empty
- // strips between the two sections and blend into the original side borders.
- struct Row {int from,to;};
+ };
+ for(const auto& label:labels)repair(label);
+ // Move each block at 1:1 scale and keep the pattern in the empty margins.
+ struct Block {int top,bottom,shift,right;};
  constexpr int left=151,right=949,top=156,bottom=924;
- constexpr Row rows[]={
-  {top,top},{161,210},{195,244},
-  {365,365+profile::settingsPromptShift},{532,532+profile::settingsPromptShift},
-  {565,565+profile::settingsTextShift},{914,914+profile::settingsTextShift},{bottom,bottom}
+ constexpr Block blocks[]={
+  {158,202,49,460},
+  {365,532,profile::settingsPromptShift,390},
+  {565,922,profile::settingsTextShift,right}
  };
  constexpr int width=right-left;
  qlie::Bytes source(size_t(width)*(bottom-top)*4);
  for(int y=top;y<bottom;++y)
   std::copy_n(&pixel(left,y,0),width*4,source.data()+size_t(y-top)*width*4);
+ // Fill the space vacated by the heading and the sample image with the
+ // same background pattern. Their original pixels are in the copy above.
+ repair({175,163,434,197,340});
+ repair({477,808,933,912,0,-440});
  auto original=[&](int x,int y,int channel){
   return source[(size_t(y-top)*width+x-left)*4+channel];
  };
- for(size_t i=1;i<std::size(rows);++i){
-  const auto [fromTop,toTop]=rows[i-1];
-  const auto [fromBottom,toBottom]=rows[i];
-  for(int y=toTop;y<toBottom;++y){
-   const float from=fromTop+float(y-toTop)*(fromBottom-fromTop)/(toBottom-toTop);
-   const int srcY=int(from);
-   const float fraction=from-srcY;
-   for(int x=left;x<right;++x){
-    const float weight=std::min({1.f,float(x-left)/27,float(right-1-x)/15});
-    for(int channel=0;channel<4;++channel){
-     const float value=original(x,srcY,channel)*(1-fraction)+
-                       original(x,std::min(srcY+1,bottom-1),channel)*fraction;
-     pixel(x,y,channel)=uint8_t(value*weight+original(x,y,channel)*(1-weight)+.5f);
-    }
+ for(const auto& block:blocks)for(int y=block.top;y<block.bottom;++y){
+  const int targetY=y+block.shift;
+  const float vertical=std::min(float(y-block.top),float(block.bottom-y))/8;
+  for(int x=left;x<block.right;++x){
+   const float weight=std::min({1.f,vertical,float(x-left)/27,float(block.right-1-x)/15});
+   for(int channel=0;channel<4;++channel){
+    auto& destination=pixel(x,targetY,channel);
+    destination=uint8_t(original(x,y,channel)*weight+destination*(1-weight)+.5f);
    }
   }
  }

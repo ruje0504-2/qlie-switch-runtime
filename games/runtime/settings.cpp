@@ -19,9 +19,20 @@ int settingMaximum(const std::string&key){
 }
 }
 
-Settings::Settings(qlie::Assets&a,bool actorSettings):namedVoices(actorSettings){values={{"SkipMode",1},{"MasterVolume",100},{"MusicModeVolume",100},{"BGMVolume",60},{"VoiceVolume",100},{"SEVolume",100},{"SysSEVolume",50},{"MovieVolume",80},{"WindowAlpha",210},{"TextSpeed",10},{"ClickVoiceStop",0},{"AutoPlayVoiceWait",1},{"AutoTextWait",40},{"AutoClickWait",1200}};
+Settings::Settings(qlie::Assets&a,bool actorSettings,bool waitUsesZero):namedVoices(actorSettings){values={{"SkipMode",1},{"MasterVolume",100},{"MusicModeVolume",100},{"BGMVolume",60},{"VoiceVolume",100},{"SEVolume",100},{"SysSEVolume",50},{"MovieVolume",80},{"WindowAlpha",210},{"TextSpeed",10},{"ClickVoiceStop",0},{"AutoPlayVoiceWait",1},{"AutoTextWait",40},{"AutoClickWait",1200}};
  for(unsigned i=0;i<voiceActorCount();++i){values.emplace(muteKey(i),0);values.emplace(gainKey(i),256);}
- std::istringstream in(a.text("script/config/default.txt"));std::string line;while(std::getline(in,line)){auto pos=line.find('=');if(pos==line.npos)continue;auto key=trim(line.substr(0,pos));if(values.count(key)){auto value=trim(line.substr(pos+1));set(key,std::stoi(value[0]=='$'?value.substr(1):value,nullptr,value[0]=='$'?16:10));}}defaults=values;
+ std::istringstream in(a.text("script/config/default.txt"));
+ std::string line;
+ while(std::getline(in,line)){
+  auto pos=line.find('=');
+  if(pos==line.npos)continue;
+  auto key=trim(line.substr(0,pos));
+  if(!values.count(key))continue;
+  const auto value=trim(line.substr(pos+1));
+  const int number=std::stoi(value[0]=='$'?value.substr(1):value,nullptr,value[0]=='$'?16:10);
+  set(key,waitUsesZero&&key=="AutoPlayVoiceWait"?number==0:number);
+ }
+ defaults=values;
 }
 float Settings::characterVoiceGain(std::string_view actor)const{
  if(!namedVoices||actor=="none")return 1;

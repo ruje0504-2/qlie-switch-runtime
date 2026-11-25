@@ -211,7 +211,7 @@ struct Frontend {
 #ifdef QLIE_PROFILE_WHJ5
  whj2::Settings settings{assets,true};
 #else
- whj2::Settings settings{assets};
+ whj2::Settings settings{assets,false,gameSettingsLayout.classic};
 #endif
  whj2::GameMenu gameMenu{assets,settings};
  enum class MenuFadeKind {Page,Load,Title,Quit};
@@ -392,8 +392,13 @@ struct Frontend {
  gameMenu.prepareHistory(game_profile::story.historyJumpLimit!=0);
  gameMenu.preparePanels();
  whj2::MessageText preview(assets);
- preview.start(ui.text("[spd,0]「サンプルテキスト」"));
- gameMenu.setWindowPreview(preview.render(font,{400,50,20,20,0xffffff}));
+ if(gameSettingsLayout.classic){
+  preview.start(ui.simplified()?"[spd,0]文本示例":"[spd,0]テキスト　サンプル");
+  gameMenu.setWindowPreview(preview.render(storyFont(),{100,50,10,10,0xffffff}));
+ }else{
+  preview.start(ui.text("[spd,0]「サンプルテキスト」"));
+  gameMenu.setWindowPreview(preview.render(font,{400,50,20,20,0xffffff}));
+ }
  transition=std::make_unique<whj2::SceneTransition>(assets);
  transition->setReadAhead(readAhead.get());
  movie=std::make_unique<whj2::Movie>(assets,*audio);
@@ -1813,7 +1818,11 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  refreshSlotFlags();
  submit([&](whj2::RenderQueue&queue){
   if(gameMenu.asking){auto prompt=gameMenu.requested==UI::Quit?ui.text("ゲームを終了しますか？"):gameMenu.requested==UI::Title?ui.text("タイトルに戻りますか？"):gameMenu.requested==UI::ResetSettings?ui.text("設定を初期状態に戻しますか？"):gameMenu.requested==UI::SectionSkip?(ui.simplified()?"跳过这个场景吗？":"このシーンをスキップしますか？"):gameMenu.requested==UI::DeleteSlot?ui.text("データを削除しますか？"):gameMenu.panel==UI::Load?ui.text("データをロードしますか？"):ui.text("データを上書き保存しますか？");line(prompt,440,275,28,0xffffff,&queue);return;}
-  if(gameMenu.panel==UI::Settings&&gameMenu.allowSceneReturn)line(ui.text("回想を終了"),520,680,26,gameMenu.focus==16?0xffff88:0xffffff,&queue);
+  if(gameMenu.panel==UI::Settings){
+   if(gameSettingsLayout.classic)line(ui.simplified()?"快进范围":"スキップ対象",165,431,17,0xffffff,&queue);
+   if(gameMenu.allowSceneReturn)line(ui.text("回想を終了"),520,680,26,
+                                   gameMenu.focus==16?0xffff88:0xffffff,&queue);
+  }
   if(gameMenu.panel==UI::Save||gameMenu.panel==UI::Load)for(int i=0;i<8;i++){
    unsigned slot=unsigned(gameMenu.page*8+i+1);
    int x=i<4?198:834,y=136+(i%4)*135;
@@ -2387,16 +2396,20 @@ controllerKey(e.cbutton.button);
  if(++frames>=smoke&&!done){throw std::runtime_error("Auto test timed out");}
  continue;
  }if(settingsTest){
+ const auto& opacity=gameSettingsLayout.sliders[0];
+ const auto& speed=gameSettingsLayout.sliders[1];
+ const auto& master=gameSettingsLayout.sliders[2];
+ const auto& bgm=gameSettingsLayout.sliders[3];
  auto tap=[&](float x,float y){pointer(int(x),int(y));};
  if(frames==1){activate();controllerKey(SDL_CONTROLLER_BUTTON_X);}
- if(frames==4){if(gameMenu.panel!=whj2::GameMenu::Settings)throw std::runtime_error("Settings entry");gameMenu.update(250);tap(664,163);if(settings.get("MasterVolume")!=0)throw std::runtime_error("Touch master volume");}
+ if(frames==4){if(gameMenu.panel!=whj2::GameMenu::Settings)throw std::runtime_error("Settings entry");gameMenu.update(250);tap(master.x,master.y);if(settings.get("MasterVolume")!=0)throw std::runtime_error("Touch master volume");}
  if(frames==12)mutedNonzero=audio->stats().nonzero;
- if(frames==18){if(audio->stats().nonzero!=mutedNonzero)throw std::runtime_error("Muted mixer emitted samples");tap(1125,163);if(settings.get("MasterVolume")!=100)throw std::runtime_error("Master gain restore");tap(598,314);if(settings.get("TextSpeed")!=0)throw std::runtime_error("Text speed right edge");tap(357,195);if(settings.get("WindowAlpha")!=0)throw std::runtime_error("Window alpha");draw();snapshot("settings.bmp");}
+ if(frames==18){if(audio->stats().nonzero!=mutedNonzero)throw std::runtime_error("Muted mixer emitted samples");tap(master.x+master.width,master.y);if(settings.get("MasterVolume")!=100)throw std::runtime_error("Master gain restore");tap(speed.x+speed.width,speed.y);if(settings.get("TextSpeed")!=0)throw std::runtime_error("Text speed right edge");tap(opacity.x,opacity.y);if(settings.get("WindowAlpha")!=0)throw std::runtime_error("Window alpha");draw();snapshot("settings.bmp");}
  if(frames==20){gameMenu.focus=3;controllerKey(SDL_CONTROLLER_BUTTON_DPAD_RIGHT);if(settings.get("WindowAlpha")!=12)throw std::runtime_error("Controller slider increment");whj2::Settings restored(assets);restored.restore(qlie::file(saveDir+"/settings.cfg"));if(restored.save()!=settings.save())throw std::runtime_error("Settings persistence");controllerKey(SDL_CONTROLLER_BUTTON_B);}
  if(frames==23){if(gameMenu.closing())continue;if(messageText->getSpeed()!=0)throw std::runtime_error("Text speed not applied");snapshot("window-alpha.bmp");controllerKey(SDL_CONTROLLER_BUTTON_X);gameMenu.update(250);gameMenu.focus=12;controllerKey(SDL_CONTROLLER_BUTTON_A);}
- if(frames==25){if(!gameMenu.asking)throw std::runtime_error("Reset confirmation");controllerKey(SDL_CONTROLLER_BUTTON_A);whj2::Settings defaults(assets);if(settings.save()!=defaults.save())throw std::runtime_error("Reset defaults");draw();snapshot("settings-reset.bmp");}
- if(frames==26){gameMenu.update(250);SDL_Event ev{};ev.type=SDL_FINGERDOWN;ev.tfinger.x=664.f/1280;ev.tfinger.y=222.f/720;SDL_PushEvent(&ev);}
- if(frames==27){SDL_Event ev{};ev.type=SDL_FINGERMOTION;ev.tfinger.x=1125.f/1280;ev.tfinger.y=222.f/720;SDL_PushEvent(&ev);}
+ if(frames==25){if(!gameMenu.asking)throw std::runtime_error("Reset confirmation");controllerKey(SDL_CONTROLLER_BUTTON_A);whj2::Settings defaults(assets,false,gameSettingsLayout.classic);if(settings.save()!=defaults.save())throw std::runtime_error("Reset defaults");draw();snapshot("settings-reset.bmp");}
+ if(frames==26){gameMenu.update(250);SDL_Event ev{};ev.type=SDL_FINGERDOWN;ev.tfinger.x=bgm.x/1280;ev.tfinger.y=bgm.y/720;SDL_PushEvent(&ev);}
+ if(frames==27){SDL_Event ev{};ev.type=SDL_FINGERMOTION;ev.tfinger.x=(bgm.x+bgm.width)/1280;ev.tfinger.y=bgm.y/720;SDL_PushEvent(&ev);}
  if(frames==28){if(settings.get("BGMVolume")!=100||!fingerUiDrag)throw std::runtime_error("Continuous slider drag");SDL_Event ev{};ev.type=SDL_FINGERMOTION;ev.tfinger.x=0;ev.tfinger.y=.8f;SDL_PushEvent(&ev);}
  if(frames==29){if(settings.get("BGMVolume")!=0)throw std::runtime_error("Slider clamp outside track");SDL_Event ev{};ev.type=SDL_FINGERUP;ev.tfinger.x=0;ev.tfinger.y=.8f;SDL_PushEvent(&ev);}
  if(frames==30){if(fingerUiDrag||!gameMenu.visible())throw std::runtime_error("Drag release activated another action");whj2::Settings saved(assets,settings.voiceActorCount()!=0);saved.restore(qlie::file(saveDir+"/settings.cfg"));if(saved.get("BGMVolume")!=0)throw std::runtime_error("Drag release not saved");settings.reset();applySettings();}

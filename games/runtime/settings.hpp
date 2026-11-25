@@ -9,7 +9,7 @@ class Settings {
  std::map<std::string,int> values,defaults;
  bool namedVoices;
 public:
- explicit Settings(qlie::Assets&,bool namedVoices=false);
+ explicit Settings(qlie::Assets&,bool namedVoices=false,bool waitUsesZero=false);
  unsigned voiceActorCount()const{return namedVoices?7:0;}
  float characterVoiceGain(std::string_view actor)const;
  bool characterVoiceMuted(unsigned index)const;

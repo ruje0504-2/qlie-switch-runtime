@@ -2,6 +2,7 @@
 #pragma once
 #include "story.hpp"
 #include "profiles/title_layout.hpp"
+#include "profiles/settings_layout.hpp"
 
 namespace whj1::profile {
 // The original Moonlight clip is 74.7 MiB after stereo PCM decoding.
@@ -31,6 +32,7 @@ inline const qlie::ArchiveLayout archives{
 };
 inline constexpr whj2::LegacyAvgLayout legacyLayout{
  "windowframe_window.b",261,603,824,120,24,
+ 0,720,
  285,567,24,0,
  "^face,x:200,y:720,align:center:bottom,mode:auto,pri:1015",
  "5",0x00b6,0x01f7,
@@ -70,6 +72,12 @@ inline constexpr whj2::TitleLayout title{
  {"start","load","album","option","quit"},
  {"cg_mode","memory_mode","sound_mode","back"},{},{},0,0,false,0,0,0,true,true
 };
+inline constexpr whj2::SettingsLayout settingsLayout{{{
+ {355,198,245,-6,-10,5},{355,314,245,-6,-10,5},
+ {662,164,465,-8,-11,5},{662,243,465,-8,-11,5},{662,322,465,-8,-11,5},
+ {662,401,465,-8,-11,5},{662,480,465,-8,-11,5},{662,559,465,-8,-11,5},
+ {355,373,245,-6,-10,5}
+}}, {225,304,383,462,541}, true};
 inline constexpr bool explicitCharacterExtensions=true;
 inline constexpr bool captureReplacements=false;
 inline constexpr bool relativeCameraDepth=false;

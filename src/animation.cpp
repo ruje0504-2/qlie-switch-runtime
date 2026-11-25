@@ -246,7 +246,10 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
  for(const auto&key:layer.keys)if(keyCode(key,0x34)==1&&ms>=keyU32(key,0)){
   if(keyI16(key,0x8d)!=0){out.unsupported.push_back("conditional-key-jump");break;}
   int target=keyI16(key,0x89);if(target<0||size_t(target)>=layer.keys.size()){out.unsupported.push_back("invalid-key-jump");break;}
-  double start=keyU32(layer.keys[size_t(target)],0),end=keyU32(key,0);
+  const auto& destination=layer.keys[size_t(target)];
+  double start=keyU32(destination,0),end=keyU32(key,0);
+  // A jump to the current key holds it instead of reaching later padding keys.
+  if(&destination==&key){ms=end;break;}
   if(start>=end){out.unsupported.push_back("nonbackward-key-jump");break;}
   ms=start+std::fmod(ms-start,end-start);break;
  }

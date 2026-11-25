@@ -18,6 +18,7 @@ struct StoryState {
 struct LegacyAvgLayout {
  const char* messageImage;
  unsigned messageX,messageY,messageWidth,messageHeight,messageFontSize;
+ unsigned frameX,frameY;
  unsigned speakerX,speakerY,speakerSize,speakerColor;
  const char* faceWindow;
  const char* externalFontSlot;

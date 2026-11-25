@@ -26,6 +26,16 @@ int main(){try{
  check(std::abs(randomAt10.x-expected)<.0001f&&randomAt10.unsupported.empty(),"random5 quotient and table wrapping");
  Animation looping;looping.bounds={1280,720,1000,200};
  check(nestedAnimationTime(looping,1000)==200&&nestedAnimationTime(looping,1500)==700,"child loop wrapping");
+ auto freeze=layer(0,0,100,4);
+ freeze.keys.resize(3,qlie::Bytes(162));
+ freeze.keys[1]=freeze.keys[0];
+ freeze.keys[1][0]=0x70;freeze.keys[1][1]=0x17; // 6000 ms
+ freeze.keys[1][6]=1;freeze.keys[1][0x34]=1;freeze.keys[1][0x89]=1;
+ freeze.keys[2][0]=0x58;freeze.keys[2][1]=0x1b; // 7000 ms padding
+ const auto beforeHold=sampleAnimation(freeze,5999);
+ const auto held=sampleAnimation(freeze,30000);
+ check(beforeHold.resource==0&&held.kind==4&&held.resource==1&&held.unsupported.empty(),
+       "self jump holds the current picture after all later keys");
  check(nestedAnimationTime(looping,100)==100&&nestedAnimationTime(looping,200)==200,"child loop intro");
  looping.bounds[2]=0;check(nestedAnimationTime(looping,1500)==1500,"unbounded child timeline");
 

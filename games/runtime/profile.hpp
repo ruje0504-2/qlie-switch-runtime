@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
+#include "profiles/settings_layout.hpp"
 #if defined(QLIE_PROFILE_WHJ1)
 #include "profiles/whj1.hpp"
 namespace game_profile=whj1::profile;
+inline constexpr auto& gameSettingsLayout=whj1::profile::settingsLayout;
 #elif defined(QLIE_PROFILE_WHJ5)
 #include "profiles/whj5.hpp"
 namespace game_profile=whj5::profile;
@@ -18,4 +20,7 @@ namespace game_profile=whj4::profile;
 #else
 #include "profiles/whj2.hpp"
 namespace game_profile=whj2::profile;
+#endif
+#if !defined(QLIE_PROFILE_WHJ1)
+inline constexpr auto& gameSettingsLayout=whj2::standardSettingsLayout;
 #endif

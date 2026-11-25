@@ -1918,6 +1918,7 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
  auto get=[&](const Layer*l,const std::string&k,float def){return k=="pri"?priority(*l):value(*l,k,def);};
  std::stable_sort(sorted.begin(),sorted.end(),[&](auto*a,auto*b){return get(a,"pri",0)<get(b,"pri",0);});
  const auto panned=layers.find(panLayer);
+ const auto message=layers.find("message");
  for(auto*l:sorted){
  auto beforeImages=queue.imageCount();
  const std::string_view align=l->params.at("align");
@@ -1945,7 +1946,10 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
  const auto [w,h]=l->composite&&!filmLayer?l->composite->dimensions():std::make_pair(bitmap->width,bitmap->height);
  const auto blend=l->params.find("blend");
  const unsigned blendMode=blend==l->params.end()?0:imageBlend(blend->second);
- float layerX=get(l,"x",640),layerY=get(l,"y",360);
+ const bool messageLayer=message!=layers.end()&&l==&message->second;
+ const auto* legacyWindow=messageLayer?game_profile::story.legacyAvg:nullptr;
+ const float textX=get(l,"x",640),textY=get(l,"y",360);
+ float layerX=legacyWindow?legacyWindow->frameX:textX,layerY=legacyWindow?legacyWindow->frameY:textY;
  float layerZ=get(l,"z",0),scaleX=get(l,"scalex",100),scaleY=get(l,"scaley",100),scaleZ=get(l,"scalez",100);
  if(panned!=layers.end()&&l==&panned->second){
   layerX=640-panExtentX*std::clamp(1.7f*panX,-1.f,1.f);
@@ -1978,7 +1982,6 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
   return cached.result.get();
  };
  const Image*plain=l->pixels.get();
- const bool messageLayer=layers.count("message")&&l==&layers.at("message");
  if(filmLayer){
   const auto name=filterName(l->params,0);
   auto&cached=l->filtered[0];
@@ -2017,8 +2020,12 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
  AnimationContext external;external.randomCursor=&waveformCursor;external.external=l->external;external.externalMask=l->externalMask;
  if(l->composite&&!filmLayer){auto m=l->params.find("motion");
   std::optional<const Image*> messageSurface;
-  if(messageLayer)messageSurface=l->pixels.get();
-  l->composite->enqueue(queue,l->milliseconds,m==l->params.end()?"":m->second,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),blendMode,l->params.count("@portrait")?l->pixels.get():nullptr,messageSurface,windowAlpha,uiSlots.empty()?nullptr:&uiSlots,&external,spatial?&matrix:nullptr,textureFilter,liveVideo,readAhead,asyncVideo,l->replacementVideo.get());
+  if(messageLayer&&!legacyWindow)messageSurface=l->pixels.get();
+  const float opacity=legacyWindow?alpha*windowAlpha/255.f:alpha;
+  l->composite->enqueue(queue,l->milliseconds,m==l->params.end()?"":m->second,placement,get(l,"pri",0),opacity,uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),blendMode,l->params.count("@portrait")?l->pixels.get():nullptr,messageSurface,windowAlpha,uiSlots.empty()?nullptr:&uiSlots,&external,spatial?&matrix:nullptr,textureFilter,liveVideo,readAhead,asyncVideo,l->replacementVideo.get());
+  // Legacy AVG renders MessageText independently of WindowFrame.
+  if(legacyWindow&&l->pixels)
+   queue.image(*l->pixels,Affine2D{1,0,0,1,textX,textY},depth+10,alpha,0,0xffffff);
  }
  else if(spatial){transform.alpha=get(l,"alpha",255);transform.addColor=uint32_t(get(l,"addcolor",0));transform.mulColor=uint32_t(get(l,"mulcolor",0xffffff));transform.flags=blendMode;transform.textureFilter=textureFilter;quad(queue,*plain,matrix,transform,get(l,"pri",0));}
  else queue.image(*plain,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),blendMode,textureFilter);

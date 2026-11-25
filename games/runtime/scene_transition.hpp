@@ -39,6 +39,7 @@ public:
  bool commandWithCapture(const std::string&,const std::function<qlie::Bytes()>&,SentenceWait* wait=nullptr,bool animate=true);
  void startAnimation(const std::string&,double,const qlie::Bytes&);
  bool isActive()const{return active;}
+ bool awaitingPresentation()const{return staged;}
  bool needsTarget()const;
  bool needsCanvas()const;
  void captureTarget(const qlie::Bytes&);

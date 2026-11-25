@@ -1179,7 +1179,9 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   if(deferSceneCommand(e,resources,blur,gradient))return;
   if(gradient)images->takeBitmapFilter(*gradient);
   if constexpr(game_profile::deferredSceneChanges){
-   if(!normalSkip&&!checkedOutgoingScene&&images->changesCapturedScene(e.value)){
+   // AVG captures at each explicit fade, including consecutive fades in one page.
+   const bool nativeFadePending=game_profile::story.legacyAvg&&transition->awaitingPresentation();
+   if(!normalSkip&&!nativeFadePending&&!checkedOutgoingScene&&images->changesCapturedScene(e.value)){
     if(story.beforeNextPresentation(!body.empty(),[this](const auto&next){
         return next.value.rfind("^sentence,",0)==0&&transition->needsCapture(next.value);
        })){

@@ -1,0 +1,76 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+#version 430
+layout(local_size_x=16,local_size_y=16) in;
+layout(binding=0,std430) readonly buffer Source { uint source[]; };
+layout(binding=1,std430) buffer Destination { uint destination[]; };
+#define DEKO_RASTER
+#define DEKO_MOTION_KERNEL
+#include "raster_types.glsl"
+// A 64 KiB compute uniform buffer holds 409 of the 160-byte Draw records.
+layout(std140,binding=1) uniform Commands { Draw draws[409]; };
+layout(binding=3,std430) readonly buffer Tiles { uint tiles[]; };
+layout(std140,binding=0) uniform Parameters { vec4 p0;vec4 p1;vec4 p2;vec4 p3;ivec4 rect;uvec4 meta;uvec4 colors; } frame;
+#include "raster_pixels.glsl"
+#include "raster_gray.glsl"
+
+// Each invocation samples its own coordinates. The shared-coordinate version
+// hit a GPU queue error on Switch when restoring a four-layer blizzard.
+void main(){
+ uint header=gl_WorkGroupID.x*4u;
+ uint packedOrigin=tiles[header],first=tiles[header+1u],count=tiles[header+2u],control=tiles[header+3u];
+ ivec2 origin=ivec2(packedOrigin&65535u,packedOrigin>>16);
+ ivec2 q=origin+ivec2(gl_LocalInvocationID.xy);
+ uint index=uint(q.y)*frame.meta.x+uint(q.x);
+ uint prefixIndex=frame.meta.x*frame.meta.y+index;
+ uvec4 color=unpack((control&0x80000000u)!=0u?destination[prefixIndex]:
+                    frame.meta.w!=0u?frame.colors.x:destination[index]);
+ uint saveAfter=control&0x7fffffffu;
+
+ uint tile=uint(origin.y>>4)*(frame.meta.x>>4u)+uint(origin.x>>4);
+ for(uint item=0u;item<count;++item){
+  uint drawIndex=tiles[first+item];
+  uint flags=draws[drawIndex].meta.z;
+  if((flags&0xff00u)==512u&&(flags&524288u)==0u){
+   // The classifier has verified the enlarged storm is opaque grayscale.
+   uint gray=fogGray(draws[drawIndex],q);
+   uvec3 snow=uvec3(gray);
+   color.rgb=min(uvec3(255u),snow+color.rgb-((snow*color.rgb)>>8u));
+   color.a=255u;
+  }else if((flags&0xff00u)==512u){
+   // Classification guarantees a full-canvas, aligned Screen layer.
+   // Fetch only its source and coverage offsets along this branch.
+   uvec2 offsets=draws[drawIndex].colors.zw;
+   if(offsets.y!=0u){
+    if(source[offsets.y+tile]!=0u){
+     uvec3 s=unpack(source[offsets.x+index]).rgb;
+     color.rgb=min(uvec3(255u),s+color.rgb-((s*color.rgb)>>8u));
+    }
+    color.a=255u;
+   }else{
+    uvec4 s=unpack(source[offsets.x+index]);
+    uint a=s.a*draws[drawIndex].meta.w/255u;
+    s.a=a;
+    uvec4 w=(s*(a+(a>>7u)))>>8u;
+    color=min(uvec4(255u),w+color-((w*color)>>8u));
+   }
+  }else{
+   Draw p=draws[drawIndex];
+   if(all(greaterThanEqual(q,p.rect.xy))&&all(lessThan(q,p.rect.zw))){
+    uvec4 s=uvec4(0u);
+    if((p.meta.z&524288u)!=0u)s=pixel(p,q-ivec2(p.p1.xy));
+    else{
+     precise vec2 d=vec2(q)+0.5-p.p1.xy;
+     precise vec2 uv=vec2(divide(p.p0.w*d.x-p.p0.y*d.y,p.p1.z),divide(-p.p0.z*d.x+p.p0.x*d.y,p.p1.z));
+     if(all(greaterThanEqual(uv,vec2(0)))&&all(lessThan(uv,vec2(p.meta.xy))))s=samplePixel(p,uv);
+    }
+    uint a=s.a*p.meta.w/255u;
+    s.a=a;
+    if(a==255u)color=s;
+    else if(a!=0u)color=uvec4(ivec4(color)+((ivec4(s)-ivec4(color))*int((a+(a>>7u))>>1u)>>7));
+   }
+  }
+  if(item+1u==saveAfter)destination[prefixIndex]=pack(color);
+ }
+ // The native present path copies these tiles from the retained canvas.
+ destination[index]=pack(color);
+}

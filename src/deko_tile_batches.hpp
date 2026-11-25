@@ -49,6 +49,18 @@ inline bool axisBitmap(const Push& p){
  constexpr uint32_t allowed=0xffffu|524288u;
  return !(p.meta[2]&~allowed)&&p.p[0][1]==0.f&&p.p[0][2]==0.f&&p.p[0][0]>0.f&&p.p[0][3]>0.f;
 }
+inline unsigned blizzardDraw(const DrawData& draw,const DrawSources& source){
+ const auto& p=draw.image;
+ const auto blend=(p.meta[2]>>8)&255u;
+ if(p.meta[2]&~(0xffffu|524288u)||p.colors[0]!=0||p.colors[1]!=0xffffff)return 0;
+ if(blend<2)return 1;
+ if(blend==2&&p.meta[0]==960&&p.meta[1]==540&&p.meta[3]==255&&
+    source.opaque&&source.monochrome&&axisBitmap(p)&&(p.meta[2]&255u)==2u&&
+    axisBounds(p).covers(0,0,Width,Height))return 3;
+ return blend==2&&(p.meta[2]&524288u)&&p.meta[0]==Width&&p.meta[1]==Height&&
+        p.p[1][0]==0.f&&p.p[1][1]==0.f&&
+        p.rect[0]==0&&p.rect[1]==0&&p.rect[2]==int(Width)&&p.rect[3]==int(Height)?2:0;
+}
 inline bool fogDraw(const DrawData& draw,const DrawSources& sources){
  const auto& p=draw.image;
  // The enlarged fog layers use the monochrome compositor over a saved prefix.
@@ -61,13 +73,19 @@ class DekoTileBatches {
 public:
  enum Kind : uint8_t { Motion,Base,General,
 #ifdef QLIE_PROFILE_WHJ6
-  Snow,Fog,HardLight,
+  Snow,Fog,HardLight,Blizzard,
 #endif
   KindCount };
  static constexpr uint32_t AlignmentWords=64;
  static constexpr uint32_t PaddingWords=(KindCount-1)*(AlignmentWords-1);
  std::array<unsigned,KindCount> count{};
  std::array<uint32_t,KindCount> offsetWords{};
+#ifdef QLIE_PROFILE_WHJ6
+ static constexpr size_t BlizzardUniformBytes=64u*1024u;
+ static constexpr size_t BlizzardDrawLimit=BlizzardUniformBytes/sizeof(DrawData);
+ static_assert(BlizzardDrawLimit==409);
+ SwapDamage::Mask bufferedBlizzard;
+#endif
 private:
  std::vector<Kind> drawKinds;
  std::array<Kind,TileCount> tileKinds{};
@@ -75,6 +93,7 @@ private:
  std::vector<Whj6SnowDraw> snowDraws;
  std::vector<AxisBounds> fogDraws;
  std::vector<uint8_t> fogOverlays;
+ std::vector<uint8_t> blizzardDraws;
  std::vector<AxisBounds> hardLightDraws,alignedBases;
  bool snowTile(const uint32_t* ids,unsigned layers,uint32_t control,unsigned x,unsigned y)const{
   if(control||layers>3)return false;
@@ -94,6 +113,16 @@ private:
   return layers==2&&control<=1&&alignedBases[ids[0]].covers(x,y,Tile,Tile)&&
          hardLightDraws[ids[1]].covers(x,y,Tile,Tile);
  }
+ bool blizzardTile(const uint32_t* ids,unsigned layers)const{
+  unsigned screens=0,storms=0;
+  for(unsigned layer=0;layer<layers;++layer){
+   const auto type=blizzardDraws[ids[layer]];
+   if(!type)return false;
+   screens+=type>=2;
+   storms+=type==3;
+  }
+  return screens>=3||storms>=1;
+ }
 #endif
 public:
  void write(const Scene& scene,uint32_t* words){
@@ -102,6 +131,9 @@ public:
   drawKinds.resize(frame.commands.size());
   bool hasBase=false,hasGeneral=false,hasSnow=false,hasFog=false,hasHardLight=false;
 #ifdef QLIE_PROFILE_WHJ6
+  bufferedBlizzard.reset();
+  unsigned blizzardLayers=0,stormLayers=0;
+  blizzardDraws.resize(frame.commands.size());
   snowDraws.resize(frame.commands.size());
   fogDraws.resize(frame.commands.size());
   fogOverlays.resize(frame.commands.size());
@@ -113,6 +145,9 @@ public:
    drawKinds[i]=opaqueBaseDraw(draw,frame.sources[i])?Base:motionDraw(draw)?Motion:General;
    hasBase|=drawKinds[i]==Base;hasGeneral|=drawKinds[i]==General;
 #ifdef QLIE_PROFILE_WHJ6
+   blizzardDraws[i]=blizzardDraw(draw,frame.sources[i]);
+   blizzardLayers+=blizzardDraws[i]>=2;
+   stormLayers+=blizzardDraws[i]==3;
    snowDraws[i]=Whj6SnowDraw::classify(draw,frame.sources[i]);
    hasSnow|=snowDraws[i].part==Whj6SnowDraw::Video;
    const bool fog=fogDraw(draw,frame.sources[i]);
@@ -129,7 +164,14 @@ public:
   }
   offsetWords.fill(0);
   count.fill(0);
-  if(!hasBase&&!hasGeneral&&!hasSnow&&!hasFog&&!hasHardLight){
+#ifdef QLIE_PROFILE_WHJ6
+  const bool hasBlizzard=(blizzardLayers>=3||stormLayers>=2)&&frame.commands.size()<=BlizzardDrawLimit;
+#endif
+  if(!hasBase&&!hasGeneral&&!hasSnow&&!hasFog&&!hasHardLight
+#ifdef QLIE_PROFILE_WHJ6
+     &&!hasBlizzard
+#endif
+  ){
    count[Motion]=unsigned(tiles.size());scene.writeTileList(words);
    return;
   }
@@ -139,7 +181,10 @@ public:
    auto first=scene.workIndices.begin()+h[1];
    Kind kind=Motion;
 #ifdef QLIE_PROFILE_WHJ6
-   if(hasFog&&h[2]&&fogTile(scene.workIndices.data()+h[1],h[2],h[3],x,y))kind=Fog;
+   if(hasBlizzard&&h[2]&&blizzardTile(scene.workIndices.data()+h[1],h[2])){
+    kind=Blizzard;bufferedBlizzard.set(tile);
+   }
+   else if(hasFog&&h[2]&&fogTile(scene.workIndices.data()+h[1],h[2],h[3],x,y))kind=Fog;
    else if(hasSnow&&h[2]>=2&&snowTile(scene.workIndices.data()+h[1],h[2],h[3],x,y))kind=Snow;
    else if(hasHardLight&&h[2]&&hardLightTile(scene.workIndices.data()+h[1],h[2],h[3],x,y))kind=HardLight;
    else

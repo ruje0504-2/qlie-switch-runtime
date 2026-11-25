@@ -129,11 +129,12 @@ struct Scene {
  virtual void setInterlaced(bool)=0;
  virtual bool supportsVideoSurfaces()const{return false;}
  virtual bool beginVideoSurface(const KVideoSurface&){return false;}
- virtual std::optional<uint32_t> videoTexture(const KVideoSurface&,uint64_t&,bool){return std::nullopt;}
+ virtual std::optional<uint32_t> videoTexture(const KVideoSurface&,uint64_t&,bool,uint32_t* =nullptr){return std::nullopt;}
 
  void freeSpan(Span);
  Span allocateSpan(size_t);
- uint32_t texture(const Image&,uint64_t& uploadId,bool* opaque=nullptr,bool* monochrome=nullptr);
+ uint32_t texture(const Image&,uint64_t& uploadId,bool* opaque=nullptr,bool* monochrome=nullptr,
+                  uint32_t* screenCoverage=nullptr);
  void waitForPrevious();
  void completeFrame();
  void traceFrame(const char* format,...) __attribute__((format(printf,2,3)));

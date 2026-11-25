@@ -103,9 +103,9 @@ Scene::Span Scene::allocateSpan(size_t size){
   for(auto it=freeSpans.begin();it!=freeSpans.end();++it)if(it->second>=size){Span span{it->first,size};size_t rest=it->second-size;freeSpans.erase(it);if(rest)freeSpans.emplace(span.offset+size,rest);return span;}
   Span span{textureEnd,size};textureEnd+=size;return span;
  }
-uint32_t Scene::texture(const Image&i,uint64_t&uploadId,bool*opaque,bool*monochrome){
+uint32_t Scene::texture(const Image&i,uint64_t&uploadId,bool*opaque,bool*monochrome,uint32_t*screenCoverage){
   if(i.videoSurface){
-   if(auto address=videoTexture(i.videoSurface->surface,uploadId,i.videoSurface->sepia)){
+   if(auto address=videoTexture(i.videoSurface->surface,uploadId,i.videoSurface->sepia,screenCoverage)){
     if(opaque)*opaque=true;
     return *address;
    }
@@ -296,17 +296,22 @@ void Scene::dispatch(const Image&i,Push&p,float alpha,uint32_t add,uint32_t mul,
    p.meta[2]|=524288u;
   bool needOpacity=blend<2&&p.meta[3]==255;
   bool* monochrome=nullptr;
+  uint32_t* screenCoverage=nullptr;
 #ifdef QLIE_PROFILE_WHJ6
   const bool fog=blend==2&&i.width==1920&&i.height==1080&&!i.videoSurface;
   needOpacity|=fog||(blend==2&&filter==0&&p.meta[3]==255&&i.videoSurface);
   if(fog||(blend==13&&!i.videoSurface&&i.width>=512&&i.height>=300))
    monochrome=&sources.monochrome;
+  // An aligned, untinted and fully opaque Screen movie can skip black tiles.
+  if(i.videoSurface&&blend==2&&(p.meta[2]&524288u)&&p.meta[3]==255&&add==0&&mul==0xffffff&&
+     i.width==Width&&i.height==Height&&p.p[1][0]==0.f&&p.p[1][1]==0.f)
+   screenCoverage=&p.colors[3];
   if(filter==2&&i.alphaTiles&&i.alphaTiles->sourceVersion&&i.alphaTiles->sourceVersion==i.version.get()&&
      p.p[0][1]==0.f&&p.p[0][2]==0.f&&p.p[0][0]>=.125f&&p.p[0][3]>=.125f&&
      std::abs(p.p[1][0])<=65536.f&&std::abs(p.p[1][1])<=65536.f)
    sources.alphaTiles=i.alphaTiles;
 #endif
-  p.colors[2]=texture(i,sources.primary,needOpacity?&sources.opaque:nullptr,monochrome);
+  p.colors[2]=texture(i,sources.primary,needOpacity?&sources.opaque:nullptr,monochrome,screenCoverage);
   if(i.width==1&&i.height==1)std::memcpy(&sources.singlePixel,i.pixels.data(),4);
   if(compareAlignedBitmaps&&!i.videoSurface&&current->cleared&&current->alignedBitmap==UINT32_MAX&&(p.meta[2]&524288u)&&
      i.width==Width&&i.height==Height&&p.p[1][0]==0.f&&p.p[1][1]==0.f){

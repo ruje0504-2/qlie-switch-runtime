@@ -3,10 +3,17 @@
 layout(local_size_x=16,local_size_y=8) in;
 layout(r8ui,binding=0) uniform readonly uimage2D lumaPlane;
 layout(rg8ui,binding=1) uniform readonly uimage2D chromaPlane;
-layout(std140,binding=0) uniform Target { uint firstWord; uint sepia; };
+layout(std140,binding=0) uniform Target { uint firstWord; uint sepia;
+#ifdef DEKO_WHJ6_VIDEO
+ uint screenCoverage;
+#endif
+};
 layout(std430,binding=0) writeonly buffer Texels { uint texels[]; };
+#ifdef DEKO_WHJ6_VIDEO
+shared uint occupiedRows[16];
+#endif
 
-void convert(ivec2 q,ivec3 chromaBias){
+uint convert(ivec2 q,ivec3 chromaBias){
  int y=(int(imageLoad(lumaPlane,q).r)-16)*298;
  ivec3 rgb=clamp((ivec3(y)+chromaBias)>>8,0,255);
  if(sepia!=0u){
@@ -14,7 +21,9 @@ void convert(ivec2 q,ivec3 chromaBias){
   const ivec3 tone=ivec3(68,34,17);
   rgb=gray+tone-gray*tone/255;
  }
- texels[firstWord+uint(q.y)*1280u+uint(q.x)]=0xff000000u|uint(rgb.r)<<16|uint(rgb.g)<<8|uint(rgb.b);
+ uint rgbBytes=uint(rgb.r)<<16|uint(rgb.g)<<8|uint(rgb.b);
+ texels[firstWord+uint(q.y)*1280u+uint(q.x)]=0xff000000u|rgbBytes;
+ return rgbBytes;
 }
 
 void main(){
@@ -23,8 +32,27 @@ void main(){
  ivec2 c=ivec2(imageLoad(chromaPlane,chroma).rg)-128;
  ivec3 bias=ivec3(409*c.y,-100*c.x-208*c.y,516*c.x)+128;
  ivec2 q=chroma*2;
+#ifdef DEKO_WHJ6_VIDEO
+ uint rgb=convert(q,bias)|convert(q+ivec2(1,0),bias)|
+          convert(q+ivec2(0,1),bias)|convert(q+ivec2(1,1),bias);
+ if(screenCoverage!=0u){
+  // A 32x16 NV12 workgroup spans two 16x16 raster tiles.
+  uint x=gl_LocalInvocationID.x,y=gl_LocalInvocationID.y;
+  // Vote per row to avoid one atomic hot spot in dense snow.
+  if(x<2u)occupiedRows[y*2u+x]=0u;
+  barrier();
+  if(rgb!=0u)atomicOr(occupiedRows[y*2u+(x>>3u)],1u);
+  barrier();
+  if(y==0u&&x<2u){
+   uint visible=0u;
+   for(uint row=0u;row<8u;++row)visible|=occupiedRows[row*2u+x];
+   texels[screenCoverage+gl_WorkGroupID.y*80u+gl_WorkGroupID.x*2u+x]=visible;
+  }
+ }
+#else
  convert(q,bias);
  convert(q+ivec2(1,0),bias);
  convert(q+ivec2(0,1),bias);
  convert(q+ivec2(1,1),bias);
+#endif
 }

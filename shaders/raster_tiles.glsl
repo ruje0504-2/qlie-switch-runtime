@@ -29,6 +29,19 @@ void applyDraw(Draw p,ivec2 q,uint index,inout uvec4 color
   color=glyphOver(s,color);return;
  }
 #endif
+#ifdef DEKO_WHJ6_MOTION
+ // The converter proved every RGB byte in this Screen tile is zero.
+ // An opaque Screen black still sets output alpha to 255.
+ if(p.colors.w!=0u){
+  uint tile=uint(q.y>>4)*(frame.meta.x>>4u)+uint(q.x>>4);
+  if(source[p.colors.w+tile]!=0u){
+   uvec3 s=unpack(source[p.colors.z+index]).rgb;
+   color.rgb=min(uvec3(255u),s+color.rgb-((s*color.rgb)>>8u));
+  }
+  color.a=255u;
+  return;
+ }
+#endif
  uvec4 s;
  if((p.meta.z&524288u)!=0u){
   s=pixel(p,q-ivec2(p.p1.xy));

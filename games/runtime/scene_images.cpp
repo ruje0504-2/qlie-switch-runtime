@@ -406,7 +406,7 @@ struct Composite {
    }
   }
   for(auto&motion:definition.motions)for(auto&layer:motion.layers){if(layer.mode>2)warn("layer-mode="+std::to_string(layer.mode));
- for(auto&k:layer.keys)if(k[4]!=0&&k[4]!=1&&k[4]!=3&&k[4]!=4&&k[4]!=6&&k[4]!=10&&k[4]!=15&&k[4]!=16&&k[4]!=17&&k[4]!=18&&k[4]!=20)warn("primitive="+std::to_string(k[4]));
+ for(auto&k:layer.keys)if(k[4]!=0&&k[4]!=1&&k[4]!=3&&k[4]!=4&&k[4]!=6&&k[4]!=9&&k[4]!=10&&k[4]!=15&&k[4]!=16&&k[4]!=17&&k[4]!=18&&k[4]!=20)warn("primitive="+std::to_string(k[4]));
  }
  }
  size_t closeVideoClips(AssetReadAhead*worker){
@@ -530,7 +530,7 @@ struct Composite {
   queue.image(white,affine(parent,shape),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,k.textureFilter);
   continue;
  }
- if(k.kind==10){
+ if(k.kind==9||k.kind==10){
   if(k.resource>=members.size()||k.childMotion>=members.size())throw std::runtime_error("Mask image index "+path);
   const bool textSource=messageSurface&&messagePlaceholder&&k.resource==messageSlot;
   const Image*source=textSource?*messageSurface:members[k.resource].image.get();
@@ -554,7 +554,15 @@ struct Composite {
    unsigned sx=pixel(k.mask.sourceX-width*k.mask.alignX+u*width,source->width),sy=pixel(k.mask.sourceY-height*k.mask.alignY+v*height,source->height);
    unsigned mx=pixel(k.mask.x-maskWidth*k.mask.alignX+u*maskWidth,mask->width),my=pixel(k.mask.y-maskHeight*k.mask.alignY+v*maskHeight,mask->height);
    auto src=source->pixels.data()+(size_t(sy)*source->width+sx)*4;auto dst=output.pixels.data()+(size_t(y)*output.width+x)*4;
-   std::copy(src,src+4,dst);dst[3]=gradientMaskAlpha(src[3],mask->pixels[(size_t(my)*mask->width+mx)*4],k.mask.amount,k.mask.mode);
+   auto second=mask->pixels.data()+(size_t(my)*mask->width+mx)*4;
+   if(k.mask.crossfade){
+    // WHJ5 0x562164 picks the exact endpoints. 0x5385a4 mixes BGRA in 1/128 steps.
+    const unsigned weight=k.mask.amount==255?128:k.mask.amount>>1;
+    for(unsigned channel=0;channel<4;++channel)dst[channel]=uint8_t((src[channel]*(128-weight)+second[channel]*weight)>>7);
+   }else{
+    std::copy(src,src+4,dst);
+    dst[3]=gradientMaskAlpha(src[3],second[0],k.mask.amount,k.mask.mode);
+   }
   }
 
   queue.snapshot(output,affine(parent,placement),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,k.textureFilter);
@@ -735,7 +743,7 @@ std::string SceneImages::filterName(const std::map<std::string,std::string>& par
  return filter.empty()?base:base+"\\"+filter;
 }
 std::optional<SceneImages::BackgroundBlur> SceneImages::backgroundBlur(const std::string&line)const{
- if(!readAhead||line.rfind("^bg",0)!=0||line.find("filter")==line.npos||line.find(":blur")==line.npos)return {};
+ if(!readAhead||line.rfind("^bg",0)!=0||line.find(",imgfilter")==line.npos||line.find("blur")==line.npos)return {};
  auto comma=line.find(',');
  auto layer=line.substr(1,comma-1);
  auto found=layers.find(layer);
@@ -1110,9 +1118,13 @@ std::array<float,3> SceneImages::sampleWave(const Layer&layer){
          float(amplitude(2)*envelope*value(layer,"wave_z",0))};
 }
 bool SceneImages::cameraCommand(const std::string&arguments){
+ const auto resetCamera=[](Layer&layer){
+  layer=Layer{};
+  layer.params={{"show","false"},{"x","0"},{"y","0"},{"z","0"},{"scalex","100"},{"scaley","100"},
+   {"rotz","0"},{"pri1","-100"},{"pri2","999"},{"move","linear"},{"time","0"}};
+ };
  auto&camera=layers["camera"];
- if(camera.params.empty())camera.params={{"show","false"},{"x","0"},{"y","0"},{"z","0"},
-  {"scalex","100"},{"scaley","100"},{"rotz","0"},{"pri1","-100"},{"pri2","999"},{"move","linear"}};
+ if(camera.params.empty())resetCamera(camera);
  auto before=camera;
  const char*sourceKeys[]={"ax","ay","az","zoomx","zoomy","rotz"};
  const char*transformKeys[]={"x","y","z","scalex","scaley","rotz"};
@@ -1122,6 +1134,13 @@ bool SceneImages::cameraCommand(const std::string&arguments){
   const auto colon=field.find(':');
   if(colon==field.npos)throw std::runtime_error("Unknown camera template "+field);
   const auto key=field.substr(0,colon),value=field.substr(colon+1);
+  if(key=="clear"&&value=="def"){
+   resetCamera(camera);
+   before=camera;
+   duration="0";
+   moved=false;
+   continue;
+  }
   if(key=="genfilter"){setWave(camera,value);continue;}
   if(key=="time")camera.params[key]=duration=value;
   if(key=="movetime")duration=value;

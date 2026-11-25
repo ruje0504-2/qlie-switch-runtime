@@ -403,13 +403,14 @@ void GpuRaster::maskedImage(const Image&source,const Image&mask,const AnimationS
  float maskWidth=settings.maskWidth?settings.maskWidth:mask.width,maskHeight=settings.maskHeight?settings.maskHeight:mask.height;
  draw.maskSource[0]=settings.sourceX-width*settings.alignX;draw.maskSource[1]=settings.sourceY-height*settings.alignY;draw.maskSource[2]=width;draw.maskSource[3]=height;
  // An open mask over the unchanged source samples exactly the original texels.
- if(settings.amount==255&&draw.maskSource[0]==0&&draw.maskSource[1]==0&&width==source.width&&height==source.height&&source.width<=16384&&source.height<=16384){
+ if(!settings.crossfade&&settings.amount==255&&draw.maskSource[0]==0&&draw.maskSource[1]==0&&width==source.width&&height==source.height&&source.width<=16384&&source.height<=16384){
   std::fill_n(draw.maskSource,4,0.f);
   return;
  }
  draw.image.meta[2]|=262144;
  draw.maskRect[0]=settings.x-maskWidth*settings.alignX;draw.maskRect[1]=settings.y-maskHeight*settings.alignY;draw.maskRect[2]=maskWidth;draw.maskRect[3]=maskHeight;
- draw.maskMeta[0]=mask.width;draw.maskMeta[1]=mask.height;draw.maskMeta[2]=s.texture(mask,s.current->sources.back().secondary);draw.maskMeta[3]=unsigned(settings.amount)|(unsigned(settings.mode)<<8);
+ draw.maskMeta[0]=mask.width;draw.maskMeta[1]=mask.height;draw.maskMeta[2]=s.texture(mask,s.current->sources.back().secondary);
+ draw.maskMeta[3]=unsigned(settings.amount)|(unsigned(settings.mode)<<8)|(unsigned(settings.crossfade)<<16);
 }
 void GpuRaster::font(const Image&i,int x,int y){
  if(!i.width||!i.height)return;

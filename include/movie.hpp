@@ -9,7 +9,7 @@ namespace whj2 {
 class Movie {
  qlie::Assets&assets;Audio&audio;
  std::shared_ptr<PreparedMovie> clip;
- std::string pending,path;
+ std::string pending,path,primed;
  std::chrono::steady_clock::time_point requestedAt;
  uint64_t origin=0;
  bool started=false,nativeSurfaces=false;
@@ -22,6 +22,7 @@ public:
  void setNativeSurfaces(bool enabled){nativeSurfaces=enabled;}
  std::string assetPath(const std::string&)const;
  void warmFile(const std::string&);
+ void primeFile(const std::string&);
  void open(const std::string&);void openBytes(qlie::Bytes,const std::string&);
  void update();void presented();void stop();
  bool loading()const{return !pending.empty();}

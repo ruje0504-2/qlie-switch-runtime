@@ -33,8 +33,12 @@ uvec4 pixel(Draw p,ivec2 q){
  precise vec2 from=p.maskSource.xy+uv*p.maskSource.zw,mask=p.maskRect.xy+uv*p.maskRect.zw;
  ivec2 sq=clamp(ivec2(floor(from)),ivec2(0),ivec2(p.meta.xy)-1),mq=clamp(ivec2(floor(mask)),ivec2(0),ivec2(p.maskMeta.xy)-1);
  uvec4 color=unpack(loadTexel(p.colors.z+uint(sq.y)*p.meta.x+uint(sq.x)));
- uint blue=loadTexel(p.maskMeta.z+uint(mq.y)*p.maskMeta.x+uint(mq.x))&255u;
- color.a=maskAlpha(color.a,blue,p.maskMeta.w&255u,p.maskMeta.w>>8);return color;
+ uint second=loadTexel(p.maskMeta.z+uint(mq.y)*p.maskMeta.x+uint(mq.x)),amount=p.maskMeta.w&255u;
+ if((p.maskMeta.w&65536u)!=0u){
+  uint weight=amount==255u?128u:amount>>1;
+  return (color*(128u-weight)+unpack(second)*weight)>>7;
+ }
+ color.a=maskAlpha(color.a,second&255u,amount,p.maskMeta.w>>8);return color;
 #endif
 }
 uvec4 samplePixel(Draw p,vec2 uv){

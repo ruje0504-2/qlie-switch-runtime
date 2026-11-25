@@ -393,7 +393,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    movie->open(game_profile::secondMakerLogo);
   }else showTitle();
  }
- void warmNextScene(bool openingHint=false){
+ void warmNextScene(bool openingHint=false,bool endingWait=false){
   if(!readAhead)return;
   enum class Kind { Image, Audio, Movie, Rule };
   struct Hint {std::string path;Kind kind;std::optional<whj2::SceneImages::BackgroundBlur> blur;};std::vector<Hint> hints;
@@ -406,6 +406,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    if(keys.size()<hintsPerWorker&&std::find(keys.begin(),keys.end(),key)==keys.end()){keys.push_back(key);hints.push_back({path,kind,std::move(blur)});}
   };
   std::vector<std::string> upcoming;
+  std::string imminentMovie;
   try{upcoming=story.upcomingAssetCommands(openingHint);}
   catch(const std::runtime_error&e){QLIE_LOGF("LOAD read-ahead script: %s\n",e.what());return;}
   for(auto&line:upcoming){
@@ -422,7 +423,10 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    auto comma=line.find(',');auto cmd=line.substr(0,comma);
    if(cmd=="^movie"){
     auto path=movie->assetPath(line.substr(comma+1));
-    if(assets.exists(path))add(path,Kind::Movie);
+    if(assets.exists(path)){
+     if(endingWait&&imminentMovie.empty())imminentMovie=path;
+     else add(path,Kind::Movie);
+    }
    }else if(cmd=="^sentence"){
     if(normalSkip)continue;
     try{for(const auto&path:transition->ruleAssets(line))add(path,Kind::Rule);}
@@ -449,6 +453,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
     for(auto&path:images->warmPaths(line,&futurePortraits))add(path,Kind::Image);
    }
   }
+  movie->primeFile(imminentMovie);
   readAhead->retain(sceneKeys);
   soundReadAhead->retain(soundKeys);
   for(auto&h:hints){
@@ -816,7 +821,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    if(qlie::diagnostics) timing.capture+=std::chrono::duration<double,std::milli>(LoadClock::now()-start).count();
    return scene;
   },&sentenceWait,!normalSkip);continue;
- }if(e.type=="wait"||e.type=="click-wait"){sentenceWait.native(e.type=="click-wait",e.value.empty()?0:std::stod(e.value));transition->present();warmNextScene();return;
+ }if(e.type=="wait"||e.type=="click-wait"){sentenceWait.native(e.type=="click-wait",e.value.empty()?0:std::stod(e.value));transition->present();
+  warmNextScene(false,e.type=="wait"&&e.file==game_profile::story.endingMovieScript);return;
  }if(e.type=="command"&&e.value.rfind("^savefilter",0)==0){auto fields=whj2::split(e.value,',');if(fields.size()!=2||fields[1]!="0")throw std::runtime_error("Unsupported save thumbnail filter");continue;
  }if(e.type=="audio-volume"){
   auto fields=whj2::split(e.value,',');

@@ -78,6 +78,7 @@ std::shared_ptr<PreparedMovie> prepare(qlie::Bytes bytes,const std::string&name,
 Movie::~Movie(){stop();}
 
 void Movie::stop(){
+ primeFile({});
  if(loading()){
   if(readAhead)readAhead->release(pending);
   pending.clear();
@@ -113,6 +114,14 @@ void Movie::request(const std::string&name,bool required){
 
 void Movie::warmFile(const std::string&name){if(readAhead)request(name,false);}
 
+void Movie::primeFile(const std::string&name){
+ if(!readAhead||name==primed)return;
+ if(!primed.empty())readAhead->discard(primed);
+ primed=name;
+ // An imminent movie can be larger than the speculative cache budget.
+ if(!primed.empty())request(primed,true);
+}
+
 void Movie::takePrepared(){
  if(auto ready=readAhead->takeReady(pending)){
   clip=std::move(ready->movie);
@@ -123,6 +132,7 @@ void Movie::takePrepared(){
 void Movie::open(const std::string&name){
  auto asset=assetPath(name);
  if(!readAhead){openBytes(assets.read(asset),asset);return;}
+ if(primed==asset)primed.clear();
  stop();
  if constexpr (qlie::diagnostics) requestedAt=Clock::now();
  pending=std::move(asset);

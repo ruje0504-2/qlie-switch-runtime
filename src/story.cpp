@@ -150,6 +150,9 @@ const std::vector<std::string>& Story::includeCommands(const std::string&name){
  }
  return includes.emplace(name,std::move(lines)).first->second;
 }
+static std::string endingMovieCommand(const std::string&name){
+ return "^movie,movie/"+qlie::canonical(name);
+}
 std::vector<std::string> Story::upcomingAssetCommands(bool opening){
  std::string file=opening?profile.root:state.at.file;
  std::vector<std::string> out;
@@ -168,9 +171,15 @@ std::vector<std::string> Story::upcomingAssetCommands(bool opening){
    source=&script(next);pc=0;break;
   }
  }
- auto collect=[&out](const std::string&text){
+ const bool ending=!profile.endingMovieScript.empty()&&file==profile.endingMovieScript;
+ auto collect=[&](const std::string&text){
+  if(ending&&text.rfind("^movie,",0)==0){
+   const auto media=state.vars.find("__ending_movie");
+   if(media!=state.vars.end()&&!media->second.empty())out.push_back(endingMovieCommand(media->second));
+   return;
+  }
   const bool clearsCharacter=text.rfind("^chara",0)==0&&text.find("clear:def")!=text.npos;
-  const bool filtersBackground=text.rfind("^bg",0)==0&&text.find(",imgfilter:blur")!=text.npos;
+  const bool filtersBackground=text.rfind("^bg",0)==0&&text.find(",imgfilter")!=text.npos&&text.find("blur")!=text.npos;
   const bool resourceCommand=!text.empty()&&text.front()=='^'&&
     (text.find(",file")!=text.npos||text.find(",$")!=text.npos||text.find(",base:")!=text.npos);
   const bool rule=text.rfind("^sentence,",0)==0&&
@@ -181,7 +190,8 @@ std::vector<std::string> Story::upcomingAssetCommands(bool opening){
  size_t end=std::min(source->ops.size(),pc+96);
  for(;pc<end;++pc){
   const auto&text=source->ops[pc].text;
-  if(text.rfind("\\jmp,",0)==0||text.rfind("\\if,",0)==0||text.rfind("\\sub,",0)==0)break;
+  if(text.rfind("\\jmp,",0)==0||text.rfind("\\if,",0)==0)break;
+  if(text.rfind("\\sub,",0)==0)break;
   if(text.rfind("^include,",0)==0){
    auto args=split(text,',');
    if(args.size()==2)for(const auto&line:includeCommands(args[1]))collect(line);
@@ -307,7 +317,7 @@ void Story::caret(const Op&o){auto a=split(o.text,44);std::string cmd=lower(a[0]
   const auto media=state.vars.find("__ending_movie");
   if(a.size()!=2||a[1].find("ParamStr[0]")==std::string::npos||media==state.vars.end()||media->second.empty())
    throw std::runtime_error("Missing ending movie argument");
-  state.pending.push_back(event("command","^movie,movie/"+qlie::canonical(media->second),o.line));
+  state.pending.push_back(event("command",endingMovieCommand(media->second),o.line));
   return;
  }
  if(!profile.sceneCommands.count(cmd))throw std::runtime_error("Unsupported story command: "+o.text);

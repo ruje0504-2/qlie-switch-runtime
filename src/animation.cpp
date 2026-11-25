@@ -148,6 +148,14 @@ int keyI16(const qlie::Bytes&k,size_t p){
  if(p+2>k.size())throw std::runtime_error("Animation field outside key");
  return int16_t(uint16_t(k[p])|(uint16_t(k[p+1])<<8));
 }
+float animationSine(int phase){
+ static const auto sine=[]{
+  std::array<float,1024> table{};
+  for(size_t i=0;i<table.size();++i)table[i]=float(std::sin(i*2.0*3.14159265358979323846/1024));
+  return table;
+ }();
+ return sine[phase&1023];
+}
 // PE offsets efcb0/efcd2 select the position/scale mode at 0x30.
 // f0860/f0882 use 0x33 for color/alpha. a1bb0/a1c38 use the
 // exponent 1 + 1.4 * power; these are not fixed quartic easing curves.
@@ -172,9 +180,22 @@ float sampleValue(float a,float b,unsigned mode,float power,double t,std::vector
   q=1-std::pow(1-t,1+1.4*power);
   break;
  }
+ case 7:{
+  // WHJ5 0x4fcff4 joins ease-out and ease-in at the midpoint.
+  const double exponent=1+1.4*power;
+  q=t<.5?.5*(1-std::pow(1-t*2,exponent)):.5+.5*std::pow(t*2-1,exponent);
+  break;
+ }
  case 8:{
   const double exponent=1+1.4*power;
   q=t<.5?.5*std::pow(t*2,exponent):1-.5*std::pow((1-t)*2,exponent);
+  break;
+ }
+ case 17:{
+  // WHJ5 0x4fd4c8 damps a table-quantized cosine by the remaining time.
+  const float angle=float(3.14159265L*float(t));
+  const int phase=int(static_cast<long double>(angle)*512*0.3183098865475128L);
+  q=1-(1-t)*animationSine(phase+256);
   break;
  }
  default:warnings.push_back("easing="+std::to_string(mode));
@@ -253,7 +274,11 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
   out.mask.sourceX=input(8);out.mask.sourceY=input(0xa);out.mask.width=input(0xc);out.mask.height=input(0xe);
   out.mask.x=input(0x40);out.mask.y=input(0x42);out.mask.maskWidth=input(0x44);out.mask.maskHeight=input(0x46);
   out.mask.alignX=number(a,0x81)/100;out.mask.alignY=number(a,0x83)/100;
-  out.mask.amount=uint8_t(std::clamp(int(std::round(val(0x37,keyCode(a,0x33),keyCode(a,0x3b)/100.f))),0,255));out.mask.mode=keyCode(a,0x3a);
+  out.mask.mode=keyCode(a,0x3a);
+ }
+ if(out.kind==9||out.kind==10){
+  out.mask.amount=uint8_t(std::clamp(int(std::round(val(0x37,keyCode(a,0x33),keyCode(a,0x3b)/100.f))),0,255));
+  out.mask.crossfade=out.kind==9;
   out.childMotion=keyCode(a,7);
  }
  if(out.kind==0||out.kind==4||out.kind==20||out.kind==21){
@@ -299,13 +324,8 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
   float value=0;bool known=true;
   auto trig=[](float radians,bool cosine){
    // a18c4 quantizes the phase to the engine's 1024-entry sine table.
-   static const auto sine=[]{
-    std::array<float,1024> table{};
-    for(size_t i=0;i<table.size();++i)table[i]=float(std::sin(i*2.0*3.14159265358979323846/1024));
-    return table;
-   }();
    int phase=int(radians*512.f/3.14159265f)+(cosine?256:0);
-   return sine[phase&1023];
+   return animationSine(phase);
   };
   if(op==1){
    if(!context.randomCursor){out.unsupported.push_back("sequential-random-context");continue;}
@@ -349,7 +369,7 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
  }
  if(keyI16(a,0x48)||keyI16(a,0x4a))out.unsupported.push_back("3d-rotation");
  if(out.kind==4&&(out.flags&0x7f)>8)out.unsupported.push_back("bitmap-blend="+std::to_string(out.flags&0x7f));
- if(out.kind!=0&&out.kind!=1&&out.kind!=3&&out.kind!=4&&out.kind!=6&&out.kind!=10&&out.kind!=15&&out.kind!=16&&out.kind!=17&&out.kind!=18)out.unsupported.push_back("primitive="+std::to_string(out.kind));
+ if(out.kind!=0&&out.kind!=1&&out.kind!=3&&out.kind!=4&&out.kind!=6&&out.kind!=9&&out.kind!=10&&out.kind!=15&&out.kind!=16&&out.kind!=17&&out.kind!=18)out.unsupported.push_back("primitive="+std::to_string(out.kind));
  if(layer.mode>2)out.unsupported.push_back("layer-mode="+std::to_string(layer.mode));
  return out;
 }

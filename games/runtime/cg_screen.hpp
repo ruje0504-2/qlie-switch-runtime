@@ -17,6 +17,10 @@ class CgScreen {
  unsigned requestedVariant=0;
 #ifdef QLIE_PROFILE_WHJ6
  bool viewControls=true;
+ bool reverseView=false;
+ std::string prefetchedView;
+ void prefetchView(const std::string&);
+ void cancelViewPrefetch();
  void setViewControls(bool);
 #endif
  void prepareLayout();void setup();void highlight();void requestView(unsigned);void cancelViewRequest();void closeView();void loadView();void positionView();bool exists(int)const;

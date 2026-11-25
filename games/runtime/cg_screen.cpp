@@ -95,6 +95,10 @@ bool CgScreen::open(){
  }
  close();
  if(!prepared)prepareLayout();
+#ifdef QLIE_PROFILE_WHJ6
+ // The album replaces story look-ahead. Free unused hints before warming its selection.
+ if(readAhead)readAhead->retain({});
+#endif
  opened=true;page=0;selected=pageCount()?0:navigationStart()+3;
  setup();
  return true;
@@ -120,20 +124,48 @@ void CgScreen::highlight(){
  for(int i=0;i<pageButtons();++i)
   whj6::ui::focus(menuScene,"ui_cg_page"+std::to_string(i),selected==24+i,false,page==unsigned(i));
  for(int i=0;i<4;++i)whj6::ui::focus(menuScene,"ui_cg_nav"+std::to_string(i),selected==navigationStart()+i,i==0);
+ if(exists(selected)&&catalog.unlocked(page*24+unsigned(selected),progress))
+  prefetchView(catalog.items()[page*24+unsigned(selected)].files.front());
+ else cancelViewPrefetch();
 #else
  for(unsigned i=0;i<24;i++){auto index=page*24+i;if(index>=catalog.items().size())continue;auto mode=!catalog.unlocked(index,progress)?"*OnLock":selected==int(i)?"*OnMouse":"*OffMouse";menuScene.setUiMotion("ui_cg_item"+std::to_string(i),mode);}
  for(int i=0;i<pageButtons();i++)menuScene.setUiMotion("ui_cg_page"+std::to_string(i),page==unsigned(i)?"*OnCheck":selected==24+i?"*OnMouse":"*OffMouse");
  for(int i=game_profile::story.legacyAvg?3:0;i<4;i++)menuScene.setUiMotion("ui_cg_nav"+std::to_string(i),i==0?"*OnLock":selected==navigationStart()+i?"*OnMouse":"*OffMouse");
 #endif
 }
+#ifdef QLIE_PROFILE_WHJ6
+void CgScreen::cancelViewPrefetch(){
+ if(readAhead&&!prefetchedView.empty())readAhead->discard(prefetchedView);
+ prefetchedView.clear();
+}
+void CgScreen::prefetchView(const std::string&file){
+ if(!readAhead)return;
+ auto key=qlie::canonical(file);
+ if(prefetchedView==key)return;
+ cancelViewPrefetch();
+ if(viewScene.warmFile(file))prefetchedView=std::move(key);
+}
+#endif
 void CgScreen::cancelViewRequest(){
  if(readAhead&&!pendingView.empty())readAhead->discard(pendingView);
  pendingView.clear();
 }
 void CgScreen::requestView(unsigned selection){
+ const auto&file=catalog.items()[group].files[selection];
+#ifdef QLIE_PROFILE_WHJ6
+ auto key=qlie::canonical(file);
+ if(pendingView==key){requestedVariant=selection;return;}
+ if(viewReady&&selection==variant){
+  cancelViewRequest();
+  requestedVariant=selection;
+  return;
+ }
+ // A confirmed selection claims the existing background request for this file.
+ if(prefetchedView==key)prefetchedView.clear();
+ else cancelViewPrefetch();
+#endif
  cancelViewRequest();
  requestedVariant=selection;
- const auto&file=catalog.items()[group].files[selection];
  if(readAhead&&viewScene.warmFile(file,true,true)){
   pendingView=qlie::canonical(file);
   return;
@@ -165,6 +197,12 @@ void CgScreen::loadView(){
   displayedCount=std::move(count);
  }
  viewReady=true;positionView();viewFade.present();
+#ifdef QLIE_PROFILE_WHJ6
+ if(files.size()>1){
+  const auto next=(variant+(reverseView?files.size()-1:1))%files.size();
+  if(files[next]!=file)prefetchView(files[next]);
+ }
+#endif
 }
 void CgScreen::positionView(){
  const auto size=viewScene.dimensions("ui_cg_view");
@@ -179,6 +217,8 @@ void CgScreen::positionView(){
 }
 void CgScreen::closeView(){cancelViewRequest();viewFade.reset();viewing=viewReady=false;viewScene.removeUiLayer("ui_cg_view",true);
 #ifdef QLIE_PROFILE_WHJ6
+ cancelViewPrefetch();
+ reverseView=false;
  setViewControls(true);
  if(prepared)whj6::ui::focus(viewScene,"ui_cg_viewbutton1",false);
 #endif
@@ -212,7 +252,11 @@ void CgScreen::toggleZoom(){if(viewing&&viewReady){zoom=zoom==1?2:1;positionView
 #endif
 }}
 CgScreen::Action CgScreen::back(){if(viewing){if(zoom==2)toggleZoom();else closeView();}else return Back;return None;}
-void CgScreen::move(int x,int y){if(!opened||elapsed<250)return;if(viewing){if(x){auto count=catalog.items()[group].files.size();requestView(unsigned((int(requestedVariant)+x+int(count))%int(count)));}if(y)panDelta(0,y*40);return;}
+void CgScreen::move(int x,int y){if(!opened||elapsed<250)return;if(viewing){if(x){
+#ifdef QLIE_PROFILE_WHJ6
+ reverseView=x<0;
+#endif
+ auto count=catalog.items()[group].files.size();requestView(unsigned((int(requestedVariant)+x+int(count))%int(count)));}if(y)panDelta(0,y*40);return;}
  const int navigation=navigationStart();
  if(selected<24){
   if(y<0)selected=selected<6?(pageButtons()?24:selected):selected-6;

@@ -624,6 +624,10 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   for(const auto&path:predictedFaces)add(path,Kind::Image);
   movie->primeFile(imminentMovie);
   readAhead->retain(sceneKeys);
+#ifdef QLIE_PROFILE_WHJ6
+  // The timeline starts the theme before the first story hints are needed.
+  if(openingHint&&opening)soundKeys.emplace_back(qlie::canonical(game_profile::titleMusic));
+#endif
   soundReadAhead->retain(soundKeys);
   for(auto&h:hints){
    if(h.gradient)images->warmBitmapFilter(*h.gradient);
@@ -2427,10 +2431,24 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(pad.direction)controllerKey(pad.direction<0?SDL_CONTROLLER_BUTTON_DPAD_UP:SDL_CONTROLLER_BUTTON_DPAD_DOWN);
 
 #endif
- if(movie->playing()&&!menuFadeLocksInput()){movie->update();
+ if(movie->playing()&&!menuFadeLocksInput()){
+#if defined(__SWITCH__) && defined(QLIE_PROFILE_WHJ6) && QLIE_DIAGNOSTICS
+ const auto movieUpdateAt=SDL_GetTicks64();
+#endif
+ movie->update();
  if(!movie->playing()){if(movieOnly){done=true;
  break;
- }if(opening){nextMakerLogo();}else next();
+ }if(opening){
+#if defined(__SWITCH__) && defined(QLIE_PROFILE_WHJ6) && QLIE_DIAGNOSTICS
+  const unsigned from=opening;
+  const auto switchAt=SDL_GetTicks64();
+#endif
+  nextMakerLogo();
+#if defined(__SWITCH__) && defined(QLIE_PROFILE_WHJ6) && QLIE_DIAGNOSTICS
+  QLIE_LOGF("OPENING handoff from=%u to=%u movie_update_ms=%llu handoff_ms=%llu\n",from,opening,
+             (unsigned long long)(switchAt-movieUpdateAt),(unsigned long long)(SDL_GetTicks64()-switchAt));
+#endif
+ }else next();
  }}SDL_Event e;
  while(SDL_PollEvent(&e)){if(e.type==SDL_QUIT)done=true;
 else if(e.type==SDL_FINGERDOWN){if(!fingerActive){fingerActive=true;fingerId=e.tfinger.fingerId;fingerX=e.tfinger.x;fingerY=e.tfinger.y;touchTitleView(fingerX,fingerY);pressTitleTouch(fingerX,fingerY);touchDrag(fingerX,fingerY,true);}}

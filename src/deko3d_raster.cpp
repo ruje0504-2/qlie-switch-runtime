@@ -20,6 +20,9 @@ using namespace gpu;
 #include "deko_base.inc"
 #include "deko_video.inc"
 #include "deko_field.inc"
+#ifdef QLIE_PROFILE_WHJ6
+#include "deko_snow.inc"
+#endif
 
 constexpr unsigned ImageCount = 3;
 // NVGPU_GPU_IOCTL_PMU_GET_GPU_LOAD returns the PMU's device-wide load in tenths of a percent.
@@ -48,6 +51,9 @@ class DekoScene final : public Scene {
  dk::UniqueMemBlock texels, drawBuffer, tileBuffer, imageDescriptors, repairTiles;
  dk::UniqueCmdBuf cmd;
  dk::Shader shader,motionShader,restoreShader,baseShader,videoShader,fieldShader;
+#ifdef QLIE_PROFILE_WHJ6
+ dk::Shader snowShader;
+#endif
  std::map<uint32_t,VideoMapping> videoMaps;
  std::map<uint64_t,VideoTexture> videoTextures;
  dk::UniqueMemBlock videoDescriptors,videoUniforms;
@@ -60,7 +66,7 @@ class DekoScene final : public Scene {
  size_t sampleDirect=0;
  unsigned sampleCopied=0,sampleVideoTextures=0;
  double sampleAcquireMs=0;
- size_t sampleTiles=0,sampleMotionTiles=0,sampleBaseTiles=0;
+ size_t sampleTiles=0,sampleMotionTiles=0,sampleBaseTiles=0,sampleSnowTiles=0;
  std::array<dk::Image,ImageCount> images;
  dk::UniqueSwapchain swapchain;
  std::array<SwapDamage::Mask,ImageCount> damage;
@@ -92,7 +98,11 @@ class DekoScene final : public Scene {
   device=dk::DeviceMaker{}.create();
   if(!device)throw std::runtime_error("deko3d device creation");
   queue=dk::QueueMaker{device}.setFlags(DkQueueFlags_Graphics|DkQueueFlags_Compute)
-         .setPerWarpScratchMemorySize(std::max<unsigned>({rasterScratchPerWarp,motionScratchPerWarp,restoreScratchPerWarp,baseScratchPerWarp,videoScratchPerWarp,fieldScratchPerWarp,DK_PER_WARP_SCRATCH_MEM_ALIGNMENT})).create();
+         .setPerWarpScratchMemorySize(std::max<unsigned>({rasterScratchPerWarp,motionScratchPerWarp,restoreScratchPerWarp,baseScratchPerWarp,videoScratchPerWarp,fieldScratchPerWarp,
+#ifdef QLIE_PROFILE_WHJ6
+          snowScratchPerWarp,
+#endif
+          DK_PER_WARP_SCRATCH_MEM_ALIGNMENT})).create();
   if(!queue)throw std::runtime_error("deko3d queue creation");
   static_assert(sizeof(rasterDksh)%DK_SHADER_CODE_ALIGNMENT==0);
   static_assert(sizeof(motionDksh)%DK_SHADER_CODE_ALIGNMENT==0);
@@ -103,13 +113,24 @@ class DekoScene final : public Scene {
   constexpr size_t videoOffset=baseOffset+sizeof(baseDksh);
   static_assert(sizeof(videoDksh)%DK_SHADER_CODE_ALIGNMENT==0);
   constexpr size_t fieldOffset=videoOffset+sizeof(videoDksh);
-  code=allocate(fieldOffset+sizeof(fieldDksh)+DK_SHADER_CODE_UNUSABLE_SIZE,Mapped|DkMemBlockFlags_Code);
+  constexpr size_t snowOffset=fieldOffset+sizeof(fieldDksh);
+#ifdef QLIE_PROFILE_WHJ6
+  constexpr size_t shaderBytes=snowOffset+sizeof(snowDksh);
+#else
+  constexpr size_t shaderBytes=snowOffset;
+#endif
+  code=allocate(shaderBytes+DK_SHADER_CODE_UNUSABLE_SIZE,Mapped|DkMemBlockFlags_Code);
   std::memcpy(code.getCpuAddr(),rasterDksh,sizeof(rasterDksh));
   std::memcpy(static_cast<uint8_t*>(code.getCpuAddr())+sizeof(rasterDksh),motionDksh,sizeof(motionDksh));
   std::memcpy(static_cast<uint8_t*>(code.getCpuAddr())+restoreOffset,restoreDksh,sizeof(restoreDksh));
   std::memcpy(static_cast<uint8_t*>(code.getCpuAddr())+baseOffset,baseDksh,sizeof(baseDksh));
   std::memcpy(static_cast<uint8_t*>(code.getCpuAddr())+videoOffset,videoDksh,sizeof(videoDksh));
   std::memcpy(static_cast<uint8_t*>(code.getCpuAddr())+fieldOffset,fieldDksh,sizeof(fieldDksh));
+#ifdef QLIE_PROFILE_WHJ6
+  std::memcpy(static_cast<uint8_t*>(code.getCpuAddr())+snowOffset,snowDksh,sizeof(snowDksh));
+  dk::ShaderMaker{code,snowOffset}.initialize(snowShader);
+  if(!snowShader.isValid()||snowShader.getStage()!=DkStage_Compute)throw std::runtime_error("deko3d snow shader");
+#endif
   dk::ShaderMaker{code,fieldOffset}.initialize(fieldShader);
   if(!fieldShader.isValid()||fieldShader.getStage()!=DkStage_Compute)throw std::runtime_error("deko3d field presentation shader");
   dk::ShaderMaker{code,videoOffset}.initialize(videoShader);
@@ -178,11 +199,11 @@ class DekoScene final : public Scene {
   inFlight=false;
   if constexpr (qlie::diagnostics) priorWaitMs+=milliseconds(Clock::now()-start);
   if(qlie::diagnostics&&sampleFrame){
-   traceFrame("DEKO3D PRESENT frame=%llu direct_tiles=%zu copy_tiles=%u kernel=%s motion_tiles=%zu raster_gpu_ms=%.3f copy_gpu_ms=%.3f gpu_load_pct=%.1f base_tiles=%zu nv12_frames=%u nv12_gpu_ms=%.3f acquire_ms=%.3f\n",
+   traceFrame("DEKO3D PRESENT frame=%llu direct_tiles=%zu copy_tiles=%u kernel=%s motion_tiles=%zu raster_gpu_ms=%.3f copy_gpu_ms=%.3f gpu_load_pct=%.1f base_tiles=%zu nv12_frames=%u nv12_gpu_ms=%.3f acquire_ms=%.3f snow_tiles=%zu\n",
                 (unsigned long long)sampleFrame,sampleDirect,sampleCopied,
                 !sampleTiles?"idle":!sampleMotionTiles?"general":sampleMotionTiles==sampleTiles?"motion":"mixed",sampleMotionTiles,
                 sampleTiles?stageMs(0):0.0,sampleCopied?stageMs(2):0.0,gpuLoadPercent(),sampleBaseTiles,
-                sampleVideoTextures,sampleVideoTextures?stageMs(4):0.0,sampleAcquireMs);
+                sampleVideoTextures,sampleVideoTextures?stageMs(4):0.0,sampleAcquireMs,sampleSnowTiles);
    sampleFrame=0;
   }
  }
@@ -334,7 +355,7 @@ class DekoScene final : public Scene {
   const size_t drawBytes=current->commands.size()*sizeof(DrawData);
   const size_t headerWords=workTiles.size()*4;
   grow(drawBuffer,std::max(sizeof(DrawData),drawBytes));
-  grow(tileBuffer,(headerWords+workIndices.size()+2*(DekoTileBatches::AlignmentWords-1))*sizeof(uint32_t));
+  grow(tileBuffer,(headerWords+workIndices.size()+DekoTileBatches::PaddingWords)*sizeof(uint32_t));
   grow(texels,sizeof(uint32_t));
   if(drawBytes)std::memcpy(drawBuffer.getCpuAddr(),current->commands.data(),drawBytes);
   batches.write(*this,static_cast<uint32_t*>(tileBuffer.getCpuAddr()));
@@ -355,7 +376,12 @@ class DekoScene final : public Scene {
   const auto handle=dkMakeImageHandle(presentSlot>=0?unsigned(presentSlot):0u);
   cmd.bindImages(DkStage_Compute,0,handle);
   if(qlie::diagnostics&&sampleFrame){
-   sampleTiles=workTiles.size();sampleBaseTiles=batches.baseTiles;sampleMotionTiles=batches.motionTiles+sampleBaseTiles;
+   sampleTiles=workTiles.size();
+   sampleBaseTiles=batches.count[DekoTileBatches::Base];
+#ifdef QLIE_PROFILE_WHJ6
+   sampleSnowTiles=batches.count[DekoTileBatches::Snow];
+#endif
+   sampleMotionTiles=batches.count[DekoTileBatches::Motion]+sampleBaseTiles+sampleSnowTiles;
    timestamp(0,DkCounter_TimestampPipelineTop);
   }
   auto rasterBatch=[&](const dk::Shader& program,unsigned count,uint32_t start){
@@ -367,9 +393,15 @@ class DekoScene final : public Scene {
    cmd.dispatchCompute(count,1,1);
    if constexpr (qlie::diagnostics) ++dispatches;
   };
-  rasterBatch(motionShader,batches.motionTiles,0);
-  rasterBatch(baseShader,batches.baseTiles,batches.baseOffsetWords);
-  rasterBatch(shader,unsigned(workTiles.size())-batches.motionTiles-batches.baseTiles,batches.generalOffsetWords);
+  auto runBatch=[&](const dk::Shader& program,DekoTileBatches::Kind kind){
+   rasterBatch(program,batches.count[kind],batches.offsetWords[kind]);
+  };
+  runBatch(motionShader,DekoTileBatches::Motion);
+  runBatch(baseShader,DekoTileBatches::Base);
+  runBatch(shader,DekoTileBatches::General);
+#ifdef QLIE_PROFILE_WHJ6
+  runBatch(snowShader,DekoTileBatches::Snow);
+#endif
   cmd.barrier(DkBarrier_Primitives,0);
   if(qlie::diagnostics&&sampleFrame)timestamp(1,DkCounter_Timestamp);
  }
@@ -475,7 +507,7 @@ class DekoScene final : public Scene {
   if(qlie::diagnostics&&(frames==0||(frames+1)%FrameTraceInterval==0)){
    sampleFrame=frames+1;sampleDirect=direct?workTiles.size():0;
    sampleAcquireMs=milliseconds(Clock::now()-acquireStart);
-   sampleTiles=0;sampleMotionTiles=0;sampleBaseTiles=0;sampleCopied=0;sampleVideoTextures=0;
+   sampleTiles=0;sampleMotionTiles=0;sampleBaseTiles=0;sampleSnowTiles=0;sampleCopied=0;sampleVideoTextures=0;
    std::memset(reports.getCpuAddr(),0,6*sizeof(CounterReport));
   }
   recordCanvas(direct?slot:-1,interlaced);

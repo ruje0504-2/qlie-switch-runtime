@@ -26,55 +26,105 @@ inline bool opaqueBaseDraw(const DrawData& draw,const DrawSources& sources){
  return p.p[0][1]==0.f&&p.p[0][2]==0.f&&p.p[0][0]>=1.f&&p.p[0][3]>=1.f;
 }
 
+#ifdef QLIE_PROFILE_WHJ6
+struct Whj6SnowDraw {
+ enum Part : uint8_t { None,Panorama,Video,Flash };
+ Part part=None;
+ AxisBounds bounds{};
+
+ static Whj6SnowDraw classify(const DrawData& draw,const DrawSources& sources){
+  const auto& p=draw.image;
+  constexpr uint32_t allowed=0xff00u|524288u;
+  if(p.meta[2]&~allowed||p.p[0][0]<=0.f||p.p[0][3]<=0.f||
+     p.p[0][1]!=0.f||p.p[0][2]!=0.f)return {};
+  const unsigned blend=(p.meta[2]>>8)&255u;
+  if(blend==7&&coversCanvasWithSolid(p))return {Flash,{}};
+  if(!sources.opaque||p.meta[3]!=255||p.colors[0]!=0||p.colors[1]!=0xffffff)return {};
+  if(blend==0)return {Panorama,axisBounds(p)};
+  if(blend==2&&p.meta[0]==1280&&p.meta[1]==720)return {Video,axisBounds(p)};
+  return {};
+ }
+};
+#endif
+
 class DekoTileBatches {
- enum Kind : uint8_t { Motion,Base,General };
+public:
+ enum Kind : uint8_t { Motion,Base,General,
+#ifdef QLIE_PROFILE_WHJ6
+  Snow,
+#endif
+  KindCount };
+ static constexpr uint32_t AlignmentWords=64;
+ static constexpr uint32_t PaddingWords=(KindCount-1)*(AlignmentWords-1);
+ std::array<unsigned,KindCount> count{};
+ std::array<uint32_t,KindCount> offsetWords{};
+private:
  std::vector<Kind> drawKinds;
  std::array<Kind,TileCount> tileKinds{};
+#ifdef QLIE_PROFILE_WHJ6
+ std::vector<Whj6SnowDraw> snowDraws;
+ bool snowTile(const uint32_t* ids,unsigned layers,uint32_t control,unsigned x,unsigned y)const{
+  if(control||layers>3)return false;
+  const auto& base=snowDraws[ids[0]];
+  const auto& snow=snowDraws[ids[1]];
+  return base.part==Whj6SnowDraw::Panorama&&snow.part==Whj6SnowDraw::Video&&
+         base.bounds.covers(x,y,Tile,Tile)&&snow.bounds.covers(x,y,Tile,Tile)&&
+         (layers==2||snowDraws[ids[2]].part==Whj6SnowDraw::Flash);
+ }
+#endif
 public:
- static constexpr uint32_t AlignmentWords=64;
- unsigned motionTiles=0,baseTiles=0;
- uint32_t baseOffsetWords=0,generalOffsetWords=0;
-
  void write(const Scene& scene,uint32_t* words){
   const auto& frame=*scene.current;
   const auto& tiles=scene.workTiles;
   drawKinds.resize(frame.commands.size());
-  bool hasBase=false,hasGeneral=false;
+  bool hasBase=false,hasGeneral=false,hasSnow=false;
+#ifdef QLIE_PROFILE_WHJ6
+  snowDraws.resize(frame.commands.size());
+#endif
   for(size_t i=0;i<frame.commands.size();++i){
    const auto& draw=frame.commands[i];
    drawKinds[i]=opaqueBaseDraw(draw,frame.sources[i])?Base:motionDraw(draw)?Motion:General;
    hasBase|=drawKinds[i]==Base;hasGeneral|=drawKinds[i]==General;
+#ifdef QLIE_PROFILE_WHJ6
+   snowDraws[i]=Whj6SnowDraw::classify(draw,frame.sources[i]);
+   hasSnow|=snowDraws[i].part==Whj6SnowDraw::Video;
+#endif
   }
-  baseOffsetWords=generalOffsetWords=0;
-  motionTiles=baseTiles=0;
-  if(!hasBase&&!hasGeneral){
-   motionTiles=unsigned(tiles.size());scene.writeTileList(words);
+  offsetWords.fill(0);
+  count.fill(0);
+  if(!hasBase&&!hasGeneral&&!hasSnow){
+   count[Motion]=unsigned(tiles.size());scene.writeTileList(words);
    return;
   }
   for(size_t i=0;i<tiles.size();++i){
    const auto& h=tiles[i];
-   const unsigned tile=(h[0]>>16)/Tile*Columns+(h[0]&65535u)/Tile;
+   const unsigned x=h[0]&65535u,y=h[0]>>16,tile=y/Tile*Columns+x/Tile;
    auto first=scene.workIndices.begin()+h[1];
    Kind kind=Motion;
+#ifdef QLIE_PROFILE_WHJ6
+   if(hasSnow&&h[2]>=2&&snowTile(scene.workIndices.data()+h[1],h[2],h[3],x,y))kind=Snow;
+   else
+#endif
    if(h[2]==1&&drawKinds[*first]==Base&&frame.covered[tile]&&frame.tiles[tile].size()==1)kind=Base;
    else if(hasGeneral&&std::any_of(first,first+h[2],[this](uint32_t id){return drawKinds[id]==General;}))kind=General;
    tileKinds[i]=kind;
-   motionTiles+=kind==Motion;baseTiles+=kind==Base;
+   ++count[kind];
   }
-  unsigned generalTiles=unsigned(tiles.size())-motionTiles-baseTiles;
-  if(motionTiles==tiles.size()||baseTiles==tiles.size()||generalTiles==tiles.size()){
+  if(std::any_of(count.begin(),count.end(),[&](unsigned n){return n==tiles.size();})){
    scene.writeTileList(words);
    return;
   }
-  auto aligned=[](uint32_t n){return (n+AlignmentWords-1)&~(AlignmentWords-1);};
-  uint32_t end=4*motionTiles;
-  if(baseTiles){baseOffsetWords=aligned(end);end=baseOffsetWords+4*baseTiles;}
-  if(generalTiles){generalOffsetWords=aligned(end);end=generalOffsetWords+4*generalTiles;}
-  uint32_t offsets[3]={0,baseOffsetWords,generalOffsetWords};
-  uint32_t* heads[3]={words,words+baseOffsetWords,words+generalOffsetWords};
+  uint32_t end=0;
+  std::array<uint32_t*,KindCount> heads{};
+  for(unsigned kind=0;kind<KindCount;++kind){
+   if(!count[kind])continue;
+   offsetWords[kind]=(end+AlignmentWords-1)&~(AlignmentWords-1);
+   heads[kind]=words+offsetWords[kind];
+   end=offsetWords[kind]+4*count[kind];
+  }
   for(size_t i=0;i<tiles.size();++i){
    auto h=tiles[i];Kind kind=tileKinds[i];
-   h[1]+=end-offsets[kind];
+   h[1]+=end-offsetWords[kind];
    heads[kind]=std::copy(h.begin(),h.end(),heads[kind]);
   }
   std::copy(scene.workIndices.begin(),scene.workIndices.end(),words+end);

@@ -263,6 +263,10 @@ void Scene::dispatch(const Image&i,Push&p,float alpha,uint32_t add,uint32_t mul,
   if(p.meta[3]<255&&coversCanvasWithSolid(p)&&std::abs(p.p[1][0])<4194304&&std::abs(p.p[1][1])<4194304)
    p.meta[2]|=524288u;
   bool mayOcclude=blend<2&&p.meta[3]==255;
+#ifdef QLIE_PROFILE_WHJ6
+  // The snow pass can also use an opaque NV12 surface with screen blending.
+  mayOcclude|=blend==2&&p.meta[3]==255&&bool(i.videoSurface);
+#endif
   p.colors[2]=texture(i,sources.primary,mayOcclude?&sources.opaque:nullptr);
   if(i.width==1&&i.height==1)std::memcpy(&sources.singlePixel,i.pixels.data(),4);
   if(compareAlignedBitmaps&&!i.videoSurface&&current->cleared&&current->alignedBitmap==UINT32_MAX&&(p.meta[2]&524288u)&&

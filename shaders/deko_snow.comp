@@ -1,0 +1,50 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+#version 430
+layout(local_size_x=16,local_size_y=16) in;
+layout(binding=0,std430) readonly buffer Source { uint source[]; };
+layout(binding=1,std430) buffer Destination { uint destination[]; };
+layout(r32ui,binding=0) uniform writeonly uimage2D presentImage;
+#define DEKO_RASTER
+#define DEKO_MOTION_KERNEL
+#include "raster_types.glsl"
+layout(binding=2,std430) readonly buffer Commands { Draw draws[]; };
+layout(binding=3,std430) readonly buffer Tiles { uint tiles[]; };
+layout(std140,binding=0) uniform Parameters { vec4 p0;vec4 p1;vec4 p2;vec4 p3;ivec4 rect;uvec4 meta;uvec4 colors; } frame;
+#include "raster_pixels.glsl"
+
+shared uvec4 addresses[16];
+shared uvec3 fade;
+
+uvec2 nearestCoord(Draw p,ivec2 q){
+ precise vec2 d=vec2(q)+0.5-p.p1.xy;
+ return uvec2(divide(p.p0.w*d.x,p.p1.z),divide(p.p0.x*d.y,p.p1.z));
+}
+
+void main(){
+ uint header=gl_WorkGroupID.x*4u,packedOrigin=tiles[header];
+ ivec2 origin=ivec2(packedOrigin&65535u,packedOrigin>>16);
+ uint first=tiles[header+1u];
+ Draw base=draws[tiles[first]],snow=draws[tiles[first+1u]];
+ uint x=gl_LocalInvocationID.x,y=gl_LocalInvocationID.y;
+ if(y==0u){
+  ivec2 q=origin+ivec2(int(x));
+  uvec2 b=nearestCoord(base,q),s=nearestCoord(snow,q);
+  addresses[x]=uvec4(base.colors.z+b.x,b.y*base.meta.x,snow.colors.z+s.x,s.y*snow.meta.x);
+  if(x==0u){
+   fade=uvec3(0);
+   if(tiles[header+2u]==3u){
+    Draw flash=draws[tiles[first+2u]];
+    uvec4 value=tint(flash,unpack(source[flash.colors.z]));
+    fade=(value.rgb*(value.a+(value.a>>7u)))>>8u;
+   }
+  }
+ }
+ barrier();
+ uvec3 b=unpack(source[addresses[x].x+addresses[y].y]).rgb;
+ uvec3 s=unpack(source[addresses[x].z+addresses[y].w]).rgb;
+ uvec3 color=min(uvec3(255),s+b-((s*b)>>8u)+fade);
+ uint result=pack(uvec4(color,255));
+ ivec2 q=origin+ivec2(int(x),int(y));
+ destination[uint(q.y)*frame.meta.x+uint(q.x)]=result;
+ if(frame.meta.z!=0u)imageStore(presentImage,q,uvec4(result,0,0,0));
+}

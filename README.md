@@ -2,7 +2,7 @@
 
 [![GPL-2.0-or-later](https://img.shields.io/badge/license-GPL--2.0--or--later-blue)](LICENSE)
 
-面向 Nintendo Switch/Horizon 和 macOS 的 QLIE 运行时。WHJ2 和 WHJ4 均已完成 Switch 实机使用测试。WHJ4 涵盖日文本体和可选汉化更新的本地打包。WHJ5 构建目标使用现有简体中文脚本和日文语音，尚待 Switch 实机验收。
+面向 Nintendo Switch/Horizon 和 macOS 的 QLIE 运行时。WHJ2 和 WHJ4 均已完成 Switch 实机使用测试。WHJ4 支持日文本体和可选汉化更新。WHJ5 使用简体中文脚本和日文语音，已由项目维护者在 Switch 实机验收通过。
 
 [优化手册](docs/optimization/README.md)记录 deko3d 渲染、影片硬解、资源预读、音频和界面的实现及测量范围。
 

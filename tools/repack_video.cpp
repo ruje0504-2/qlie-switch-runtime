@@ -48,7 +48,8 @@ uint64_t readLE(const Bytes&bytes,size_t offset,unsigned size){
  return value;
 }
 
-std::optional<Bytes> replaceVideo(const Bytes&input,const fs::path&encoded,const std::string&name,bool extract){
+std::optional<Bytes> replaceVideo(const Bytes&input,const fs::path&encoded,const std::string&name,
+                                  bool extract,[[maybe_unused]] bool authoredScene=true){
  if(starts(input,"OggS")){
   const auto end=input.begin()+std::min<size_t>(input.size(),65536);
   const std::array<uint8_t,7> identification{0x80,'t','h','e','o','r','a'};
@@ -67,19 +68,21 @@ std::optional<Bytes> replaceVideo(const Bytes&input,const fs::path&encoded,const
   auto video=qlie::file(output.string());
   require(starts(video,"\x1a\x45\xdf\xa3"),"H.264 encoding must use Matroska");
 #ifdef QLIE_PROFILE_WHJ6
-  require(input.end()-header>=20,"Truncated Theora identification");
-  const auto dimension=[&](unsigned index){
-   return (unsigned(header[index])<<16)|(unsigned(header[index+1])<<8)|unsigned(header[index+2]);
-  };
-  const auto width=dimension(14),height=dimension(17);
-  require(width>0&&width<=2048&&height>0&&height<=2700,"Unexpected WHJ6 authored scene video dimensions");
-  Bytes addressed(20+video.size());
-  std::copy_n("VSD1",4,addressed.begin());
-  writeLE(addressed,4,12,4);
-  std::copy_n("W6CG",4,addressed.begin()+8);
-  writeLE(addressed,12,width,4);writeLE(addressed,16,height,4);
-  std::copy(video.begin(),video.end(),addressed.begin()+20);
-  video=std::move(addressed);
+  if(authoredScene){
+   require(input.end()-header>=20,"Truncated Theora identification");
+   const auto dimension=[&](unsigned index){
+    return (unsigned(header[index])<<16)|(unsigned(header[index+1])<<8)|unsigned(header[index+2]);
+   };
+   const auto width=dimension(14),height=dimension(17);
+   require(width>0&&width<=2048&&height>0&&height<=2700,"Unexpected WHJ6 authored scene video dimensions");
+   Bytes addressed(20+video.size());
+   std::copy_n("VSD1",4,addressed.begin());
+   writeLE(addressed,4,12,4);
+   std::copy_n("W6CG",4,addressed.begin()+8);
+   writeLE(addressed,12,width,4);writeLE(addressed,16,height,4);
+   std::copy(video.begin(),video.end(),addressed.begin()+20);
+   video=std::move(addressed);
+  }
 #endif
   std::cout<<"VIDEO\t"<<digest<<"\t"<<sha256(video)<<"\t"<<input.size()<<"\t"<<video.size()<<"\t"<<name<<"\n";
   return video;
@@ -140,10 +143,15 @@ void repack(const fs::path&source,const fs::path&destination,const fs::path&enco
   const auto name=qlie::canonical(entry.name);
   const auto extension=fs::path(name).extension();
   if(extension!=".b"&&extension!=".ogv")continue;
+  bool authoredScene=true;
 #ifdef QLIE_PROFILE_WHJ6
-  if(extension==".ogv"&&name.rfind("画像/",0)!=0)continue;
+  if(extension==".ogv"&&name.rfind("画像/",0)!=0){
+   if(name!="script/makerlogo/omegastar.ogv"&&name!="script/makerlogo/seikeiproduction.ogv")continue;
+   // Maker logos are presented at the output size and need no scene coordinates.
+   authoredScene=false;
+  }
 #endif
-  auto replacement=replaceVideo(archive.read(entry),encoded,source.filename().string()+":"+name,extract);
+  auto replacement=replaceVideo(archive.read(entry),encoded,source.filename().string()+":"+name,extract,authoredScene);
   if(replacement)replacements.emplace(index,std::move(*replacement));
  }
  if(replacements.empty())return;

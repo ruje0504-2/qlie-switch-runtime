@@ -115,11 +115,13 @@ void SceneTransition::loadRule(const std::string&path){
  rule=readRule(assets,path);cachedRulePath=path;
 }
 void SceneTransition::loadAnimation(const std::string&path){
- if(cachedAnimationPath!=path){
-  auto members=abmp(assets.read(path));
-  auto metadata=std::find_if(members.begin(),members.end(),[](const Member&m){return m.type.rfind("abdata",0)==0;});
-  if(metadata==members.end())throw std::runtime_error("Missing transition animation metadata "+path);
-  auto definition=whj2::animation(metadata->type,metadata->data);
+ const bool changed=cachedAnimationPath!=path;
+ if(!animation)animation=std::make_unique<SceneImages>(assets);
+ if(changed)animation->clear();
+ animation->setReadAhead(readAhead);
+ animation->command("^ui_transition,file:"+path+",x:0,y:0");
+ if(changed){
+  const auto& definition=animation->uiAnimation(AnimationLayerName);
   // Original AVG effects may inherit the display canvas from the capture.
   const bool capturesCanvas=game_profile::story.legacyAvg&&definition.bounds[0]==0&&definition.bounds[1]==0;
   if((!capturesCanvas&&(definition.bounds[0]!=int(Width)||definition.bounds[1]!=int(Height)))||definition.motions.empty())
@@ -129,13 +131,10 @@ void SceneTransition::loadAnimation(const std::string&path){
   for(std::string field;std::getline(comment,field);)if(trim(field)=="*CaptureFadein=1")captureAnimationTarget=true;
   // abdata15 stores the default action's playback end on the motion.
   // Earlier headers keep it in the bounds, with abdata14 placing start first.
-  animationLength=metadata->type=="abdata15"?definition.motions.front().loopEnd:
+  animationLength=definition.motionPlaybackRange?definition.motions.front().loopEnd:
    definition.bounds[definition.loopStartFirst?3:2];
-  if(!animation)animation=std::make_unique<SceneImages>(assets);
-  else animation->clear();
   cachedAnimationPath=path;
  }
- animation->command("^ui_transition,file:"+path+",x:0,y:0");
  if(!previous.pixels.empty())animation->uiSlot(AnimationLayerName,0,previous);
  if(captureAnimationTarget&&!incoming.pixels.empty())animation->uiSlot(AnimationLayerName,1,incoming);
 }
@@ -194,16 +193,26 @@ std::vector<std::vector<std::string>> SceneTransition::sentenceFields(const std:
  if(!waitMode.empty())fields.push_back({"wait",waitMode,waitTimeField,skipTime});
  return fields;
 }
-std::vector<std::string> SceneTransition::ruleAssets(const std::string&line)const{
- std::vector<std::string> paths;
- auto last=cachedRulePath;
+std::vector<SceneTransition::Resource> SceneTransition::resources(const std::string&line)const{
+ std::vector<Resource> result;
+ auto lastRule=cachedRulePath,lastAnimation=cachedAnimationPath;
  for(const auto&fields:sentenceFields(line)){
-  if(!hasFadeAsset(fields)||fields[0]!="fade"||fields[1]!="rule"||fadeTime(fields)<=0)continue;
+  if(!hasFadeAsset(fields)||fields[0]!="fade"||(fields[1]!="rule"&&fields[1]!="anime")||fadeTime(fields)<=0)continue;
+  const bool animated=fields[1]=="anime";
+  auto& last=animated?lastAnimation:lastRule;
   auto path=fadeAsset(assets,fields[3]);
-  if(path!=last&&std::find(paths.begin(),paths.end(),path)==paths.end())paths.push_back(path);
+  if(path!=last&&std::none_of(result.begin(),result.end(),[&](const Resource&item){
+   return item.animated==animated&&item.path==path;
+  }))result.push_back({path,animated});
   last=std::move(path);
  }
- return paths;
+ return result;
+}
+void SceneTransition::warmAnimation(const std::string&path,bool required){
+ if(!readAhead)return;
+ if(!animation)animation=std::make_unique<SceneImages>(assets);
+ animation->setReadAhead(readAhead);
+ animation->warmFile(path,required,false);
 }
 bool SceneTransition::needsCapture(const std::string&line)const{
  return captureUses(sentenceFields(line),caught)>0;

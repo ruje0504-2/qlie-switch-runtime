@@ -9,6 +9,7 @@
 #include <array>
 namespace whj2 {
 struct Affine2D;
+struct Animation;
 struct Composite;
 struct EyecatchFilm;
 class RenderTarget;
@@ -105,6 +106,7 @@ public:
  bool warmUiBitmaps(const std::string&key,std::vector<std::string> paths,bool required=false);
  void takeUiBitmaps(const std::string&key);
  void setUiMotion(const std::string&layer,const char*motion);
+ const Animation& uiAnimation(const std::string& layer)const;
  void removeUiLayer(const std::string&layer,bool releaseAsset=false);
  void resetUiAnimations();
  void seekUiLayer(const std::string& layer,double milliseconds);

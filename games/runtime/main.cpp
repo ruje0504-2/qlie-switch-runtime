@@ -519,7 +519,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }
  void warmNextScene(bool openingHint=false,bool endingWait=false){
   if(!readAhead)return;
-  enum class Kind { Image, Audio, Movie, Rule };
+  enum class Kind { Image, Audio, Movie, Rule, Animation };
   struct Hint {
    std::string path;
    Kind kind;
@@ -569,8 +569,9 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
     }
    }else if(cmd=="^sentence"){
     if(normalSkip)continue;
-    try{for(const auto&path:transition->ruleAssets(line))add(path,Kind::Rule);}
-    catch(const std::exception&){/* The live command reports invalid rules. */}
+    try{
+     for(const auto&asset:transition->resources(line))add(asset.path,asset.animated?Kind::Animation:Kind::Rule);
+    }catch(const std::exception&){/* The live command reports invalid transition assets. */}
    }else if(!cmd.empty()&&audioTrack(cmd.substr(1))>=0){
     const auto fields=whj2::split(line.substr(comma+1),',');
     for(const auto&part:fields)if(part.rfind("file:",0)==0){
@@ -608,6 +609,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    else if(h.kind==Kind::Movie)movie->warmFile(h.path);
    else if(h.kind==Kind::Audio)audio->warmFile(assets,h.path);
    else if(h.kind==Kind::Rule)transition->warmRule(h.path);
+   else if(h.kind==Kind::Animation)transition->warmAnimation(h.path);
    else images->warmFile(h.path);
   }
  }
@@ -1147,12 +1149,17 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   if(characterFade&&(normalSkip||transition->awaitingPresentation()))continue;
   game_profile::applySentenceTiming(e);
   if(!normalSkip){
-   std::vector<std::string> rules;
-   for(const auto&path:transition->ruleAssets(e.value)){
-    transition->warmRule(path,true);
-    rules.push_back(whj2::SceneTransition::ruleKey(path));
+   std::vector<std::string> transitionAssets;
+   for(const auto&asset:transition->resources(e.value)){
+    if(asset.animated){
+     transition->warmAnimation(asset.path,true);
+     transitionAssets.push_back(qlie::canonical(asset.path));
+    }else{
+     transition->warmRule(asset.path,true);
+     transitionAssets.push_back(whj2::SceneTransition::ruleKey(asset.path));
+    }
    }
-   if(deferSceneUntil(e,std::move(rules)))return;
+   if(deferSceneUntil(e,std::move(transitionAssets)))return;
   }
   qlie::Bytes snapshot;
   if(!normalSkip&&transition->needsCapture(e.value)){

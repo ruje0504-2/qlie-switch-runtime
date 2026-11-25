@@ -102,6 +102,7 @@ Animation animation(const std::string&type,const qlie::Bytes&b){AnimReader r{b};
  const bool modern=type=="abdata15";
  const bool wide=type=="abdata14"||modern;
  a.loopStartFirst=wide;
+ a.motionPlaybackRange=modern;
  a.name=r.str(wide);
  uint32_t version=0;
  if(type=="abdata13"||wide)version=r.n();

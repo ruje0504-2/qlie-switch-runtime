@@ -132,6 +132,8 @@ struct JpegAnimation {
  unsigned duration=0;
  size_t frameIndex=0;
  std::shared_ptr<const Image> decoded;
+ std::string prefetchKey;
+ std::optional<size_t> pendingFrame;
  JpegAnimation(qlie::Bytes bytes,bool repeat):data(std::move(bytes)),loop(repeat){
   auto number=[&](size_t p){return uint32_t(data[p])|(uint32_t(data[p+1])<<8)|(uint32_t(data[p+2])<<16)|(uint32_t(data[p+3])<<24);};
   if(data.size()<64||std::memcmp(data.data()+12,"SOUND",5)||std::memcmp(data.data()+32,"MOVIE",5)||number(24)||number(28))
@@ -160,14 +162,42 @@ struct JpegAnimation {
    offset+=jpeg;
   }
  }
- const std::shared_ptr<const Image>&at(double ms){
+ void cancelPrefetch(AssetReadAhead* worker){
+  if(worker&&pendingFrame)worker->discard(prefetchKey);
+  pendingFrame.reset();
+ }
+ const std::shared_ptr<const Image>&at(double ms,AssetReadAhead* worker=nullptr){
   double elapsed=std::max(0.,ms);
   if(elapsed>=duration)elapsed=loop?std::fmod(elapsed,duration):duration;
   const auto index=std::min(frames.size()-1,size_t(elapsed*frames.size()/duration));
   if(!decoded||frames[index]!=frames[frameIndex]){
-   const auto [start,length]=frames[index];
-   decoded=sceneBitmap(image(qlie::Bytes(data.begin()+start,data.begin()+start+length)));
+   std::shared_ptr<const Image> picture;
+   if(worker&&pendingFrame&&frames[*pendingFrame]==frames[index])
+    if(auto ready=worker->takeReady(prefetchKey))picture=std::move(ready->bitmap);
+   cancelPrefetch(worker);
+   // Preserve the exact frame when the clock jumps or a worker misses its deadline.
+   if(!picture){
+    const auto [start,length]=frames[index];
+    picture=sceneBitmap(image(qlie::Bytes(data.begin()+start,data.begin()+start+length)));
+   }
+   decoded=std::move(picture);
    frameIndex=index;
+  }
+  // The non-looping IMOAVI is the ordinary WHJ1 title. Only one frame is queued.
+  if(worker&&!loop&&!pendingFrame){
+   auto next=index+1;
+   while(next<frames.size()&&frames[next]==frames[index])++next;
+   if(next<frames.size()){
+    if(prefetchKey.empty())prefetchKey="@title/jpeg-frame/"+std::to_string(reinterpret_cast<uintptr_t>(this));
+    const auto [start,length]=frames[next];
+    worker->request(prefetchKey,[jpeg=qlie::Bytes(data.begin()+start,data.begin()+start+length)]{
+     WarmAsset ready;
+     ready.bitmap=sceneBitmap(image(jpeg));
+     ready.bytes=ready.bitmap->pixels.size();
+     return ready;
+    });
+    pendingFrame=next;
+   }
   }
   return decoded;
  }
@@ -766,7 +796,7 @@ struct Composite {
     if(clip.audible)warn("video nonzero audio requires mixer binding");
    }else if(!slot&&e.jpegAnimation){
     if(k.alpha<=0)continue;
-    source=&queue.retainImage(e.jpegAnimation->at(k.mediaTime));
+    source=&queue.retainImage(e.jpegAnimation->at(k.mediaTime,worker));
    }
    // Primitive 3 specifies the rectangle in pixels, as in the original
    // 1280x720 noise layer driven by a 400x300 IMOAVI member.
@@ -836,6 +866,9 @@ bool SceneImages::warmFile(const std::string&path,bool required,bool prepareVide
    ready.composite=std::make_shared<Composite>(std::move(bytes),path,ready.identities,true,film.get());
    if(prepareVideo&&ready.composite->hasVideo)ready.composite->prepareOpeningVideo(nativeVideo);
    ready.bytes=ready.composite->bytesHeld();
+   if(prepareVideo&&!ready.composite->members.empty())
+    if(const auto& jpeg=ready.composite->members.front().jpegAnimation;jpeg&&!jpeg->loop)
+     ready.bytes+=jpeg->at(0)->pixels.size();
   }else{ready.bitmap=sceneBitmap(image(bytes));ready.bytes=ready.bitmap->pixels.size();}
   return ready;
  },required);
@@ -1200,6 +1233,11 @@ void SceneImages::setUiMotion(const std::string&name,const char*motion){
  if(current==motion)return;
  current=motion;layer.milliseconds=0;layer.audioMilliseconds=-1;
 }
+const Animation& SceneImages::uiAnimation(const std::string&name)const{
+ const auto& object=layers.at(name).composite;
+ if(!object||object->standaloneVideo)throw std::runtime_error("Missing UI animation metadata "+name);
+ return object->definition;
+}
 void SceneImages::removeUiLayer(const std::string&name,bool releaseAsset){
  if(name.rfind("ui_",0)!=0)throw std::runtime_error("UI layer owner");
  auto layer=layers.find(name);
@@ -1240,9 +1278,15 @@ void SceneImages::uiExternal(const std::string&name,unsigned index,float v){
  layer.externalMask|=uint16_t(1u<<index);
 }
 void SceneImages::clearComposites(){
- if(readAhead)for(auto&entry:composites)if(entry.second->hasVideo){
-  readAhead->discard(qlie::canonical(entry.first));
-  entry.second->closeVideoClips(readAhead);
+ if(readAhead)for(auto&entry:composites){
+  auto& object=*entry.second;
+  if(!object.members.empty())
+   if(const auto& jpeg=object.members.front().jpegAnimation;jpeg&&!jpeg->loop)
+    jpeg->cancelPrefetch(readAhead);
+  if(object.hasVideo){
+   readAhead->discard(qlie::canonical(entry.first));
+   object.closeVideoClips(readAhead);
+  }
  }
  composites.clear();
 }

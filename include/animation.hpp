@@ -13,6 +13,7 @@ struct Animation {
  uint32_t flags=0;
  std::vector<Motion> motions;
  bool loopStartFirst=false;
+ bool motionPlaybackRange=false;
 };
 struct AnimationContext {unsigned imageWidth=UINT32_MAX,imageHeight=UINT32_MAX,targetWidth=UINT32_MAX,targetHeight=UINT32_MAX;uint32_t randomSeed=0;std::array<float,16> external{};uint16_t externalMask=0;uint32_t* randomCursor=nullptr;};
 struct Affine2D {float a=1,b=0,c=0,d=1,x=0,y=0;};

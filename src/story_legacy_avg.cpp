@@ -94,6 +94,11 @@ std::string Story::legacyAssetHint(const std::string& text,std::string& scope)co
   if(duration.empty())duration="500";
   return "^sentence,fade:rule:"+duration+":"+(filename.empty()?"blind":filename);
  }
+ if(cmd=="^ffade"&&id=="ex1"&&!filename.empty()){
+  auto duration=arg(fields,3);
+  if(duration.empty())duration="500";
+  return "^sentence,fade:anime:"+duration+":"+filename;
+ }
  if(filename.empty()||filename=="@"||filename.find_first_of("#$+")!=filename.npos)return {};
  if(cmd=="^iload"){
   const auto layer=background(id);

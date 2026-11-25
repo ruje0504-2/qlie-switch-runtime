@@ -313,11 +313,12 @@ struct Frontend {
  }
  KFont*font=nullptr;
  std::unique_ptr<KFont,decltype(&kfont_close)> localizedFont{nullptr,kfont_close};
- KFont* storyFont() const {return localizedFont?localizedFont.get():font;}
+ KFont* dialogueFont() const {return localizedFont?localizedFont.get():font;}
+ KFont* storyFont() const {return ui.simplified()?dialogueFont():font;}
 #ifdef QLIE_PROFILE_WHJ6
  std::unique_ptr<KFont,decltype(&kfont_close)> captionFont{nullptr,kfont_close};
  KFont* messageFont(unsigned slot){
-  if(slot!=whj6::profile::captionFontSlot)return storyFont();
+  if(slot!=whj6::profile::captionFontSlot)return dialogueFont();
   if(!captionFont){
    const auto* path=whj6::profile::captionFontFile;
    if(assets.exists(path)){
@@ -406,10 +407,23 @@ struct Frontend {
  if(!font||(!nativeGpu&&!texture))throw std::runtime_error("Font/texture initialization failed");
  kfont_set_antialias(font,4);
  kfont_set_style(font,2,0x302020);
- if(ui.simplified()){
-  const auto data=assets.read("localization/zh-cn/arshanghaisonggbpro_lt.otf");
+ constexpr char localizedFontResource[]="localization/zh-cn/arshanghaisonggbpro_lt.otf";
+ bool usePackedFont=ui.simplified();
+#ifdef QLIE_PROFILE_WHJ6
+ // WHJ6 can use the dialogue face alongside an existing gameplay patch.
+ const auto dialogueFontPath=std::filesystem::path(game)/localizedFontResource;
+ if(std::filesystem::is_regular_file(dialogueFontPath)){
+  const auto data=qlie::file(dialogueFontPath.string());
   localizedFont.reset(kfont_open_memory(data.data(),data.size(),1));
-  if(!localizedFont)throw std::runtime_error("Chinese story font initialization failed");
+ }
+ usePackedFont=usePackedFont||assets.inPack(localizedFontResource);
+#endif
+ if(!localizedFont&&usePackedFont){
+  const auto data=assets.read(localizedFontResource);
+  localizedFont.reset(kfont_open_memory(data.data(),data.size(),1));
+  if(!localizedFont&&ui.simplified())throw std::runtime_error("Chinese story font initialization failed");
+ }
+ if(localizedFont){
   kfont_set_antialias(localizedFont.get(),4);
   kfont_set_style(localizedFont.get(),2,0x302020);
  }
@@ -834,7 +848,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }
  void drawGlyph(uint32_t cp,int x,int y,unsigned width,unsigned height,uint32_t color,
                  whj2::RenderQueue*queue=nullptr,GlyphFace face=GlyphFace::Interface){
- auto* selected=face==GlyphFace::Dialogue?storyFont():font;
+ auto* selected=face==GlyphFace::Dialogue?dialogueFont():font;
  if(!frameTarget&&!queue){kfont_draw(selected,newImage(),cp,x,y,width,height,color);return;}
  auto key=std::make_tuple(selected!=font,cp,width,height,color);
  auto at=uiGlyphs.find(key);

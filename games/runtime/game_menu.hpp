@@ -6,6 +6,7 @@
 #include <array>
 #include <functional>
 namespace whj2 {
+class AssetReadAhead;
 class GameMenu {
  qlie::Assets& assets;whj2::Settings& settings;std::map<std::string,Image> cache;
  const Image& resource(const std::string&);
@@ -13,6 +14,7 @@ class GameMenu {
  int draggedSlider=-1;
  int historyDragRow=-1,historyDragOffset=0;float historyDragY=0;
  std::array<AnimationLayer,2> historyTracks{};
+ AssetReadAhead* preparingPanels=nullptr;
  AnimationSample panelView;
  double panelElapsed=0;
  bool panelClosing=false;
@@ -43,6 +45,8 @@ public:
  AnimationSample panelZoom(bool closing,double elapsed)const;
  void prepareHistory(bool jumps=false);
  void preparePanels();
+ void warmPanels(AssetReadAhead&,bool jumps);
+ void takeWarmPanels();
  void open(Panel);
  void close();
  void beginClose();

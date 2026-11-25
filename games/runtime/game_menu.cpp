@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "game_menu.hpp"
+#include "asset_read_ahead.hpp"
 #include "profile.hpp"
 #include <cmath>
 #include <cstdio>
 #include <algorithm>
 namespace whj2 {
+struct PreparedMenuAssets {
+ std::map<std::string,Image> images;
+ std::array<AnimationLayer,2> historyTracks;
+};
 namespace {
+constexpr auto PanelAssetsKey="@menu/panel-assets";
 constexpr auto& sliders=gameSettingsLayout.sliders;
 constexpr auto& testButtonY=gameSettingsLayout.testButtonY;
 constexpr const char* sliderKeys[]={"WindowAlpha","TextSpeed","MasterVolume","BGMVolume",
@@ -79,6 +85,28 @@ void GameMenu::preparePanels(){
  }
  close();
 }
+void GameMenu::warmPanels(AssetReadAhead&worker,bool jumps){
+ preparingPanels=&worker;
+ worker.request(PanelAssetsKey,[&source=assets,snapshot=settings,jumps]() mutable {
+  GameMenu warmed(source,snapshot);
+  warmed.prepareHistory(jumps);
+  warmed.preparePanels();
+  WarmAsset result;
+  result.menuAssets=std::make_shared<PreparedMenuAssets>(
+   PreparedMenuAssets{std::move(warmed.cache),std::move(warmed.historyTracks)});
+  return result;
+ },true);
+}
+void GameMenu::takeWarmPanels(){
+ if(!preparingPanels||!preparingPanels->ready(PanelAssetsKey))return;
+ auto*worker=preparingPanels;
+ preparingPanels=nullptr;
+ auto prepared=worker->takeReady(PanelAssetsKey);
+ if(!prepared)return;
+ cache.merge(prepared->menuAssets->images);
+ if(historyTracks[0].keys.empty())historyTracks=std::move(prepared->menuAssets->historyTracks);
+ worker->retire(std::move(prepared->menuAssets));
+}
 AnimationSample GameMenu::panelZoom(bool closing,double elapsed)const{
  const auto& track=historyTracks[closing];
  AnimationSample zoom{};
@@ -104,6 +132,7 @@ void GameMenu::applyPanelView(RenderQueue&q)const{
  if(panelView.scaleX!=100||panelView.scaleY!=100)q.control(panelView,-1);
 }
 void GameMenu::open(Panel p){
+ takeWarmPanels();
  loadHistoryTracks();
  close();panel=p;focus=p==Settings?3:0;
  historyOffset=0;historyVoiceRow=-1;historyVoices.fill(false);historyJumps.fill(false);historyTextOffset.fill(0);historyTextMax.fill(0);

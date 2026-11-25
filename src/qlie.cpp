@@ -107,7 +107,48 @@ struct MT {
  uint64_t get64(){uint64_t a=get();return a|(uint64_t(get())<<32);}
 };
 static Bytes decrypt(Bytes b,uint32_t arc,const std::string&name,const Bytes&k1,const Bytes&k2){uint32_t h=0x85f532,seed=0x33f641,len=uint32_t(b.size());for(size_t j=0;j<name.size();j++){h+=uint32_t(j&255)*uint8_t(name[j]);seed^=h;}seed+=arc^(7*(len&0xffffff)+len+h+(h^len^0x8f32dc));seed=9*(seed&0xffffff);if(!k2.empty())seed^=0x453a;MT mt(seed,k1,k2);uint64_t table[16];for(auto&x:table)x=mt.get64();for(int j=0;j<9;j++)mt.get();uint64_t hs=mt.get64();unsigned t=mt.get()&15;for(size_t p=0;p+8<=b.size();p+=8){hs=padd(hs^table[t],table[t],32);uint64_t d=rd(b,p,8)^hs;wr(b,p,d);hs=padd(hs,d,8)^d;hs=padd((hs<<1)&0xfffffffefffffffeULL,d,16);t=(t+1)&15;}return b;}
-Bytes decompress(const Bytes&b){if(b.size()<12||std::memcmp(b.data(),"1PC\xff",4))throw std::runtime_error("Not QLIE compressed data");size_t size=rd(b,8,4),p=12;Bytes out;out.reserve(size);while(p<b.size()){uint8_t l[256],r[256]={};for(int i=0;i<256;i++)l[i]=uint8_t(i);for(int i=0;i<256;){unsigned c=rd(b,p++,1);if(c>127){i+=int(c-127);c=0;}if(i>255)break;for(unsigned j=0;j<=c;j++){if(i>=256)throw std::runtime_error("Invalid BPE table");l[i]=uint8_t(rd(b,p++,1));if(l[i]!=i)r[i]=uint8_t(rd(b,p++,1));i++;}}unsigned cb=(b[4]&1)?2:4;size_t count=rd(b,p,cb);p+=cb;if(count>b.size()-p)throw std::runtime_error("Truncated BPE block");for(size_t j=0;j<count;j++){std::vector<uint8_t> stack{b[p++]};unsigned steps=0;while(!stack.empty()){unsigned v=stack.back();stack.pop_back();if(l[v]==v){if(out.size()==size)throw std::runtime_error("BPE overflow");out.push_back(uint8_t(v));}else{stack.push_back(r[v]);stack.push_back(l[v]);}if(++steps>size*2+256)throw std::runtime_error("Cyclic BPE");}}}if(out.size()!=size)throw std::runtime_error("BPE size mismatch");return out;}
+Bytes decompress(const Bytes&bytes){
+ if(bytes.size()<12||std::memcmp(bytes.data(),"1PC\xff",4))
+  throw std::runtime_error("Not QLIE compressed data");
+ Bytes output;
+ output.reserve(rd(bytes,8,4));
+ std::vector<uint8_t> stack;
+ stack.reserve(32);
+ const unsigned countBytes=(bytes[4]&1)?2:4;
+ size_t pos=12;
+ while(pos<bytes.size()){
+  uint8_t left[256],right[256]={};
+  for(unsigned i=0;i<256;++i)left[i]=uint8_t(i);
+  for(unsigned i=0;i<256;){
+   unsigned count=rd(bytes,pos++,1);
+   if(count>127){i+=count-127;count=0;}
+   if(i>255)break;
+   for(unsigned j=0;j<=count;++j){
+    if(i>=256)throw std::runtime_error("Invalid BPE table");
+    left[i]=uint8_t(rd(bytes,pos++,1));
+    if(left[i]!=i)right[i]=uint8_t(rd(bytes,pos++,1));
+    ++i;
+   }
+  }
+  const size_t count=rd(bytes,pos,countBytes);
+  pos+=countBytes;
+  if(count>bytes.size()-pos)throw std::runtime_error("Truncated BPE block");
+  for(size_t i=0;i<count;++i){
+   // The expansion empties the stack for each code. Reuse its storage for
+   // the next code and block rather than allocating once per input byte.
+   stack.push_back(bytes[pos++]);
+   unsigned steps=0;
+   while(!stack.empty()){
+    const auto current=stack.back();
+    stack.pop_back();
+    if(left[current]==current)output.push_back(current);
+    else {stack.push_back(right[current]);stack.push_back(left[current]);}
+    if(++steps>256)throw std::runtime_error("Cyclic BPE");
+   }
+  }
+ }
+ return output;
+}
 std::string cp932(const Bytes&b){std::string out;for(size_t p=0;p<b.size();p++){unsigned a=b[p],cp=cp932_single[a];if(!cp&&a){if(p+1==b.size())throw std::runtime_error("Truncated CP932");unsigned c=b[++p];if(a<0x81||a>0xfe||c<0x40||c>0xfe||c==0x7f)throw std::runtime_error("Invalid CP932");cp=cp932_double[(a-0x81)*190+c-0x40-(c>0x7f)];if(!cp)throw std::runtime_error("Unknown CP932 pair");}if(cp<128)out+=char(cp);else if(cp<2048){out+=char(0xc0|(cp>>6));out+=char(0x80|(cp&63));}else{out+=char(0xe0|(cp>>12));out+=char(0x80|((cp>>6)&63));out+=char(0x80|(cp&63));}}return out;}
 std::string canonical(std::string s){for(auto&c:s){if(c==92)c=47;else if(c>=65&&c<=90)c+=32;}while(s.compare(0,2,"./")==0)s.erase(0,2);return s;}
 Bytes file(const std::string&p){std::ifstream f(p,std::ios::binary);if(!f)throw std::runtime_error("Cannot open "+p);f.seekg(0,std::ios::end);auto n=f.tellg();if(n<0)throw std::runtime_error("Cannot size "+p);f.seekg(0);Bytes b(static_cast<size_t>(n));if(!b.empty()&&!f.read(reinterpret_cast<char*>(b.data()),b.size()))throw std::runtime_error("Cannot read "+p);return b;}

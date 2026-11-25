@@ -16,6 +16,7 @@ struct PreparedEmbeddedOpening;
 struct PreparedMovie;
 struct PreparedAudioRestore;
 struct PreparedSceneRestore;
+struct PreparedMenuAssets;
 struct DecodedPcm {
  std::shared_ptr<const int16_t> samples;
  size_t count=0;
@@ -33,6 +34,7 @@ struct WarmAsset {
  std::shared_ptr<PreparedMovie> movie;
  std::shared_ptr<PreparedAudioRestore> audioRestore;
  std::shared_ptr<PreparedSceneRestore> sceneRestore;
+ std::shared_ptr<PreparedMenuAssets> menuAssets;
  size_t bytes=0;
 };
 

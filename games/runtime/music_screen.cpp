@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <cstdio>
 namespace whj2 {
-MusicScreen::MusicScreen(qlie::Assets&a,Audio&sound,Settings&config,KFont*f,int expectedTracks):assets(a),audio(sound),settings(config),scene(a),labelText(a),font(f){std::istringstream input(a.text("script/soundmode/list.txt"));std::string line;while(std::getline(input,line)){auto row=split(trim(line),',');if(row.size()<2)continue;auto path="music/"+row[1];if(path.find('.')==path.npos)path+=".ogg";if(!a.exists(path))throw std::runtime_error("Music mode track missing: "+path);tracks.push_back({row[0],path});}if(expectedTracks?trackCount()!=expectedTracks:(trackCount()!=18&&trackCount()!=27&&!paged()))throw std::runtime_error("Music mode track layout count");}
+MusicScreen::MusicScreen(qlie::Assets&a,Audio&sound,Settings&config,KFont*f,const MessageText& text,int expectedTracks):assets(a),audio(sound),settings(config),scene(a),labelText(text.forLabels()),font(f){std::istringstream input(a.text("script/soundmode/list.txt"));std::string line;while(std::getline(input,line)){auto row=split(trim(line),',');if(row.size()<2)continue;auto path="music/"+row[1];if(path.find('.')==path.npos)path+=".ogg";if(!a.exists(path))throw std::runtime_error("Music mode track missing: "+path);tracks.push_back({row[0],path});}if(expectedTracks?trackCount()!=expectedTracks:(trackCount()!=18&&trackCount()!=27&&!paged()))throw std::runtime_error("Music mode track layout count");}
 void MusicScreen::text(const std::string&id,unsigned slot,const std::string&value,unsigned width,unsigned height,unsigned size){labelText.start("[spd,0]"+value);scene.uiSlot(id,slot,labelText.render(font,MessageStyle{width,height,size,size,0xffffff}));}
 void MusicScreen::prepare(){
  if(prepared)return;

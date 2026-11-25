@@ -390,9 +390,11 @@ struct Frontend {
  messageCursor=std::make_unique<whj2::SceneImages>(assets);
  messageCursor->command("^ui_cursor,file:avg/window/Click.b,x:1070,y:670,pri:1550,motion:None");
  historyText=std::make_unique<whj2::MessageText>(*messageText);
- gameMenu.prepareHistory(game_profile::story.historyJumpLimit!=0);
- gameMenu.preparePanels();
- whj2::MessageText preview(assets);
+ if(!game_profile::story.legacyAvg){
+  gameMenu.prepareHistory(game_profile::story.historyJumpLimit!=0);
+  gameMenu.preparePanels();
+ }
+ auto preview=messageText->forLabels();
  if(gameSettingsLayout.classic){
   preview.start(ui.simplified()?"[spd,0]文本示例":"[spd,0]テキスト　サンプル");
   gameMenu.setWindowPreview(preview.render(storyFont(),{100,50,10,10,0xffffff}));
@@ -417,8 +419,9 @@ struct Frontend {
  upperMenu=std::make_unique<whj2::UpperMenu>(assets);
 #endif
  title=std::make_unique<whj2::TitleScreen>(assets,game_profile::title);
- choiceScreen=std::make_unique<whj2::ChoiceScreen>(assets);
- musicScreen=std::make_unique<whj2::MusicScreen>(assets,*audio,settings,font,game_profile::musicTrackCount);
+ choiceScreen=std::make_unique<whj2::ChoiceScreen>(assets,*messageText);
+ if(game_profile::story.legacyAvg)choiceScreen->prepare(*readAhead);
+ musicScreen=std::make_unique<whj2::MusicScreen>(assets,*audio,settings,font,*messageText,game_profile::musicTrackCount);
  replayScreen=std::make_unique<whj2::ReplayScreen>(assets,progress);
  cgScreen=std::make_unique<whj2::CgScreen>(assets,progress,font,game_profile::extendedCgRoots);
  cgScreen->setReadAhead(readAhead.get());
@@ -455,6 +458,8 @@ struct Frontend {
   if(game_profile::titleMusic[0])audio->warmFile(assets,game_profile::titleMusic);
  }
  opening=1;images->command("^ui_caution,file:script/caution/caution.b,x:0,y:0");
+ if(game_profile::story.legacyAvg)
+  gameMenu.warmPanels(*readAhead,game_profile::story.historyJumpLimit!=0);
  QLIE_LOG_LINE(<<"OPENING caution\n");
  }
  ~Frontend(){
@@ -1230,7 +1235,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }throw std::runtime_error("Unhandled frontend event "+e.type);
  }throw std::runtime_error("Frontend event budget");
  }
- static constexpr unsigned AutoSaveBase=121,AutoSaveCount=5;
+ static constexpr unsigned ManualSlotCount=120;
  unsigned newestManualSlot(){
   if(manualSlotsScanned)return latestManualSlot;
   latestManualSlot=1;
@@ -1241,19 +1246,23 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    unsigned slot=0;
    const char*end=name.data()+name.size()-6;
    auto parsed=std::from_chars(name.data()+4,end,slot);
-   if(parsed.ec!=std::errc{}||parsed.ptr!=end||slot==0||slot>=AutoSaveBase||(name.size()==13&&slot<100))continue;
+   if(parsed.ec!=std::errc{}||parsed.ptr!=end||slot==0||slot>ManualSlotCount||(name.size()==13&&slot<100))continue;
    const auto time=entry.last_write_time();
    if(time>latest||(time==latest&&slot<latestManualSlot)){latest=time;latestManualSlot=slot;}
   }
   manualSlotsScanned=true;
   return latestManualSlot;
  }
- std::string slotPrefix(unsigned slot=1)const{if(slot>=AutoSaveBase){if(slot>=AutoSaveBase+AutoSaveCount)throw std::runtime_error("Auto save slot range");char number[32];std::snprintf(number,sizeof(number),"/autosave/slot%02u",slot-AutoSaveBase+1);return saveDir+number;}char number[16];std::snprintf(number,sizeof(number),"/slot%02u",slot);return saveDir+number;}
+ std::string slotPrefix(unsigned slot=1)const{
+  if(!slot||slot>ManualSlotCount)throw std::runtime_error("Save slot range");
+  char number[16];std::snprintf(number,sizeof(number),"/slot%02u",slot);
+  return saveDir+number;
+ }
  bool save(unsigned slot=1){
   if(replayActive||menu||movie->playing())return false;
   if(pendingScene){status=ui.text("場面の準備中です。");return false;}
   try{
-   if(slot<AutoSaveBase)flushProgress();
+   flushProgress();
    whj2::SaveSlotWrite output(slotPrefix(slot));
    qlie::Bytes scene(1280*720*4,0);
    images->drawThumbnail(scene,float(saveThumbnailPriority));
@@ -1303,13 +1312,13 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    return false;
   }
   slotPreviews.erase(slot);
-  if(slot<AutoSaveBase){latestManualSlot=slot;manualSlotsScanned=true;}
+  latestManualSlot=slot;manualSlotsScanned=true;
   status=ui.text("現在の状態を保存しました。");
   return true;
  }
  void refreshSlotFlags(){using UI=whj2::GameMenu;if(gameMenu.panel!=UI::Save&&gameMenu.panel!=UI::Load)return;for(unsigned i=0;i<8;i++)gameMenu.populatedSlots[i]=slotPreview(unsigned(gameMenu.page)*8+i+1).exists;if(!gameMenu.asking&&gameMenu.focus>=8&&!gameMenu.populatedSlots[unsigned(gameMenu.focus)%8])gameMenu.focus%=8;}
  void deleteSlot(unsigned slot){
-  if(!slot||slot>=AutoSaveBase)throw std::runtime_error("Manual delete slot range");
+  if(!slot||slot>ManualSlotCount)throw std::runtime_error("Manual delete slot range");
   bool removed=false;
   try{
    std::filesystem::remove(slotPrefix(slot)+".story");removed=true;
@@ -1318,13 +1327,6 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   }catch(const std::exception&e){QLIE_LOG_LINE(<<"DELETE FAIL "<<e.what()<<"\n");status=removed?ui.text("データを削除しましたが、一部のファイルが残っています。"):ui.text("削除できませんでした。");}
   try{whj2::commitSavePath(saveDir+"/");}catch(const std::exception&e){QLIE_LOG_LINE(<<"DELETE COMMIT FAIL "<<e.what()<<"\n");status=ui.text("削除結果を保存できませんでした。");}
   slotPreviews.erase(slot);if(latestManualSlot==slot)manualSlotsScanned=false;refreshSlotFlags();
- }
- void autoSaveChoice(){
-  if(replayActive||menu||movie->playing()||normalSkip)return;
-  unsigned chosen=AutoSaveBase;auto oldest=std::filesystem::file_time_type::max();
-  for(unsigned i=0;i<AutoSaveCount;i++){unsigned slot=AutoSaveBase+i;auto path=slotPrefix(slot)+".story";auto time=std::filesystem::exists(path)?std::filesystem::last_write_time(path):std::filesystem::file_time_type::min();if(time<=oldest){oldest=time;chosen=slot;}}
-  auto priorStatus=status;
-  if(save(chosen)){status=priorStatus;QLIE_LOG_LINE(<<"AUTOSAVE slot="<<(chosen-AutoSaveBase+1)<<"\n");}
  }
  static constexpr auto loadAudioKey="@restore:slot";
  static constexpr auto loadSceneKey="@restore:scene";
@@ -1455,7 +1457,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    if(game_profile::story.historyJumpLimit)result.historyHash=qlie::hash(historyData);
   }
   if(result.story.awaiting){
-   result.choice=std::make_unique<whj2::ChoiceScreen>(assets);
+   result.choice=std::make_unique<whj2::ChoiceScreen>(assets,*messageText);
    result.choice->show(result.story.choices,storyFont());
    if(std::filesystem::exists(path+".choice"))result.choice->restore(qlie::file(path+".choice"),storyFont());
   }
@@ -2177,6 +2179,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  const bool skipAtFrameStart=normalSkip;
  audio->update();
  updateBackgroundVoice();
+ gameMenu.takeWarmPanels();
  gameMenu.update(double(now-lastUpdate));
  advanceMenuFade(double(now-lastUpdate));
 #if defined(__SWITCH__) && QLIE_DIAGNOSTICS
@@ -2204,7 +2207,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(!menu&&!pendingScene&&!movie->playing()&&!gameMenu.visible()&&!upperMenu->visible()&&!menuFadeLocksInput()&&!sceneSkipRunning()){
  images->update(double(now-lastUpdate));
  sentenceWait.elapseSkip(double(now-lastUpdate));
- if(story.state.awaiting){choiceScreen->update(double(now-lastUpdate));if(choiceScreen->takeAutoSaveRequest())autoSaveChoice();int chosen=choiceScreen->takeConfirmed();if(chosen>=0){story.choose(unsigned(chosen));if(!sceneSkipActive())next();}}
+ if(story.state.awaiting){choiceScreen->update(double(now-lastUpdate));int chosen=choiceScreen->takeConfirmed();if(chosen>=0){story.choose(unsigned(chosen));if(!sceneSkipActive())next();}}
  messageText->update(double(now-lastUpdate));if(messageText->visible()!=lastMessageVisible)refreshMessage();
  transition->update(double(now-lastUpdate));
  autoPlay.tick(double(now-lastUpdate),messageText->visible(),settings.get("AutoTextWait"),settings.get("TextSpeed"),messageText->timedCharacters(autoPlay.countedGlyphs(),messageText->visible()));
@@ -2577,7 +2580,7 @@ if(!whj2_mac_can_read_game(game.c_str(),keyPath)){
 QLIE_LOG_LINE(<<"BUILD revision="<<qlie_build_revision<<"\n");
 QLIE_LOG_LINE(<<"INIT game="<<game<<" saves="<<saves<<"\n");
 struct VideoHardwareScope {~VideoHardwareScope(){kvideo_release_hardware();}} videoHardware;
-Frontend f(game,saves);if(argc>4&&std::string(argv[3])=="--restore-autosave"){unsigned index=unsigned(std::stoul(argv[4]));if(index<1||index>Frontend::AutoSaveCount)throw std::runtime_error("Auto save index must be1..5");auto slot=Frontend::AutoSaveBase+index-1;if(!std::filesystem::exists(f.slotPrefix(slot)+".story"))throw std::runtime_error("Auto save slot is empty");f.opening=0;if(!f.load(slot))throw std::runtime_error(f.status);}
+Frontend f(game,saves);
  if constexpr (qlie::diagnostics){
  if(argc>4&&std::string(argv[3])=="--start-transition-smoke"){f.startTransitionTest=true;smoke=unsigned(std::stoul(argv[4]));}
  if(argc>4&&std::string(argv[3])=="--read-skip-smoke"){f.readSkipTest=true;smoke=unsigned(std::stoul(argv[4]));}

@@ -32,7 +32,7 @@ class MusicScreen {
  void uiSound(const char*);
 public:
  enum Destination {NoDestination,Title,CG,Replay};
- MusicScreen(qlie::Assets&,Audio&,Settings&,KFont*,int expectedTracks=0);
+ MusicScreen(qlie::Assets&,Audio&,Settings&,KFont*,const MessageText&,int expectedTracks=0);
  void prepare();
  bool takeSettingsChanged(){bool value=dirty;dirty=false;return value;}
  void open();void close();bool visible()const{return opened;}

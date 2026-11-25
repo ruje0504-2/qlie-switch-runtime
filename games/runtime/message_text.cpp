@@ -84,6 +84,13 @@ MessageText::MessageText(qlie::Assets&assets,bool useStoryLineBreaking):storyLin
   }
  }
 }
+MessageText MessageText::forLabels()const{
+ MessageText result;
+ result.speed=speed;
+ result.bitmapGlyphs=bitmapGlyphs;
+ result.replacements=replacements;
+ return result;
+}
 std::string messageDisplayName(const std::string&raw){if(raw.empty())return {};auto name=raw;if(name.rfind("【",0)==0){name.erase(0,3);auto end=name.find("】");if(end!=name.npos)name.resize(end);}auto alias=name.find("＠");if(alias!=name.npos)name=name.substr(alias+3);return "【"+name+"】";}
 void MessageText::index(bool layoutChanged){if(layoutChanged)layoutVersion.publish();glyphs.clear();rubyRuns.clear();double time=0,currentSpeed=speed;bool bitmapFont=false;
  std::string display=text;

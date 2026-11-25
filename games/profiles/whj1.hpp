@@ -33,7 +33,7 @@ inline const qlie::ArchiveLayout archives{
 inline constexpr whj2::LegacyAvgLayout legacyLayout{
  "windowframe_window.b",261,603,824,120,24,
  0,720,
- 285,567,24,0,
+ 285,567,24,0xff5555,
  "^face,x:200,y:720,align:center:bottom,mode:auto,pri:1015",
  "5",0x00b6,0x01f7,
  {{{"#1_route_a_f","#game_aclearflag"},{"#1_route_b_f","#game_bclearflag"}}},

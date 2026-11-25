@@ -512,7 +512,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   };
   std::vector<Hint> hints;
   whj2::SceneImages::CharacterPrefixes futurePortraits;
-  std::vector<std::string> sceneKeys,soundKeys;
+  std::vector<std::string> sceneKeys,soundKeys,predictedFaces;
   constexpr size_t hintsPerWorker=6;
   auto add=[&](const std::string&path,Kind kind,std::optional<whj2::SceneImages::BackgroundBlur> blur={},
                std::optional<whj2::SceneImages::BitmapFilter> gradient={}){
@@ -568,11 +568,13 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
      add(key,Kind::Image,std::move(blur));
     }
     std::optional<whj2::SceneImages::BitmapFilter> gradient;
-    auto paths=images->warmPaths(line,&futurePortraits,&gradient);
+    auto paths=images->warmPaths(line,&futurePortraits,&gradient,&predictedFaces);
     if(gradient&&!gradient->result)add({},Kind::Image,{},std::move(gradient));
     for(const auto&path:paths)add(path,Kind::Image);
    }
   }
+  // A predicted face must not displace an image explicitly used by the next scene.
+  for(const auto&path:predictedFaces)add(path,Kind::Image);
   movie->primeFile(imminentMovie);
   readAhead->retain(sceneKeys);
   soundReadAhead->retain(soundKeys);
@@ -1821,7 +1823,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  fieldRequested=false;
  SDL_UpdateTexture(texture,nullptr,display,1280*4);SDL_RenderClear(renderer);SDL_RenderCopy(renderer,texture,nullptr,nullptr);framePacer.wait();SDL_RenderPresent(renderer);fpsDisplay.presented(SDL_GetTicks64());}
 #ifdef WHJ2_WITH_GPU
- void composeNative(){
+ void composeNative(const whj2::RenderQueue*scene){
  if(sceneSkipRunning()){gpu->begin(0xff000000u);drawSceneSkip(*frameTarget);}
  else if(gameMenu.coversScene()){gpu->begin(0xff000000u);drawPanel();}
  else if(extrasVisible()){
@@ -1844,7 +1846,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    else title->draw(*frameTarget);
   }
   else{
-   images->drawScene(*frameTarget,true);transition->blend(*frameTarget);
+   scene->draw(*frameTarget,1280,720);transition->blend(*frameTarget);
    if(!hidden&&gameMenu.panel!=whj2::GameMenu::History){
     images->drawMessages(*frameTarget);drawDialogueSpeaker();
     if(messageCursorMotion!="None")messageCursor->draw(*frameTarget);
@@ -1856,16 +1858,16 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   if(gameMenu.visible())drawPanel();
  }
  }
- void drawNative(){
+ void drawNative(const whj2::RenderQueue*scene){
  if(uiGlyphs.size()>1024)uiGlyphs.clear();
  if(const auto shade=menuFadeShade()){
   frameTarget=gpu.get();gpu->begin(*shade?0xffffffffu:0xff000000u);
  }else if(!gameMenu.coversScene()&&(transition->needsCanvas()||transition->needsTarget())){
-  composeCpu();
+  composeCpu(true,scene);
   gpu->begin(pixels);frameTarget=gpu.get();
   if(fieldRequested)frameTarget->requestFieldPresentation();
  }else{
-  frameTarget=gpu.get();composeNative();
+  frameTarget=gpu.get();composeNative(scene);
  }
  drawMenuFade(*frameTarget);
  recordShown();if(fpsVisible)fpsDisplay.draw(*frameTarget);frameTarget=nullptr;
@@ -1874,7 +1876,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(auto stamp=gpu->present(fpsVisible)){fpsDisplay.presented(*stamp);movie->presented();}
  }
 #endif
- void composeCpu(bool liveVideo=false){
+ void composeCpu(bool liveVideo=false,const whj2::RenderQueue*scene=nullptr){
  fieldRequested=false;
  if(sceneSkipRunning()){clearMenuFrame(0);drawSceneSkip(pixels);return;}
  if(gameMenu.coversScene()){clearMenuFrame(0);drawPanel();return;}
@@ -1899,7 +1901,12 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  pixels[i+1]=menu?0:25;
  pixels[i+2]=menu?0:20;
  pixels[i+3]=255;
- }if(!menu){fieldRequested=images->drawScene(pixels,liveVideo);transition->captureTarget(pixels);fieldRequested=transition->blend(pixels)||fieldRequested;}
+ }
+ if(!menu){
+  if(scene){scene->draw(pixels,1280,720);fieldRequested=scene->usesFieldPresentation();}
+  else fieldRequested=images->drawScene(pixels,liveVideo);
+  transition->captureTarget(pixels);fieldRequested=transition->blend(pixels)||fieldRequested;
+ }
  if(menu){
   if(titleStarting&&!game_profile::title.exitUsesMotions)fieldRequested=transition->blend(pixels);
   else{
@@ -1954,9 +1961,9 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    pixels[i+3]=255;
   }
  }
- void composeMenuFrame(bool liveVideo){
+ void composeMenuFrame(bool liveVideo,const whj2::RenderQueue*scene=nullptr){
   if(const auto shade=menuFadeShade()){fieldRequested=false;clearMenuFrame(*shade);}
-  else composeCpu(liveVideo);
+  else composeCpu(liveVideo,scene);
   drawMenuFade(pixels);
  }
  qlie::Bytes captureMenuFrame(){
@@ -1972,11 +1979,29 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  // While waiting for media, repaint only to show or remove an overlay.
  const bool waitingForMedia=movie->loading()||pendingScene;
  if(waitingForMedia&&!overlay&&!lastFrameHadOverlay){framePacer.wait();return;}
+ std::optional<whj2::RenderQueue> scene;
+ if(!menu&&opening!=1&&!movie->hasFrame()&&!sceneSkipRunning()&&!gameMenu.coversScene()&&!extrasVisible()&&!menuFadeShade()){
+  bool masks=false,videoSurfaces=false;
+#ifdef WHJ2_WITH_GPU
+  if(gpu&&gpu->nativePresentation()&&!transition->needsCanvas()&&!transition->needsTarget()){
+   masks=gpu->supportsMasks();
+   videoSurfaces=gpu->supportsVideoSurfaces();
+  }
+#endif
+  scene.emplace(images->captureQueue(masks,videoSurfaces));
+  // A cold decoder has no image yet. Keep the display and transition target
+  // intact until every visible video layer can contribute its first frame.
+  if(scene->waitingForVideoFrame()){
+   images->takeShownFiles();
+   framePacer.wait();
+   return;
+  }
+ }
  lastFrameHadOverlay=overlay;
 #ifdef WHJ2_WITH_GPU
- if(gpu&&gpu->nativePresentation()){drawNative();return;}
+ if(gpu&&gpu->nativePresentation()){drawNative(scene?&*scene:nullptr);return;}
 #endif
- composeMenuFrame(true);
+ composeMenuFrame(true,scene?&*scene:nullptr);
  present();movie->presented();
  }
  void snapshot(const std::string&name){SDL_Surface*surface=SDL_CreateRGBSurfaceFrom(pixels.data(),1280,720,32,1280*4,0x00ff0000,0x0000ff00,0x000000ff,0xff000000);

@@ -35,7 +35,7 @@ class RenderQueue {
  std::deque<Image> snapshots;
  std::vector<std::shared_ptr<const Image>> retainedImages;
  size_t visibleImages=0;
- bool shaderMasks=false,nativeVideo=false,fieldPresentation=false;
+ bool shaderMasks=false,nativeVideo=false,fieldPresentation=false,pendingVideoFrame=false;
  std::optional<Affine2D> view;
  void drawRows(qlie::Bytes&,unsigned,unsigned,unsigned,unsigned,RenderTarget* =nullptr)const;
 public:
@@ -45,6 +45,8 @@ public:
  bool supportsVideoSurfaces()const{return nativeVideo;}
  void requestFieldPresentation(){fieldPresentation=true;}
  bool usesFieldPresentation()const{return fieldPresentation;}
+ void waitForVideoFrame(){pendingVideoFrame=true;}
+ bool waitingForVideoFrame()const{return pendingVideoFrame;}
  size_t imageCount()const{return visibleImages;}
  void image(const Image&,const Affine2D&,float priority,float alpha,uint32_t add,uint32_t mul,unsigned blend=0,unsigned filter=0);
  void maskedImage(const Image&,const Image&,const AnimationSample::Mask&,const Affine2D&,float,float,uint32_t,uint32_t,unsigned,unsigned);

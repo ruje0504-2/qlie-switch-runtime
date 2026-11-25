@@ -208,7 +208,7 @@ struct EmbeddedDecoder {
  std::shared_ptr<const Image> heldFrame;
  uint64_t heldTick=0;
  uint64_t ticks=0;
- bool ended=false,audible=false,softwareOnly=false,settled=false;
+ bool ended=false,audible=false,softwareOnly=false,settled=false,frameReady=false;
  explicit EmbeddedDecoder(std::shared_ptr<const qlie::Bytes> b,std::string name={})
   :bytes(std::move(b)),source(std::move(name)){}
  ~EmbeddedDecoder(){if(video)kvideo_close(video);}
@@ -218,9 +218,8 @@ struct EmbeddedDecoder {
   if(!video)throw std::runtime_error("Embedded video open failed: "+source);
   const unsigned width=kvideo_source_width(video),height=kvideo_source_height(video);
   frame=std::make_shared<Image>(Image{width,height,qlie::Bytes(size_t(width)*height*4)});
-  frame->version.publish();
   spare.reset();
-  ticks=0;ended=false;audible=false;
+  ticks=0;ended=false;audible=false;frameReady=false;
  }
  std::shared_ptr<const Image> at(double ms,bool live,bool nativeVideo,bool loop){
   if(!video)reset();
@@ -234,7 +233,7 @@ struct EmbeddedDecoder {
    else{ticks=0;ended=false;audible=false;rewound=true;}
   }
   settled=ended||ticks>target;
-  if(settled)return heldFrame?heldFrame:frame;
+  if(settled)return heldFrame?heldFrame:frameReady?frame:nullptr;
   if(nativeVideo&&!softwareOnly)kvideo_enable_surface(video);
   // A long stall can move the script clock ahead by seconds. Work through
   // that backlog in small batches on the interactive presentation path.
@@ -266,6 +265,7 @@ struct EmbeddedDecoder {
    throw std::runtime_error("Embedded video "+source+": "+kvideo_error(video));
   }
   if(kvideo_written_frames(video)!=before){
+   frameReady=true;
    output->version.publish();
    KVideoSurface surface{};
    if(kvideo_get_surface(video,&surface)){
@@ -283,18 +283,13 @@ struct EmbeddedDecoder {
    }else output->videoSurface.reset();
    if(borrowed)spare=std::move(frame);
    frame=std::move(output);
-  }else if(rewound){
-   std::fill(output->pixels.begin(),output->pixels.end(),0);
-   output->videoSurface.reset();
-   output->version.publish();
-   if(borrowed)spare=std::move(frame);
-   frame=std::move(output);
   }else if(borrowed)spare=std::move(output);
   // A reusable CPU buffer must not keep an extra NVDEC surface pinned.
   if(spare&&spare.use_count()==1)spare->videoSurface.reset();
   ticks=due+1;ended=code==1;settled=ended||due==target;
-  if(heldFrame&&(due>=heldTick||ended))heldFrame.reset();
-  return heldFrame?heldFrame:frame;
+  if(heldFrame&&frameReady&&(due>=heldTick||ended))heldFrame.reset();
+  if(ended&&!heldFrame&&!frameReady)throw std::runtime_error("Embedded video has no picture: "+source);
+  return heldFrame?heldFrame:frameReady?frame:nullptr;
  }
 };
 struct EmbeddedVideo {
@@ -307,7 +302,8 @@ struct EmbeddedVideo {
  explicit EmbeddedVideo(std::shared_ptr<const qlie::Bytes> bytes,std::string source)
   :decoder(std::make_shared<EmbeddedDecoder>(std::move(bytes),std::move(source))){}
  void install(std::shared_ptr<const Image> frame,uint64_t tick){
-  shown=std::move(frame);shownTick=tick;audible=decoder->audible;settled=decoder->settled;
+  if(frame)shown=std::move(frame);
+  shownTick=tick;audible=decoder->audible;settled=decoder->settled;
  }
  void cancel(AssetReadAhead*worker){
   if(pendingTick&&worker)worker->discard(key);
@@ -348,7 +344,7 @@ struct PreparedEmbeddedOpening {
  }
  size_t bytesHeld()const{
   size_t size=0;
-  for(const auto&clip:clips)size+=clip.second->shown->pixels.size();
+  for(const auto&clip:clips)if(clip.second->shown)size+=clip.second->shown->pixels.size();
   return size;
  }
 };
@@ -564,7 +560,7 @@ struct Composite {
   if(standaloneVideo){
    if(opacity<=0)return;
    auto image=standaloneFrame(ms,liveVideo,queue.supportsVideoSurfaces(),worker,asyncVideo);
-   if(!image)return;
+   if(!image){queue.waitForVideoFrame();return;}
    const auto&frame=queue.retainImage(std::move(image));
    if(parent3D){
     AnimationSample sample;sample.alpha=opacity;sample.addColor=parentAdd;sample.mulColor=parentMul;sample.flags=parentBlend;sample.textureFilter=filterOverride;
@@ -604,6 +600,7 @@ struct Composite {
    auto&clip=replacementMedia->videoClip(0,replacementMedia->members.front(),worker);
    auto frame=clip.at(time,liveVideo,queue.supportsVideoSurfaces(),false,worker,asyncVideo);
    if(clip.audible)warn("replacement video nonzero audio requires mixer binding");
+   if(!frame)queue.waitForVideoFrame();
    return frame?&queue.retainImage(std::move(frame)):nullptr;
   };
   for(size_t index=0;index<samples.size();index++){
@@ -629,7 +626,7 @@ struct Composite {
   const Image*source=textSource?*messageSurface:members[k.resource].image.get();
   const Image*mask=members[k.childMotion].image.get();
    if(uiSlots){auto src=uiSlots->find(k.resource);if(src!=uiSlots->end())source=src->second;auto msk=uiSlots->find(k.childMotion);if(msk!=uiSlots->end())mask=msk->second;}
-  if(replacementMedia&&k.resource==0){source=replacementFrame(k.mediaTime);if(!source)continue;}
+  if(replacementMedia&&k.resource==0){if(k.alpha<=0)continue;source=replacementFrame(k.mediaTime);if(!source)continue;}
   if(textSource&&!source)continue;
   if(!source||!mask){warn("mask-nonbitmap-resource");continue;}
    if(!source->width||!source->height||!mask->width||!mask->height)continue;
@@ -724,7 +721,7 @@ struct Composite {
  const bool textSlot=messageSurface&&k.resource==messageSlot;
  const Image*slot=textSlot?*messageSurface:k.resource==0?replacement:nullptr;
  if(uiSlots){auto override=uiSlots->find(k.resource);if(override!=uiSlots->end())slot=override->second;}
- if(replacementMedia&&k.resource==0){slot=replacementFrame(k.mediaTime);if(!slot)continue;}
+ if(replacementMedia&&k.resource==0){if(k.alpha<=0)continue;slot=replacementFrame(k.mediaTime);if(!slot)continue;}
  // A message window's authored text placeholder is never displayed while
  // its live text surface is pending. Keep actual animation images available.
  if(textSlot&&messagePlaceholder&&!slot)continue;
@@ -751,7 +748,7 @@ struct Composite {
     if(k.alpha<=0)continue;
     auto&clip=videoClip(index,e,worker);
     auto image=clip.at(k.mediaTime,liveVideo,queue.supportsVideoSurfaces(),false,worker,asyncVideo);
-    if(!image)continue;
+    if(!image){queue.waitForVideoFrame();continue;}
     source=&queue.retainImage(std::move(image));
     if(clip.audible)warn("video nonzero audio requires mixer binding");
    }else if(!slot&&e.jpegAnimation){
@@ -942,7 +939,8 @@ void SceneImages::prepareRestoredPortraitGradients(){
  }
 }
 std::vector<std::string> SceneImages::warmPaths(const std::string&line,CharacterPrefixes* future,
-                                              std::optional<BitmapFilter>* gradient)const{
+                                              std::optional<BitmapFilter>* gradient,
+                                              std::vector<std::string>* predictedFaces)const{
  if(gradient)gradient->reset();
  std::vector<std::string> result;auto comma=line.find(',');if(comma==line.npos)return result;
  auto cmd=line.substr(1,comma-1);
@@ -1015,9 +1013,9 @@ std::vector<std::string> SceneImages::warmPaths(const std::string&line,Character
   if(path.empty())continue;
   if(portraitFile)portrait.path=path;
   if(needsWarmFile(path,future!=nullptr))result.push_back(path);
-  if(future&&chara&&!replacement){
+  if(predictedFaces&&chara&&!replacement){
    const auto portrait=faceResource(mappedFace(path),true);
-   if(!portrait.empty()&&!cache.count(portrait)&&!composites.count(portrait))result.push_back(portrait);
+   if(!portrait.empty()&&!cache.count(portrait)&&!composites.count(portrait))predictedFaces->push_back(portrait);
   }
  }
  if(!base.empty()&&base!="none"&&base.find('$')==base.npos){
@@ -1517,6 +1515,8 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  std::string colorTime,moveTime,onceTime;
  std::map<std::string,std::string> beginPosition;
  if(std::any_of(args.begin(),args.end(),[](const std::string&arg){return arg.rfind("file:",0)==0;})){
+  // Imo_Image_Refresh_Main restores the default motion before merging file fields.
+  if(!chara&&!face&&!message&&!ui)l.params["motion"]="0";
   l.replacementVideo.reset();l.scriptReplacement.reset();l.params.erase("@replacement");for(unsigned i=0;i<4;i++)l.params.erase("rep"+std::to_string(i));
  }
  for(auto&s:args){if(s.empty())continue;
@@ -1887,7 +1887,7 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
  const auto alpha=get(l,"alpha",255);
  if(filmLayer&&alpha<=0)continue;
  auto film=filmLayer?l->composite->standaloneFrame(l->milliseconds,liveVideo,queue.supportsVideoSurfaces(),readAhead,asyncVideo):nullptr;
- if(filmLayer&&!film)continue;
+ if(filmLayer&&!film){queue.waitForVideoFrame();continue;}
  const auto*bitmap=film?film.get():l->pixels.get();
  const auto [w,h]=l->composite&&!filmLayer?l->composite->dimensions():std::make_pair(bitmap->width,bitmap->height);
  const auto blend=l->params.find("blend");

@@ -85,7 +85,8 @@ public:
   std::string key()const;
  };
  std::vector<std::string> warmPaths(const std::string&,CharacterPrefixes* future=nullptr,
-                                   std::optional<BitmapFilter>* gradient=nullptr)const;
+                                   std::optional<BitmapFilter>* gradient=nullptr,
+                                   std::vector<std::string>* predictedFaces=nullptr)const;
  void warmBitmapFilter(const BitmapFilter&,bool required=false);
  void takeBitmapFilter(BitmapFilter&);
  void installBitmapFilter(const BitmapFilter&);

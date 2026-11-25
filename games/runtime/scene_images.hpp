@@ -79,16 +79,16 @@ public:
  std::optional<BackgroundBlur> backgroundBlur(const std::string&)const;
  void warmBackgroundBlur(const BackgroundBlur&,bool required=false);
  void installBackgroundBlur(const BackgroundBlur&);
- struct PortraitGradient {
+ struct BitmapFilter {
   std::string layer,path,name;
   std::shared_ptr<const Image> source,result;
   std::string key()const;
  };
  std::vector<std::string> warmPaths(const std::string&,CharacterPrefixes* future=nullptr,
-                                   std::optional<PortraitGradient>* gradient=nullptr)const;
- void warmPortraitGradient(const PortraitGradient&,bool required=false);
- void takePortraitGradient(PortraitGradient&);
- void installPortraitGradient(const PortraitGradient&);
+                                   std::optional<BitmapFilter>* gradient=nullptr)const;
+ void warmBitmapFilter(const BitmapFilter&,bool required=false);
+ void takeBitmapFilter(BitmapFilter&);
+ void installBitmapFilter(const BitmapFilter&);
  void prepareRestoredPortraitGradients();
  bool changesCapturedScene(const std::string&)const;
  bool warmFile(const std::string&,bool required=false,bool prepareVideo=true);

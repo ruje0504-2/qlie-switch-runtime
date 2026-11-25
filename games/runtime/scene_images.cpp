@@ -893,10 +893,10 @@ static bool portraitFilterProperty(const std::string&name){
 static bool portraitGradientFilter(const std::string&name){
  return name.find("\"goverlay,")!=name.npos;
 }
-std::string SceneImages::PortraitGradient::key()const{
- return "@portrait-filter/"+qlie::canonical(path)+"/"+name;
+std::string SceneImages::BitmapFilter::key()const{
+ return "@bitmap-filter/"+qlie::canonical(path)+"/"+name;
 }
-void SceneImages::warmPortraitGradient(const PortraitGradient&gradient,bool required){
+void SceneImages::warmBitmapFilter(const BitmapFilter&gradient,bool required){
  readAhead->request(gradient.key(),[&sourceAssets=assets,path=gradient.path,name=gradient.name,source=gradient.source]{
   WarmAsset ready;
   ready.bitmap=source?source:sceneBitmap(image(sourceAssets.read(path)));
@@ -905,7 +905,7 @@ void SceneImages::warmPortraitGradient(const PortraitGradient&gradient,bool requ
   return ready;
  },required);
 }
-void SceneImages::takePortraitGradient(PortraitGradient&gradient){
+void SceneImages::takeBitmapFilter(BitmapFilter&gradient){
  if(gradient.result)return;
  if(auto ready=readAhead->takeReady(gradient.key())){
   const auto&source=cache.try_emplace(gradient.path,ready->bitmap).first->second;
@@ -916,15 +916,19 @@ void SceneImages::takePortraitGradient(PortraitGradient&gradient){
   gradient.result=std::move(ready->filteredBitmap);
  }
 }
-void SceneImages::installPortraitGradient(const PortraitGradient&gradient){
+void SceneImages::installBitmapFilter(const BitmapFilter&gradient){
  if(!gradient.result)return;
  auto it=layers.find(gradient.layer);
  if(it==layers.end())return;
  auto&layer=it->second;
  const auto path=layer.params.find("@portrait");
- if(path!=layer.params.end()&&path->second==gradient.path&&layer.pixels==gradient.source&&
-    !layer.scriptReplacement&&!layer.uiSlots.count(0)&&filterName(layer.params,0)==gradient.name)
-  layer.filtered[0]={gradient.source,gradient.result,gradient.name};
+ const bool portrait=path!=layer.params.end()&&path->second==gradient.path;
+  const bool bitmap=!layer.composite&&layer.path==gradient.path;
+  if((portrait||bitmap)&&layer.pixels==gradient.source&&!layer.scriptReplacement&&
+     !layer.uiSlots.count(0)&&filterName(layer.params,0)==gradient.name){
+   layer.filtered[0]={gradient.source,gradient.result,gradient.name};
+   QLIE_LOG_LINE(<<"FILTER ready "<<gradient.path<<' '<<gradient.name<<'\n');
+  }
 }
 void SceneImages::prepareRestoredPortraitGradients(){
  for(auto&[name,layer]:layers){
@@ -938,7 +942,7 @@ void SceneImages::prepareRestoredPortraitGradients(){
  }
 }
 std::vector<std::string> SceneImages::warmPaths(const std::string&line,CharacterPrefixes* future,
-                                              std::optional<PortraitGradient>* gradient)const{
+                                              std::optional<BitmapFilter>* gradient)const{
  if(gradient)gradient->reset();
  std::vector<std::string> result;auto comma=line.find(',');if(comma==line.npos)return result;
  auto cmd=line.substr(1,comma-1);
@@ -1036,7 +1040,7 @@ std::vector<std::string> SceneImages::warmPaths(const std::string&line,Character
    if(gradientFilter&&!portraitRequest.empty())
     portrait.path=sceneResource(assets,portraitRequest,false);
    if(gradientFilter&&!portrait.path.empty()&&!sceneCompositePath(portrait.path)){
-    PortraitGradient plan{cmd,portrait.path,std::move(filter),{},{}};
+    BitmapFilter plan{cmd,portrait.path,std::move(filter),{},{}};
     if(auto cached=cache.find(plan.path);cached!=cache.end())plan.source=cached->second;
     if(layer!=layers.end()){
      const auto&existing=layer->second.filtered[0];
@@ -1048,6 +1052,34 @@ std::vector<std::string> SceneImages::warmPaths(const std::string&line,Character
   }
   if(future)future->portraits.insert_or_assign(cmd,std::move(portrait));
  }
+#if defined(QLIE_PROFILE_WHJ25)
+ // The first room shot combines the authored gradient and spherical warp.
+ // Prepare the incoming bitmap and its filter together on the scene worker.
+ if(gradient&&readAhead&&cmd=="bg01"&&line.find("[gmap3,")!=line.npos&&line.find("/sphere,")!=line.npos){
+  std::map<std::string,std::string> filters;
+  std::string requested;
+  for(const auto&field:args){
+   const auto sep=field.find(':');
+   if(sep==field.npos)continue;
+   const auto key=field.substr(0,sep),name=field.substr(sep+1);
+   if(key=="file")requested="image/"+split(name,':').front();
+   else if(portraitFilterProperty(key))filters.insert_or_assign(key,name);
+  }
+  if(!requested.empty()){
+   auto path=sceneResource(assets,requested,future!=nullptr);
+   if(!path.empty()&&!sceneCompositePath(path)){
+    BitmapFilter plan{cmd,path,filterName(filters,0),{},{}};
+    if(auto cached=cache.find(path);cached!=cache.end())plan.source=cached->second;
+    if(layer!=layers.end()){
+     const auto&existing=layer->second.filtered[0];
+     if(existing.source==plan.source&&existing.name==plan.name)plan.result=existing.result;
+    }
+    result.erase(std::remove(result.begin(),result.end(),path),result.end());
+    *gradient=std::move(plan);
+   }
+  }
+ }
+#endif
  if(chara&&future)future->simple.insert_or_assign(cmd,std::move(stem));
  return result;
 }
@@ -1838,8 +1870,14 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
  const std::string_view align=l->params.at("align");
  const auto colon=align.find(':');
  const auto xAlign=l->params.find("alignx"),yAlign=l->params.find("aligny");
- const auto x=xAlign==l->params.end()?align.substr(0,colon):std::string_view(xAlign->second);
- const auto y=yAlign==l->params.end()?(colon==align.npos?"top":align.substr(colon+1)):std::string_view(yAlign->second);
+ auto x=xAlign==l->params.end()?align.substr(0,colon):std::string_view(xAlign->second);
+ auto y=yAlign==l->params.end()?(colon==align.npos?"top":align.substr(colon+1)):std::string_view(yAlign->second);
+#if defined(QLIE_PROFILE_WHJ25)
+ // Imo_Image_DefaultParam anchors the motion canvas at left:top.
+ // Apply this to existing scene saves that stored the old centered anchor.
+ const auto motionLayer=layers.find("motion");
+ if(motionLayer!=layers.end()&&l==&motionLayer->second){x="left";y="top";}
+#endif
  const float ax=imageAnchor(x,"right"),ay=imageAnchor(y,"bottom");
  // Shared composite instances can be sampled at different times in one frame.
  // Keep those ordered on the caller, and queue ordinary single-owner playback.

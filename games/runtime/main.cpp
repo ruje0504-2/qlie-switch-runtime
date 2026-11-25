@@ -508,14 +508,14 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    std::string path;
    Kind kind;
    std::optional<whj2::SceneImages::BackgroundBlur> blur;
-   std::optional<whj2::SceneImages::PortraitGradient> gradient;
+   std::optional<whj2::SceneImages::BitmapFilter> gradient;
   };
   std::vector<Hint> hints;
   whj2::SceneImages::CharacterPrefixes futurePortraits;
   std::vector<std::string> sceneKeys,soundKeys;
   constexpr size_t hintsPerWorker=6;
   auto add=[&](const std::string&path,Kind kind,std::optional<whj2::SceneImages::BackgroundBlur> blur={},
-               std::optional<whj2::SceneImages::PortraitGradient> gradient={}){
+               std::optional<whj2::SceneImages::BitmapFilter> gradient={}){
    auto&keys=kind==Kind::Audio?soundKeys:sceneKeys;
    auto key=gradient?gradient->key():kind==Kind::Rule?whj2::SceneTransition::ruleKey(path):qlie::canonical(path);
    if(keys.size()<hintsPerWorker&&std::find(keys.begin(),keys.end(),key)==keys.end()){
@@ -567,7 +567,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
      auto key=blur->key();
      add(key,Kind::Image,std::move(blur));
     }
-    std::optional<whj2::SceneImages::PortraitGradient> gradient;
+    std::optional<whj2::SceneImages::BitmapFilter> gradient;
     auto paths=images->warmPaths(line,&futurePortraits,&gradient);
     if(gradient&&!gradient->result)add({},Kind::Image,{},std::move(gradient));
     for(const auto&path:paths)add(path,Kind::Image);
@@ -577,7 +577,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   readAhead->retain(sceneKeys);
   soundReadAhead->retain(soundKeys);
   for(auto&h:hints){
-   if(h.gradient)images->warmPortraitGradient(*h.gradient);
+   if(h.gradient)images->warmBitmapFilter(*h.gradient);
    else if(h.blur)images->warmBackgroundBlur(*h.blur);
    else if(h.kind==Kind::Movie)movie->warmFile(h.path);
    else if(h.kind==Kind::Audio)audio->warmFile(assets,h.path);
@@ -859,10 +859,10 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }
  bool deferSceneCommand(whj2::Event&event,const std::vector<std::string>&resources,
                         const std::optional<whj2::SceneImages::BackgroundBlur>&blur,
-                        const std::optional<whj2::SceneImages::PortraitGradient>&gradient={}){
+                        const std::optional<whj2::SceneImages::BitmapFilter>&gradient={}){
   std::vector<std::string> waiting;
   if(gradient&&!gradient->result){
-   images->warmPortraitGradient(*gradient,true);
+   images->warmBitmapFilter(*gradient,true);
    waiting.push_back(gradient->key());
   }
   for(const auto&path:resources){
@@ -1138,11 +1138,11 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    story.state.vars.erase("__history_continue");continue;
   }
   if(audioCommand(e.value))continue;
-  std::optional<whj2::SceneImages::PortraitGradient> gradient;
+  std::optional<whj2::SceneImages::BitmapFilter> gradient;
   auto resources=images->warmPaths(e.value,nullptr,&gradient);
   auto blur=images->backgroundBlur(e.value);
   if(deferSceneCommand(e,resources,blur,gradient))return;
-  if(gradient)images->takePortraitGradient(*gradient);
+  if(gradient)images->takeBitmapFilter(*gradient);
   if constexpr(game_profile::deferredSceneChanges){
    if(!normalSkip&&!checkedOutgoingScene&&images->changesCapturedScene(e.value)){
     checkedOutgoingScene=true;
@@ -1157,7 +1157,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    }
   }
   const bool sceneCommand=images->command(e.value);
-  if(gradient)images->installPortraitGradient(*gradient);
+  if(gradient)images->installBitmapFilter(*gradient);
   if(blur)images->installBackgroundBlur(*blur);
   for(const auto&path:resources)readAhead->release(qlie::canonical(path));
   if(sceneCommand){playSceneSounds();continue;}

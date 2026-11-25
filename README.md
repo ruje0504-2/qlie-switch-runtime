@@ -85,7 +85,7 @@ QLIE_GAME=whj2 python3 tools/package_nsp.py \
 
 WHJ2 直装配置为 Title ID `01007F8E5C120000`、版本 `1.0.1`。包内游戏数据通过 RomFS 读取，直装启动要求成功挂载系统 SaveData。
 
-WHJ2.5 日文本体配置为 `01007F8E5C12B000`、版本 `1.0.0`。
+WHJ2.5 日文本体配置为 `01007F8E5C1C0000`、版本 `1.0.0`。
 
 WHJ3 的构建和打包均选 `QLIE_GAME=whj3`，本体配置为 `01007F8E5C130000`、版本 `1.0.0`。
 

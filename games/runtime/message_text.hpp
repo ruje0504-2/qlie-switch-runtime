@@ -37,6 +37,7 @@ public:
   Surface(const Surface&)=delete;
   Surface&operator=(const Surface&)=delete;
  };
+ MessageText()=default;
  explicit MessageText(qlie::Assets&,bool storyLineBreaking=false);
  void setSpeed(double);double getSpeed()const{return speed;}
  void start(const std::string&);void update(double ms);bool reveal();bool finished()const;size_t visible()const;

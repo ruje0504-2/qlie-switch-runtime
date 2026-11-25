@@ -30,7 +30,6 @@ void CgScreen::prepareLayout(){
  viewScene.command(game_profile::story.legacyAvg?
   "^ui_cg_count,file:script/albummode/ViewText.b,x:60,y:695,pri:100":
   "^ui_cg_count,file:script/albummode/ViewText.b,x:20,y:690,pri:100");
- countText=std::make_unique<MessageText>(assets);
  prepared=true;
 }
 void CgScreen::prepare(){
@@ -101,8 +100,8 @@ void CgScreen::loadView(){
  viewScene.command("^ui_cg_view,file:"+file+",x:640,y:360,align:center:center,texfilter:2");
  auto count=std::to_string(variant+1)+"/"+std::to_string(files.size());
  if(count!=displayedCount){
-  countText->start("[spd,0]"+count);
-  viewScene.uiSlot("ui_cg_count",0,countText->render(font,MessageStyle{100,50,16,16,0xffffff}));
+  countText.start("[spd,0]"+count);
+  viewScene.uiSlot("ui_cg_count",0,countText.render(font,MessageStyle{100,50,16,16,0xffffff}));
   displayedCount=std::move(count);
  }
  viewReady=true;positionView();viewFade.present();

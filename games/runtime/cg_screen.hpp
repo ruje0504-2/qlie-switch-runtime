@@ -5,12 +5,12 @@
 #include "scene_transition.hpp"
 namespace whj2 {
 class CgScreen {
- const Progress&progress;CgCatalog catalog;SceneImages menuScene,viewScene;qlie::Assets&assets;KFont*font;
+ const Progress&progress;CgCatalog catalog;SceneImages menuScene,viewScene;KFont*font;
  SceneTransition viewFade;
  std::function<qlie::Bytes()> captureView;
  AssetReadAhead*readAhead=nullptr;
  std::string pendingView;
- std::unique_ptr<MessageText> countText;
+ MessageText countText;
  bool openingWarm=false;
  std::string displayedCount;
  bool prepared=false,opened=false,viewing=false,viewReady=false;unsigned page=0,group=0,variant=0,zoom=1;int selected=0;double elapsed=0;float pointerX=640,pointerY=360;
@@ -23,7 +23,7 @@ public:
  void setViewCapture(std::function<qlie::Bytes()> capture){captureView=std::move(capture);}
  enum Action {None=0,Back=1,Replay=2,Music=3};
  CgScreen(qlie::Assets&a,const Progress&p,KFont*f,bool extendedRoots=false)
-  :progress(p),catalog(a,extendedRoots),menuScene(a),viewScene(a),assets(a),font(f),viewFade(a){}
+  :progress(p),catalog(a,extendedRoots),menuScene(a),viewScene(a),font(f),viewFade(a){}
  void prepare();
  void warmOpening();
  bool open();void close();bool visible()const{return opened;}bool inView()const{return viewing;}

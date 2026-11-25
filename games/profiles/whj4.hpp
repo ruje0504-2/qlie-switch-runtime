@@ -38,6 +38,7 @@ inline constexpr whj2::TitleLayout title{
  {1050,960},{50,0},{1130,1136},{160,197},{70,70},
  10000,500,20000,10,120,true,"*OnLockEnable","*OnLockOffMouse"
 };
+inline constexpr char secondMakerLogo[] = "";
 inline constexpr bool extendedCgRoots=true;
 inline constexpr char extrasFlag[]="#spopenflag";
 inline constexpr unsigned storyAudioTracks=5;

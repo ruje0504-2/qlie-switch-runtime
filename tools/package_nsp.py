@@ -69,11 +69,14 @@ def pfs_entries(path):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     game_profile = os.environ.get('QLIE_GAME') or 'whj2'
-    if game_profile not in ('whj2', 'whj4'):
-        ap.error('QLIE_GAME must be whj2 or whj4')
-    whj4 = game_profile == 'whj4'
-    binary = 'whj4-switch-runtime' if whj4 else 'qlie-switch-runtime'
-    resources = [f'GameData/data{i}.pack' for i in range(9)] + ['reskey.fkey'] if whj4 else RESOURCES
+    if game_profile not in ('whj2', 'whj4', 'whj5'):
+        ap.error('QLIE_GAME must be whj2, whj4, or whj5')
+    legacy = game_profile == 'whj2'
+    binary = 'qlie-switch-runtime' if legacy else f'{game_profile}-switch-runtime'
+    pack_count = 10 if game_profile == 'whj5' else 9
+    resources = RESOURCES if legacy else [f'GameData/data{i}.pack' for i in range(pack_count)] + ['reskey.fkey']
+    if game_profile == 'whj5':
+        resources.append('patch.dat')
     ap.add_argument('--game', required=True, type=Path)
     ap.add_argument('--elf', type=Path, default=ROOT/'build-switch'/f'{binary}.elf')
     ap.add_argument('--runtime-revision', help='Fixed source commit embedded in an existing ELF')
@@ -154,7 +157,7 @@ def main():
                         raise
                     shutil.copyfile(source, target)
                 report['romfs'].append({'name': relative, 'bytes': source.stat().st_size})
-            if not whj4:
+            if legacy:
                 existing_key = game/'DLL/icon.key'
                 if existing_key.is_file():
                     icon_key = existing_key.read_bytes()

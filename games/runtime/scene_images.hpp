@@ -19,15 +19,15 @@ struct SpeakerStyle {int x=200,y=570;unsigned size=26,color=0xffffff;};
 class SceneImages {
  struct Tween {float from=0,to=0,power=100;double elapsed=0,duration=0;unsigned mode=1;};
  struct FilteredSlot {std::shared_ptr<const Image> source,result;std::string name;};
- struct Layer {mutable std::array<FilteredSlot,4> filtered;std::map<unsigned,std::shared_ptr<const Image>> uiSlots;std::map<std::string,Tween> tweens;std::map<std::string,std::string> params;std::string prefix,path;std::shared_ptr<const Image> pixels,scriptReplacement;std::shared_ptr<Composite> composite;std::array<float,16> external{};uint16_t externalMask=0;double milliseconds=0,audioMilliseconds=-1;bool audioStopPending=false;};
+ struct Layer {mutable std::array<FilteredSlot,4> filtered;std::map<unsigned,std::shared_ptr<const Image>> uiSlots;std::map<std::string,Tween> tweens;std::map<std::string,std::string> params;std::string prefix,path;std::shared_ptr<const Image> pixels,scriptReplacement;std::shared_ptr<Composite> composite,extension;std::array<float,16> external{};uint16_t externalMask=0;double milliseconds=0,audioMilliseconds=-1,waveMilliseconds=-1,extensionMilliseconds=0;bool audioStopPending=false;};
  unsigned windowAlpha=255;
  uint32_t particleState=particleIdentityInitialState();
  mutable uint32_t waveformCursor=0;
  mutable bool faceWarning=false;
  mutable std::set<std::string> shownFiles;
- std::map<std::string,std::string> faceRepId,faceRepFile;
+ std::map<std::string,std::string> faceRepId,faceRepFile,waveRecipes,extensionPositions;
  std::set<std::string> splitCharacters,imageObjects;
- bool hasCamera=false,hasNameText=false;
+ bool hasCamera=false,hasNameText=false,alternateMessageWindow=false;
  unsigned faceType=0;std::string faceDefaultFile;
  qlie::Assets&assets;
  std::shared_ptr<EyecatchFilm> eyecatchFilm;
@@ -35,6 +35,8 @@ class SceneImages {
  std::map<std::string,std::shared_ptr<Composite>>composites;
  AssetReadAhead*readAhead=nullptr;
  bool prefetchNativeVideo=false;
+ std::string panLayer;
+ float panExtentX=0,panExtentY=0,panX=0,panY=0;
  struct RestoreTarget {};
  SceneImages(const SceneImages&,RestoreTarget);
  std::shared_ptr<const Image> loadBitmap(const std::string&);
@@ -42,8 +44,12 @@ class SceneImages {
  bool needsWarmFile(const std::string&,bool upcoming)const;
  void clearComposites();
  static float value(const Layer&,const std::string&,float);
+ static std::string filterName(const std::map<std::string,std::string>&,unsigned);
+ void loadCharacterExtension(Layer&,const std::string&);
  void loadReplacement(Layer&,const std::string&);
  void transition(Layer&,const Layer&,bool,bool);
+ void setWave(Layer&,std::string);
+ static std::array<float,3> sampleWave(const Layer&);
  bool cameraCommand(const std::string&);
  void render(qlie::Bytes&,unsigned pass,RenderTarget*target=nullptr,float maxPriority=999,bool liveVideo=false,const Affine2D* view=nullptr)const;
  void enqueue(RenderQueue&,unsigned pass,float maxPriority,bool liveVideo)const;
@@ -91,6 +97,11 @@ public:
  void update(double milliseconds);bool command(const std::string&);void clear(bool keepBitmaps=false);void beginPage();
  std::optional<std::string> selectFace(const std::string&speaker,const std::string&voice,bool deferCold=false);
  void draw(qlie::Bytes&,bool liveVideo=false,const Affine2D* view=nullptr)const;void drawThumbnail(qlie::Bytes&,float maxPriority)const;void drawScene(qlie::Bytes&,bool liveVideo=false)const;void drawFaces(qlie::Bytes&)const;void drawMessages(qlie::Bytes&)const;
+ void setViewPan(std::string layer,float horizontal,float vertical);
+ void moveViewPan(float dx,float dy);
+ void pointViewPan(float x,float y);
+ bool hasViewPan()const{return !panLayer.empty();}
+ void setAlternateMessageWindow(bool alternate){alternateMessageWindow=alternate;}
  void setWindowAlpha(unsigned alpha){windowAlpha=alpha>255?255:alpha;}
  bool messageVisible()const;MessageStyle messageStyle()const;void setMessageImage(Image,bool show=false);
  SpeakerStyle speakerStyle()const;

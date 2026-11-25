@@ -36,6 +36,7 @@ Story::Script&Story::script(const std::string&n){
    std::string inc=qlie::canonical(line.substr(3));
    if(!inc.empty()&&inc[0]==33)inc.erase(0,1);
    if(inc==profile.header||inc==profile.replayHeader)sc.ops.push_back({"!create",ln});
+   else if(!profile.alternateHeader.empty()&&inc==profile.alternateHeader)sc.ops.push_back({"!create-alternate",ln});
    else if(inc==profile.footer)sc.ops.push_back({"!free",ln});
    // The direct-label form invokes the already active AVG for its choice.
    else if(inc==profile.selectionPrelude)continue;
@@ -50,7 +51,11 @@ Story::Script&Story::script(const std::string&n){
   if(line.front()==92){
    for(auto& command:commands(line))if(!command.empty())sc.ops.push_back({command,ln});
   }else{
-   sc.ops.push_back({line,ln});
+   const auto inlineLabels=line.rfind("^select,",0)==0?line.find("^selectlabel,",8):line.npos;
+   if(inlineLabels!=line.npos){
+    sc.ops.push_back({line.substr(0,inlineLabels),ln});
+    sc.ops.push_back({line.substr(inlineLabels),ln});
+   }else sc.ops.push_back({line,ln});
    if(line.front()!=94)pageContent=true;
    else if(profile.presentCommandParagraphs){
     const auto command=lower(line.substr(1,line.find(',')-1));
@@ -94,6 +99,40 @@ std::string Story::value(std::string s)const{
  if(it!=state.vars.end())return it->second;
  if(name=="__rootfile")return profile.root;
  return s;
+}
+bool Story::setPlayerName(std::string name){
+ if(profile.nameEntryScript.empty())return false;
+ name=trim(std::move(name));
+ std::string fullWidth;
+ unsigned length=0;
+ for(size_t i=0;i<name.size();){
+  const auto first=static_cast<unsigned char>(name[i]);
+  if(++length>10||first<32||first==127)return false;
+  if(first<128){
+   const unsigned cp=first==32?0x3000:0xff01+first-33;
+   fullWidth+=char(0xe0|(cp>>12));
+   fullWidth+=char(0x80|((cp>>6)&0x3f));
+   fullWidth+=char(0x80|(cp&0x3f));
+   ++i;
+   continue;
+  }
+  const unsigned bytes=first>=0xf0?4:first>=0xe0?3:2;
+  if(first<0xc2||first>0xf4||i+bytes>name.size())return false;
+  for(unsigned j=1;j<bytes;++j)if((name[i+j]&0xc0)!=0x80)return false;
+  fullWidth.append(name,i,bytes);
+  i+=bytes;
+ }
+ if(fullWidth.empty())return false;
+ state.vars["_avg_username"]=std::move(fullWidth);
+ return true;
+}
+std::string Story::substitutePlayerName(std::string line)const{
+ const auto current=state.vars.find("_avg_username");
+ if(profile.nameEntryScript.empty()||current==state.vars.end())return line;
+ const std::string marker="＄ユーザー＄";
+ for(size_t pos=0;(pos=line.find(marker,pos))!=line.npos;pos+=current->second.size())
+  line.replace(pos,marker.size(),current->second);
+ return line;
 }
 bool Story::condition(const std::string&s)const{for(const auto&op:std::vector<std::string>{"!=","==",">=","<=","<",">"}){auto p=s.find(op);if(p==s.npos)continue;auto a=value(s.substr(0,p)),b=value(s.substr(p+op.size()));if(op=="!=")return a!=b;if(op=="==")return a==b;long x=std::stol(a),y=std::stol(b);return op==">="?x>=y:op=="<="?x<=y:op=="<"?x<y:x>y;}throw std::runtime_error("Unsupported story condition: "+s);}
 void Story::jump(std::string label,std::string file){label=lower(value(label));file=value(file);if(file.empty()||lower(file)=="self")file=state.at.file;else if(file.find(47)==file.npos&&file.find(92)==file.npos){auto p=state.at.file.rfind(47);file=state.at.file.substr(0,p+1)+file;}file=qlie::canonical(file);auto&sc=script(file);auto it=sc.labels.find(label);if(it==sc.labels.end())throw std::runtime_error("Missing label "+label+" in "+file);state.at={file,uint32_t(it->second)};visited.insert(file+":"+label);}
@@ -172,10 +211,40 @@ void Story::native(const Op&o){auto a=split(o.text,44);std::string cmd=lower(a[0
  if(cmd=="\\ret"){if(state.replay&&state.calls.empty()){state.finished=true;state.pending.push_back(event("finish","replay",o.line));return;}need(!state.calls.empty());state.at=state.calls.back();state.calls.pop_back();return;}
  if(cmd=="\\sub"){
   auto target=lower(arg(1));
+  if(!profile.nameEntryScript.empty()&&target=="@@top"&&
+     qlie::canonical(value(arg(2)))==profile.nameEntryScript){
+   state.pending.push_back(event("name-entry","",o.line));
+   return;
+  }
+  if(target=="@@!kroutejmp"&&qlie::canonical(value(arg(2)))==profile.root){
+   const auto file=value(arg(3));
+   const auto route=state.vars.find("#flag:KRroute");
+   const auto label="@@"+stem(qlie::canonical(file))+"_"+value(arg(4))+"_"+(route==state.vars.end()?"0":route->second);
+   state.vars["#flag:"+label]="1";
+   state.vars["resultstr[0]"]=label;
+   jump(label,file);
+   return;
+  }
+  if(!profile.alternateHeader.empty()&&target=="@@!view_setupimagepos"){
+   need(a.size()==6&&lower(arg(2))=="self");
+   auto pan=value(arg(3))+","+value(arg(4))+","+value(arg(5));
+   state.vars["__view_pan"]=pan;
+   state.pending.push_back(event("view-pan",pan,o.line));
+   return;
+  }
+  if(!profile.alternateHeader.empty()&&(target=="@@!avg_create"||target=="@@!avg_free")){
+   state.vars.erase("__view_pan");
+   state.pending.push_back(event(target=="@@!avg_create"?"create":"free",state.at.file,o.line));
+   return;
+  }
   if(target=="@@!gamevalueinit")return;
   if(target=="@@!gamevaluereset"){state.vars["game_routeflag[0]"]="0";return;}
   if(target=="@@!filejumpname"){state.home=state.at.file;state.vars["resultstr[0]"]="@@"+stem(state.at.file)+"_end";return;}
   if(target=="@@!avg_setrouteparam"){state.routeStr=value(arg(3));state.routeValue=state.routeStr.empty()?0:state.routeStr=="Route"?0:std::stoi(state.routeStr);if(a.size()>4)state.routeStr=value(arg(4));return;}
+  if(!profile.endingMovieScript.empty()&&qlie::canonical(value(arg(2)))==profile.endingMovieScript){
+   need(target=="@@top"&&a.size()==4);
+   state.vars["__ending_movie"]=value(arg(3));
+  }
   state.calls.push_back(state.at);jump(arg(1),arg(2));return;
  }
  if(cmd=="\\jmp"||cmd=="\\go"){
@@ -191,7 +260,7 @@ void Story::native(const Op&o){auto a=split(o.text,44);std::string cmd=lower(a[0
  throw std::runtime_error("Unsupported native command: "+o.text);
 }
 void Story::caret(const Op&o){auto a=split(o.text,44);std::string cmd=lower(a[0].substr(1));
- if(cmd=="select"){state.choices.assign(a.begin()+1,a.end());state.awaiting=true;state.pending.push_back(event("choice",o.text,o.line));return;}
+ if(cmd=="select"){state.choices.assign(a.begin()+1,a.end());for(auto& choice:state.choices)choice=substitutePlayerName(std::move(choice));state.awaiting=true;state.pending.push_back(event("choice",o.text,o.line));return;}
  if(cmd=="selectlabel"&&!profile.selectionPrelude.empty()){
   if(state.choice<0||size_t(state.choice)+1>=a.size())throw std::runtime_error("Missing label for selected option");
   const auto label=value(a[size_t(state.choice)+1]);
@@ -199,8 +268,14 @@ void Story::caret(const Op&o){auto a=split(o.text,44);std::string cmd=lower(a[0]
   state.vars["#flag:"+label]="1";
   return;
  }
- if(cmd=="frag"&&a.size()==4&&a[1]=="="){
-  state.vars["#flag:"+value(a[2])]=value(a[3]);
+ if(cmd=="frag"&&a.size()==4){
+  auto& flag=state.vars["#flag:"+value(a[2])];
+  if(a[1]=="=")flag=value(a[3]);
+  else if(a[1]=="+"||a[1]=="-"){
+   const int previous=flag.empty()?0:std::stoi(flag);
+   const int amount=std::stoi(value(a[3]));
+   flag=std::to_string(previous+(a[1]=="+"?amount:-amount));
+  }else throw std::runtime_error("Unsupported route fragment assignment");
   return;
  }
  if(cmd=="fragcal"&&a.size()==2){
@@ -228,10 +303,22 @@ void Story::caret(const Op&o){auto a=split(o.text,44);std::string cmd=lower(a[0]
   for(const auto&line:includeCommands(a[1]))state.pending.push_back(event("command",line,o.line));
   return;
  }
+ if(cmd=="movie"&&!profile.endingMovieScript.empty()&&state.at.file==profile.endingMovieScript){
+  const auto media=state.vars.find("__ending_movie");
+  if(a.size()!=2||a[1].find("ParamStr[0]")==std::string::npos||media==state.vars.end()||media->second.empty())
+   throw std::runtime_error("Missing ending movie argument");
+  state.pending.push_back(event("command","^movie,movie/"+qlie::canonical(media->second),o.line));
+  return;
+ }
  if(!profile.sceneCommands.count(cmd))throw std::runtime_error("Unsupported story command: "+o.text);
  state.pending.push_back(event("command",o.text,o.line));
 }
-Event Story::next(){if(!state.pending.empty()){Event e=state.pending.front();state.pending.pop_front();return e;}if(state.awaiting)return event("await-choice","");if(state.finished)return event("finished","");for(unsigned count=0;count<10000;count++){auto&sc=script(state.at.file);auto reached=sc.labelsAt.find(state.at.pc);if(reached!=sc.labelsAt.end())for(const auto&label:reached->second)visited.insert(state.at.file+":"+label);if(state.at.pc>=sc.ops.size()){if(state.calls.empty())throw std::runtime_error("Unexpected script EOF: "+state.at.file);state.at=state.calls.back();state.calls.pop_back();continue;}Op o=sc.ops[state.at.pc++];operations++;try{if(o.text=="!page")return event("page","",o.line);if(o.text=="!create")return event("create",state.at.file,o.line);if(o.text=="!free")return event("free",state.at.file,o.line);if(o.text[0]==92)native(o);else if(o.text[0]==94){caret(o);if(o.after!=After::None)state.pending.push_back(event(o.after==After::Interlude?"interlude":"visual-wait","",o.line));}else return event("text",o.text,o.line);}catch(const std::exception&e){throw std::runtime_error(state.at.file+":"+std::to_string(o.line)+" "+e.what());}if(!state.pending.empty()){Event e=state.pending.front();state.pending.pop_front();return e;}if(state.finished)return event("finish","title",o.line);}throw std::runtime_error("Story instruction budget exhausted at "+state.at.file);}
+Event Story::next(){if(!state.pending.empty()){Event e=state.pending.front();state.pending.pop_front();return e;}if(state.awaiting)return event("await-choice","");if(state.finished)return event("finished","");for(unsigned count=0;count<10000;count++){auto&sc=script(state.at.file);auto reached=sc.labelsAt.find(state.at.pc);if(reached!=sc.labelsAt.end())for(const auto&label:reached->second)visited.insert(state.at.file+":"+label);if(state.at.pc>=sc.ops.size()){if(state.calls.empty())throw std::runtime_error("Unexpected script EOF: "+state.at.file);state.at=state.calls.back();state.calls.pop_back();continue;}Op o=sc.ops[state.at.pc++];operations++;try{if(o.text=="!page")return event("page","",o.line);if(o.text=="!create"||o.text=="!create-alternate"){
+ state.vars.erase("__view_pan");
+ if(o.text=="!create-alternate")state.vars["__avg2_active"]="1";
+ else state.vars.erase("__avg2_active");
+ return event("create",state.at.file,o.line);
+}if(o.text=="!free")return event("free",state.at.file,o.line);if(o.text[0]==92)native(o);else if(o.text[0]==94){caret(o);if(o.after!=After::None)state.pending.push_back(event(o.after==After::Interlude?"interlude":"visual-wait","",o.line));}else return event("text",substitutePlayerName(o.text),o.line);}catch(const std::exception&e){throw std::runtime_error(state.at.file+":"+std::to_string(o.line)+" "+e.what());}if(!state.pending.empty()){Event e=state.pending.front();state.pending.pop_front();return e;}if(state.finished)return event("finish","title",o.line);}throw std::runtime_error("Story instruction budget exhausted at "+state.at.file);}
 void Story::choose(unsigned i){if(!state.awaiting||i>=state.choices.size())throw std::runtime_error("Invalid choice");state.choice=int(i);state.awaiting=false;}
 struct Writer {qlie::Bytes b;void n(uint32_t v){for(int i=0;i<4;i++)b.push_back(uint8_t(v>>(8*i)));}void s(const std::string&v){n(uint32_t(v.size()));b.insert(b.end(),v.begin(),v.end());}void f(const Frame&v){s(v.file);n(v.pc);}};
 struct Reader {const qlie::Bytes&b;size_t p=0;uint32_t n(){if(p+4>b.size())throw std::runtime_error("Truncated story save");uint32_t v=0;for(int i=0;i<4;i++)v|=uint32_t(b[p++])<<(8*i);return v;}std::string s(){size_t size=n();if(size>b.size()-p)throw std::runtime_error("Truncated saved string");std::string v(b.begin()+p,b.begin()+p+size);p+=size;return v;}Frame f(){auto s0=s();return {s0,n()};}};

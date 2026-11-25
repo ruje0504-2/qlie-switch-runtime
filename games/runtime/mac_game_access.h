@@ -6,6 +6,7 @@ extern "C" {
 int whj2_mac_can_read_game(const char *path,const char *keyPath);
 /* Caller frees the chosen path. The selected directory grant lives until exit. */
 char *whj2_mac_choose_game(const char *initial,const char *keyPath);
+char *whj2_mac_choose_player_name(void);
 #ifdef __cplusplus
 }
 #endif

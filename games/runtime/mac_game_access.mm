@@ -31,3 +31,17 @@ char *whj2_mac_choose_game(const char *initial,const char *keyPath){
   return strdup(path);
  }
 }
+char *whj2_mac_choose_player_name(void){
+ @autoreleasepool {
+  NSAlert *alert=[[NSAlert alloc] init];
+  alert.messageText=@"请输入您的名字";
+  alert.informativeText=@"最多 10 个字";
+  [alert addButtonWithTitle:@"确定"];
+  [alert addButtonWithTitle:@"取消"];
+  NSTextField *input=[[NSTextField alloc] initWithFrame:NSMakeRect(0,0,250,24)];
+  alert.accessoryView=input;
+  [alert.window setInitialFirstResponder:input];
+  if([alert runModal]!=NSAlertFirstButtonReturn)return nullptr;
+  return strdup(input.stringValue.UTF8String);
+ }
+}

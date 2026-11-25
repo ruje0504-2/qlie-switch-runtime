@@ -26,16 +26,26 @@ if [ "${1:-}" = --diagnostic ]; then
   "$dkp/tools/bin/elf2nro" build-switch/qlie-runtime-diagnostic.elf build-switch/qlie-runtime-diagnostic.nro --nacp=build-switch/qlie-runtime-diagnostic.nacp
   exit 0
 fi
-# Graphical runtime candidate; hardware acceptance remains separate.
-mesa=${WHJ2_MESA_SDK:-$PWD/local/mesa-sdk/opt/devkitpro/portlibs/switch}
-rust=${WHJ2_RUST_LIBDIR:-$PWD/local/rust/rust-std-nightly-aarch64-unknown-linux-gnu/rust-std-aarch64-unknown-linux-gnu/lib/rustlib/aarch64-unknown-linux-gnu/lib}
-if [ ! -f "$mesa/lib/libvulkan.a" ] || [ ! -d "$rust" ]; then
-  echo "Missing Mesa 26.2.4/Rust SDK. Run python3 tools/fetch_graphics_sdk.py" >&2
-  exit 1
-fi
-python3 tools/build_mesa_nak.py --sdk "$mesa" --devkitpro "$dkp" --output build-switch/mesa-scoped-nak.o
-$cc -std=c11 $flags -c src/switch_nak_cache.c -o build-switch/switch_nak_cache.o
-$cxx -std=c++17 $flags -ffp-contract=off -Wno-missing-field-initializers -Wno-misleading-indentation -I"$mesa/include" -c src/vulkan_raster.cpp -o build-switch/vulkan_raster.o
+# Deko3d can be built without the optional Mesa Vulkan fallback.
+vulkan_objects=
+vulkan_flags=
+case "${QLIE_SWITCH_VULKAN:-1}" in
+1)
+  mesa=${WHJ2_MESA_SDK:-$PWD/local/mesa-sdk/opt/devkitpro/portlibs/switch}
+  rust=${WHJ2_RUST_LIBDIR:-$PWD/local/rust/rust-std-nightly-aarch64-unknown-linux-gnu/rust-std-aarch64-unknown-linux-gnu/lib/rustlib/aarch64-unknown-linux-gnu/lib}
+  if [ ! -f "$mesa/lib/libvulkan.a" ] || [ ! -d "$rust" ]; then
+    echo "Missing Mesa 26.2.4/Rust SDK. Run python3 tools/fetch_graphics_sdk.py" >&2
+    exit 1
+  fi
+  python3 tools/build_mesa_nak.py --sdk "$mesa" --devkitpro "$dkp" --output build-switch/mesa-scoped-nak.o
+  $cc -std=c11 $flags -c src/switch_nak_cache.c -o build-switch/switch_nak_cache.o
+  $cxx -std=c++17 $flags -ffp-contract=off -Wno-missing-field-initializers -Wno-misleading-indentation -I"$mesa/include" -c src/vulkan_raster.cpp -o build-switch/vulkan_raster.o
+  vulkan_objects="build-switch/vulkan_raster.o build-switch/switch_nak_cache.o build-switch/mesa-scoped-nak.o"
+  vulkan_flags=-DWHJ2_WITH_VULKAN
+  ;;
+0) ;;
+*) echo "QLIE_SWITCH_VULKAN must be 0 or 1" >&2; exit 2 ;;
+esac
 python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --output build-switch/deko_raster.inc
 python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --motion --output build-switch/deko_motion.inc
 python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --restore --output build-switch/deko_restore.inc
@@ -44,9 +54,16 @@ python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --video --output b
 $cxx -std=c++17 $flags -ffp-contract=off -Wno-misleading-indentation -c src/gpu_raster.cpp -o build-switch/gpu_raster.o
 $cxx -std=c++17 $flags $codec_flags -ffp-contract=off -Ibuild-switch -c src/deko3d_raster.cpp -o build-switch/deko3d_raster.o
 $cc -std=c11 $flags -c src/switch_stdio.c -o build-switch/switch_stdio.o
-flags="$flags -ffp-contract=off -DWHJ2_WITH_VULKAN -DWHJ2_WITH_DEKO3D"
+flags="$flags -ffp-contract=off -DWHJ2_WITH_DEKO3D $vulkan_flags"
 
-$cxx -std=c++17 $flags $qlie_profile_flags $($pc --cflags sdl2 freetype2 libpng libjpeg) -L"$dkp/libnx/lib" -specs="$dkp/libnx/switch.specs" $qlie_scene_sources games/runtime/joycon.cpp games/runtime/main.cpp build-switch/gpu_raster.o build-switch/deko3d_raster.o build-switch/vulkan_raster.o build-switch/switch_stdio.o build-switch/switch_nak_cache.o build-switch/mesa-scoped-nak.o build-switch/libqlie-runtime.a -Wl,-u,qlie_build_revision,--wrap=nak_debug_flags -L"$mesa/lib" -Wl,--start-group "$mesa/lib/libvulkan.a" "$rust"/*.rlib $($pc --libs sdl2 freetype2 libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -lexpat -lzstd -ldeko3d -lpthread -lnx -Wl,--end-group -o "build-switch/$qlie_binary.elf"
+link_runtime(){
+ $cxx -std=c++17 $flags $qlie_profile_flags $($pc --cflags sdl2 freetype2 libpng libjpeg) -L"$dkp/libnx/lib" -specs="$dkp/libnx/switch.specs" $qlie_scene_sources games/runtime/joycon.cpp games/runtime/main.cpp build-switch/gpu_raster.o build-switch/deko3d_raster.o build-switch/switch_stdio.o $vulkan_objects build-switch/libqlie-runtime.a -Wl,-u,qlie_build_revision -Wl,--start-group "$@" $($pc --libs sdl2 freetype2 libpng libjpeg libavformat libavcodec libswscale libswresample libavutil) -lexpat -lzstd -ldeko3d -lpthread -lnx -Wl,--end-group -o "build-switch/$qlie_binary.elf"
+}
+if [ -n "$vulkan_objects" ]; then
+  link_runtime -Wl,--wrap=nak_debug_flags -L"$mesa/lib" "$mesa/lib/libvulkan.a" "$rust"/*.rlib
+else
+  link_runtime
+fi
 # Installed packages consume the ELF directly.
 if [ "${1:-}" = "--elf-only" ]; then
   exit 0

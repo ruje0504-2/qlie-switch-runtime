@@ -35,39 +35,67 @@ double nestedAnimationTime(const Animation&a,double milliseconds){
  if(a.loopStartFirst||time>start)return double((time-start)%span+start);
  return double(time%span);
 }
+// WHJ5 PE 0x5b3d54 and 0x5b3f90 convert the 0x5c legacy record to 0xa2.
+static void normalizeLayer15(qlie::Bytes& key){
+ key.resize(0xa2);
+ for(const auto source:{0x2fu,0x32u}){
+  const unsigned anchor=key[source];
+  const unsigned target=source==0x2f?0x81:0x85;
+  key[source]=0;
+  key[target]=uint8_t(anchor%3*50);
+  key[target+2]=uint8_t(anchor/3*50);
+  key[target+3]=uint8_t(anchor/3*50>>8);
+ }
+ for(unsigned i=0;i<4;++i){
+  key[0x89+i*2]=key[0x35+i];
+  key[0x54+i*12]=100;
+ }
+ key[0x96]=100;
+ std::fill(key.begin()+0x98,key.begin()+0xa0,0xff);
+}
 Animation animation(const std::string&type,const qlie::Bytes&b){AnimReader r{b};
  Animation a;
- const bool wide=type=="abdata14";
+ const bool modern=type=="abdata15";
+ const bool wide=type=="abdata14"||modern;
  a.loopStartFirst=wide;
  a.name=r.str(wide);
  uint32_t version=0;
  if(type=="abdata13"||wide)version=r.n();
  else if(type!="abdata12")throw std::runtime_error("Unsupported animation metadata "+type);
- if(wide&&version!=1)throw std::runtime_error("Unsupported abdata14 revision");
- for(auto&v:a.bounds)v=int32_t(r.n());
+ if(wide&&version!=(modern?2u:1u))throw std::runtime_error("Unsupported "+type+" revision");
+ // abdata15 revision 2 moves the playback interval to each motion.
+ for(unsigned i=0;i<(modern?2u:4u);++i)a.bounds[i]=int32_t(r.n());
  if(version>=1)a.flags=r.n();
  a.comment=r.str(wide);
  unsigned motions=r.n(1);
  while(motions--){
  const auto motionTag=r.tag();
- const bool wideMotion=motionTag=="abmotion11";
+ const bool modernMotion=motionTag=="abmotion12";
+ const bool wideMotion=motionTag=="abmotion11"||modernMotion;
  if(!wideMotion&&motionTag!="abmotion10")throw std::runtime_error("Unknown animation motion header");
- if(wideMotion&&r.n()!=1)throw std::runtime_error("Unsupported abmotion11 revision");
+ if(wideMotion&&r.n()!=1)throw std::runtime_error("Unsupported "+motionTag+" revision");
  Motion m;
  m.name=r.str(wideMotion);
- if(wideMotion){r.n();r.n();}
+ if(modernMotion){m.loopStart=int32_t(r.n());m.loopEnd=int32_t(r.n());r.n();}
+ else if(wideMotion){r.n();r.n();}
  unsigned layers=r.n(1);
  while(layers--){AnimationLayer l;
  auto tag=r.tag();
- if(tag!="ablayer22"&&tag!="ablayer21"&&tag!="ablayer18"&&tag!="ablayer17"&&tag!="ablayer16"&&tag!="ablayer15")
+ if(tag!="ablayer25"&&tag!="ablayer22"&&tag!="ablayer21"&&tag!="ablayer18"&&tag!="ablayer17"&&tag!="ablayer16"&&tag!="ablayer15")
   throw std::runtime_error("Unsupported animation layer "+tag);
  l.version=unsigned(std::stoi(tag.substr(7)));
- l.name=r.str(l.version==22);
+ l.name=r.str(l.version>=22);
  l.flags=uint8_t(r.n(1));
- unsigned count=r.n(1);
+ const bool modernLayer=l.version==25;
+ const unsigned count=r.n(modernLayer?4:1);
  l.mode=uint8_t(r.n(1));
- const auto keyBytes=l.version>=21?440:l.version==15?92:l.version==16?145:162;
- for(unsigned i=0;i<count;i++){l.keys.push_back(r.data(keyBytes));
+ const auto keyBytes=modernLayer?r.n():l.version>=21?440:l.version==15?92:l.version==16?145:162;
+ if((modernLayer&&keyBytes!=0x1cc)||count>(b.size()-r.p)/keyBytes)
+  throw std::runtime_error("Invalid "+tag+" key records");
+ for(unsigned i=0;i<count;i++){
+  auto key=r.data(keyBytes);
+  if(l.version==15)normalizeLayer15(key);
+  l.keys.push_back(std::move(key));
  }m.layers.push_back(std::move(l));
  }a.motions.push_back(std::move(m));
  }if(r.p!=b.size())throw std::runtime_error("Trailing animation bytes");
@@ -98,7 +126,7 @@ constexpr auto wideKeyOffsets=[]{
  return offsets;
 }();
 
-bool wideKey(const qlie::Bytes&key){return key.size()==0x1b8;}
+bool wideKey(const qlie::Bytes&key){return key.size()==0x1b8||key.size()==0x1cc;}
 uint32_t keyU32(const qlie::Bytes&k,size_t p){
  if(wideKey(k)&&p){
   p=wideKeyOffsets.at(p);
@@ -170,7 +198,6 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
   if(start>=end){out.unsupported.push_back("nonbackward-key-jump");break;}
   ms=start+std::fmod(ms-start,end-start);break;
  }
- if(layer.version<16)throw std::runtime_error("Animation layer15 normalization pending");
  size_t i=0;
  while(i+1<layer.keys.size()&&ms>=keyU32(layer.keys[i+1],0))i++;
  const auto&a=layer.keys[i];
@@ -319,6 +346,8 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
 // f6cfc/f6e5c add translation/rotation, multiply scale, saturate additive
 // color and multiply tint/alpha. The stack is reset for each motion draw.
 std::vector<AnimationSample> sampleMotion(const Motion&motion,double ms,unsigned width,unsigned height,bool applyRenderState,const AnimationContext&context){
+ if(motion.loopEnd>motion.loopStart&&ms>=motion.loopEnd)
+  ms=motion.loopStart+std::fmod(ms-motion.loopStart,motion.loopEnd-motion.loopStart);
  std::vector<AnimationSample> result,stack;
  result.reserve(motion.layers.size());
  auto compose=[](AnimationSample value,const AnimationSample&parent){

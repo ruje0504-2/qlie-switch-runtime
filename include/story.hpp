@@ -20,6 +20,7 @@ struct StoryProfile {
  std::map<std::string,std::set<unsigned>> visualWaitParagraphs;
  std::string selectionPrelude{};
  bool presentCommandParagraphs=false;
+ std::string nameEntryScript{}, alternateHeader{}, endingMovieScript{};
 };
 class Story {
  enum class After {None,Interlude,VisualWait};
@@ -32,6 +33,7 @@ class Story {
  Script&script(const std::string&);
  const std::vector<std::string>& includeCommands(const std::string&);
  std::string value(std::string)const;
+ std::string substitutePlayerName(std::string)const;
  bool condition(const std::string&)const;
  void resetState();
  void jump(std::string,std::string);
@@ -45,6 +47,7 @@ public:
  Event next();
  std::vector<std::string> upcomingAssetCommands(bool opening=false);
  void choose(unsigned);
+ bool setPlayerName(std::string);
  qlie::Bytes save()const;
  StoryState decodeSave(const qlie::Bytes&);
  void restore(const qlie::Bytes&);

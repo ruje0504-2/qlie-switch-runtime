@@ -13,6 +13,7 @@ class TitleScreen {
  void setBackdrop(bool alternate);
  void setFrame(bool alternate,bool visible);
  const char*entryMotion(int);
+ std::string buttonPosition(unsigned,bool)const;
  void enable();void highlight();
 public:
  enum Action {None,Start,Load,Extra,Settings,Quit,CG,Memory,Sound,Back};

@@ -4,10 +4,10 @@
 #include <array>
 namespace whj2 {
 struct AnimationLayer {std::string name;unsigned version;uint8_t flags,mode;std::vector<qlie::Bytes> keys;};
-struct Motion {std::string name;std::vector<AnimationLayer> layers;};
+struct Motion {std::string name;std::vector<AnimationLayer> layers;int32_t loopStart=0,loopEnd=0;};
 struct Animation {
  std::string name,comment;
- std::array<int32_t,4> bounds;
+ std::array<int32_t,4> bounds{};
  uint32_t flags=0;
  std::vector<Motion> motions;
  bool loopStartFirst=false;

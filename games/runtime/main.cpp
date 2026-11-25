@@ -217,6 +217,9 @@ struct Frontend {
  bool nativeRequested=false;
 #ifdef WHJ2_WITH_GPU
  const std::string gpuMode=selectedRenderer();
+#if defined(__SWITCH__) && !defined(WHJ2_WITH_VULKAN)
+ if(gpuMode=="vulkan")throw std::runtime_error("This build has deko3d and CPU renderers");
+#endif
 #ifdef __SWITCH__
  nativeRequested=gpuMode!="cpu";
 #endif
@@ -332,6 +335,7 @@ struct Frontend {
  if(readAhead){
   movie->setReadAhead(readAhead.get());
   movie->warmFile("script/makerlogo/omegastar.ogv");
+  if(game_profile::secondMakerLogo[0])movie->warmFile(game_profile::secondMakerLogo);
   preparedTitleAlternate=title->prepareOpening(readAhead.get(),progress.extras());
   audio->warmFile(assets,game_profile::titleMusic);
  }
@@ -366,6 +370,12 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  void flushProgress(){if(progressWriter)progressWriter->flush();}
  void syncProgress(){if(progress.capture(story))persistProgress();}
  void makerLogo(){opening=2;images->clear();movie->open("script/makerlogo/omegastar.ogv");QLIE_LOG_LINE(<<"OPENING maker-logo\n");}
+ void nextMakerLogo(){
+  if(opening==2&&game_profile::secondMakerLogo[0]){
+   opening=3;
+   movie->open(game_profile::secondMakerLogo);
+  }else showTitle();
+ }
  void warmNextScene(bool openingHint=false){
   if(!readAhead)return;
   enum class Kind { Image, Audio, Movie, Rule };
@@ -404,7 +414,10 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
     for(auto&part:whj2::split(line.substr(comma+1),','))if(part.rfind("file:",0)==0){
      auto name=part.substr(5);if(name.empty()||name=="none"||name.find('$')!=name.npos)continue;
      auto path=std::string(cmd=="^music01"?"music/":"se/")+name;if(!assets.inPack(path))path+=".ogg";
-     if(assets.inPack(path))add(path,Kind::Audio);
+     if(assets.inPack(path)){
+      if(line.find(",sndfilter:bathroom2")!=line.npos)path="@bathroom2:"+path;
+      add(path,Kind::Audio);
+     }
     }
    }else{
     if(auto blur=images->backgroundBlur(line)){
@@ -518,6 +531,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
      v.first=="clear"||v.first=="oncetime")continue;
   if(game_profile::storyAudioTracks>3){
    if(v.first=="pan"&&v.second=="50")continue;
+   if(v.first=="sndfilter"&&(v.second=="none"||v.second=="bathroom2"))continue;
    if(v.first=="delay")continue;
    if(v.first=="trans"&&v.second=="continue"&&!attrs.count("file"))continue;
    if(v.first=="id"||v.first=="mode")continue;
@@ -545,6 +559,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }if(ch!=0&&normalSkip&&!loops[ch]){audio->stop(output);return true;}
  std::string path=(ch==0?"music/":"se/")+f;
  if(!assets.exists(path))path+=".ogg";
+ if(attrs.count("sndfilter")&&attrs.at("sndfilter")=="bathroom2")path="@bathroom2:"+path;
  if(ch==0)audio->playMusicFile(assets,path,loops[ch],volumes[ch],ms,audioTypes[ch],attrs.count("time")||attrs.count("oncetime"));
  else audio->playFile(assets,output,path,loops[ch],gain,ms,audioTypes[ch],
                       attrs.count("delay")?unsigned(std::stoul(attrs["delay"])):0);
@@ -632,6 +647,42 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
                std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-pendingSceneSince).count());
   next(true);return true;
  }
+ bool enterPlayerName(){
+  if constexpr (qlie::diagnostics){
+   if(const char* value=std::getenv("WHJ5_TEST_NAME"))return story.setPlayerName(value);
+  }
+  for(;;){
+   std::string nameInput;
+#ifdef __SWITCH__
+   SwkbdConfig keyboard;
+   if(R_FAILED(swkbdCreate(&keyboard,0)))throw std::runtime_error("Cannot open name input");
+   swkbdConfigMakePresetDefault(&keyboard);
+   swkbdConfigSetHeaderText(&keyboard,"请输入您的名字");
+   swkbdConfigSetGuideText(&keyboard,"最多 10 个字");
+   swkbdConfigSetStringLenMax(&keyboard,10);
+   swkbdConfigSetStringLenMin(&keyboard,1);
+   char input[64]{};
+   const Result result=swkbdShow(&keyboard,input,sizeof(input));
+   swkbdClose(&keyboard);
+   if(R_FAILED(result))return false;
+   nameInput=input;
+#elif defined(WHJ2_MAC_GAME_PICKER)
+   std::unique_ptr<char,decltype(&std::free)> input(whj2_mac_choose_player_name(),std::free);
+   if(!input)return false;
+   nameInput=input.get();
+#else
+   throw std::runtime_error("Name input requires the Switch or Mac frontend");
+#endif
+   if(story.setPlayerName(std::move(nameInput)))return true;
+  }
+ }
+ void syncScenePan(){
+  const auto pan=story.state.vars.find("__view_pan");
+  if(pan==story.state.vars.end()){images->setViewPan("",0,0);return;}
+  const auto value=whj2::split(pan->second,',');
+  if(value.size()!=3)throw std::runtime_error("Malformed view pan state");
+  images->setViewPan(value[0],std::stof(value[1]),std::stof(value[2]));
+ }
  void next(bool resume=false){if(menu||story.state.finished||(!resume&&pendingScene))return;
   using LoadClock=std::chrono::steady_clock;
   struct PageTiming {
@@ -654,6 +705,11 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  auto e=pendingScene?std::move(*pendingScene):story.next();
  pendingScene.reset();pendingSceneAssets.clear();
  syncProgress();
+ if(e.type=="view-pan"){syncScenePan();continue;}
+ if(e.type=="name-entry"){
+  if(!enterPlayerName()){showTitle();return;}
+  continue;
+ }
  if(e.type=="choice"){normalSkip=false;sentenceWait.cancel();transition->present();focus=0;choiceScreen->show(story.state.choices,storyFont());
  text=body.empty()?ui.text("選択してください"):body;
  messageText->start(text);messageText->reveal();refreshMessage(true);
@@ -669,6 +725,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   warmNextScene();
   return;
  }if(e.type=="page"){if(body.empty())continue;
+ const bool continuesHistory=story.state.vars.count("__history_continue")&&!history.empty();
+ if(continuesHistory){speaker=history.back().speaker;voiceId=history.back().voice;}
  if(auto face=images->selectFace(speaker,voiceId,true)){
   if(deferSceneCommand(e,{*face},{}))return;
   images->selectFace(speaker,voiceId);
@@ -678,8 +736,9 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   currentPageKey=qlie::canonical(e.file)+":"+std::to_string(e.line);currentPageWasRead=progress.wasRead(currentPageKey);if(skipReadOnly&&!currentPageWasRead)normalSkip=false;
  messageText->start(text);autoPlay.page(settings.get("AutoClickWait"));refreshMessage(true);
  name=speaker;
- history.push_back({name,text,voiceId});
- playVoice(voiceId);
+ story.state.vars.erase("__history_continue");
+ if(continuesHistory){history.back().text+=text;invalidateHistoryRows();}
+ else {history.push_back({name,text,voiceId});playVoice(voiceId);}
  sentenceWait.page(true,audio->playing(3));
  advances++;warmNextScene();
  QLIE_LOGF("PAGE %s:%u\n",e.file.c_str(),e.line);
@@ -744,6 +803,9 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   if(index>=16||used!=e.value.size()-6)throw std::runtime_error("Direct sound channel out of range");
   audio->stop(8+unsigned(index));continue;
  }if(e.type=="command"){
+  if(e.value=="^format,log:continue"||e.value=="^format,log:stack"){
+   story.state.vars["__history_continue"]="1";continue;
+  }
   if(audioCommand(e.value))continue;
   auto resources=images->warmPaths(e.value);
   auto blur=images->backgroundBlur(e.value);
@@ -753,8 +815,10 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   for(const auto&path:resources)readAhead->release(qlie::canonical(path));
   if(sceneCommand){playSceneSounds();continue;}
  }
- if(e.type=="create"||e.type=="free"){audio->stopAll();bgvMode=bgvDucked=false;
+ if(e.type=="create"||e.type=="free"){story.state.vars.erase("__history_continue");audio->stopAll();bgvMode=bgvDucked=false;
+ images->setAlternateMessageWindow(story.state.vars.count("__avg2_active")!=0);
  images->clear();
+ syncScenePan();
  transition->reset();
  sentenceWait=whj2::SentenceWait{};
  messageText->start("");
@@ -787,6 +851,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  std::string slotPrefix(unsigned slot=1)const{if(slot>=AutoSaveBase){if(slot>=AutoSaveBase+AutoSaveCount)throw std::runtime_error("Auto save slot range");char number[32];std::snprintf(number,sizeof(number),"/autosave/slot%02u",slot-AutoSaveBase+1);return saveDir+number;}char number[16];std::snprintf(number,sizeof(number),"/slot%02u",slot);return saveDir+number;}
  bool save(unsigned slot=1){
   if(replayActive||menu||movie->playing())return false;
+  if(pendingScene){status=ui.text("場面の準備中です。");return false;}
   try{
    if(slot<AutoSaveBase)flushProgress();
    whj2::SaveSlotWrite output(slotPrefix(slot));
@@ -998,6 +1063,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   readAhead->retire(std::move(images));
   readAhead->retire(std::move(transition));
   images=std::move(preparedScene->images);
+  images->setAlternateMessageWindow(story.state.vars.count("__avg2_active")!=0);
+  syncScenePan();
   transition=std::move(preparedScene->transition);
   images->setReadAhead(readAhead.get());
   transition->setReadAhead(readAhead.get());
@@ -1038,7 +1105,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   QLIE_LOG_LINE(<<"TITLE START wait_ms="<<game_profile::titleStartWait<<'\n');
   if(skipTitleExitForTest)finishTitleStart();
  }
- void activate(){if(titleStarting){finishTitleStart();return;}if(normalSkip){normalSkip=false;return;}if(opening){if(opening==1)makerLogo();else {movie->stop();showTitle();}return;}if(!menu&&hidden){hidden=false;return;}if(movie->playing()){movie->stop();
+ void activate(){if(titleStarting){finishTitleStart();return;}if(normalSkip){normalSkip=false;return;}if(opening){if(opening==1)makerLogo();else {movie->stop();nextMakerLogo();}return;}if(!menu&&hidden){hidden=false;return;}if(movie->playing()){movie->stop();
  if(movieOnly)done=true;
  else next();
  return;
@@ -1242,6 +1309,11 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   gameMenu.historyVoices.fill(false);
   gameMenu.historyTextMax.fill(0);
   std::array<const HistoryRow*,4> visible{};
+#ifdef QLIE_PROFILE_WHJ5
+  constexpr auto historyFace=GlyphFace::Dialogue;
+#else
+  constexpr auto historyFace=GlyphFace::Interface;
+#endif
   for(int row=0;row<gameMenu.historyRows;row++){
    const size_t index=history.size()-1-size_t(offset)-size_t(row);
    const auto&entry=history[index];
@@ -1260,7 +1332,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
     historyText->start(entry.text);
     historyText->reveal();
     if(needsRow)cached->maxOffset=int(historyText->lastPageOffset(style));
-    cached->body=historyText->render(font,style,size_t(firstLine));
+    cached->body=historyText->render(historyFace==GlyphFace::Dialogue?storyFont():font,style,size_t(firstLine));
     cached->body.version.publish();
     cached->firstLine=firstLine;
    }
@@ -1273,7 +1345,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    for(int row=0;row<gameMenu.historyRows;row++){
     const auto&entry=history[visible[row]->entry];
     const int y=rowY[row];
-    line(whj2::messageDisplayName(entry.speaker),230,y,26,0x69faff,&queue);
+    line(whj2::messageDisplayName(entry.speaker),230,y,26,0x69faff,&queue,historyFace);
     queue.image(visible[row]->body,whj2::Affine2D{1,0,0,1,230.f,float(y+30)},0,255,0,0xffffff);
    }
   });
@@ -1469,7 +1541,15 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }
 #endif
  void windowToLogical(int px,int py,float*x,float*y){if(renderer){SDL_RenderWindowToLogical(renderer,px,py,x,y);return;}int width,height;windowSize(&width,&height);float scale=std::min(width/1280.f,height/720.f);*x=(px-(width-1280*scale)*.5f)/scale;*y=(py-(height-720*scale)*.5f)/scale;}
- void touchTitleView(float x,float y){if(!titleViewActive())return;int w,h;windowSize(&w,&h);float lx,ly;windowToLogical(int(x*w),int(y*h),&lx,&ly);titlePointer=std::clamp(lx,0.f,1280.f);title->view(titlePointer);}
+ void touchTitleView(float x,float y){
+  const bool titleView=titleViewActive();
+  const bool storyView=!menu&&!gameMenu.visible()&&images->hasViewPan();
+  if(!titleView&&!storyView)return;
+  int w,h;windowSize(&w,&h);float lx,ly;
+  windowToLogical(int(x*w),int(y*h),&lx,&ly);
+  if(storyView){images->pointViewPan(lx,ly);return;}
+  titlePointer=std::clamp(lx,0.f,1280.f);title->view(titlePointer);
+ }
  void touchDrag(float x,float y,bool start){if(menuFadeLocksInput()||(extrasVisible()&&!extrasReady())){if(start)fingerUiDrag=false;return;}int w,h;windowSize(&w,&h);float lx,ly;windowToLogical(int(x*w),int(y*h),&lx,&ly);if(cgScreen->visible()){if(start)fingerUiDrag=false;if(cgScreen->inView())cgScreen->pan(lx,ly);return;}if(replayScreen->visible()){if(start)fingerUiDrag=false;return;}if(musicScreen->visible()){bool moved=musicScreen->drag(lx,ly);if(start)fingerUiDrag=moved;return;}if(start)fingerUiDrag=gameMenu.beginDrag(lx,ly);else gameMenu.drag(lx,ly);if(fingerUiDrag&&gameMenu.settingsDirty){applySettings(false);uiSound("Sys_OnMouse");}}
  void pointer(int px,int py){if(menuFadeLocksInput())return;float x,y;
  windowToLogical(px,py,&x,&y);
@@ -1556,6 +1636,10 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
 #endif
  if(opening==1){openingElapsed+=double(now-lastUpdate);images->update(double(now-lastUpdate));if(openingElapsed>=game_profile::cautionWait)makerLogo();}
  if(titleStarting){titleStartElapsed+=double(now-lastUpdate);transition->update(double(now-lastUpdate));if(titleStartElapsed>=game_profile::titleStartWait)finishTitleStart();}
+ if(!menu&&!fingerActive&&!gameMenu.visible()&&images->hasViewPan()){
+  const float elapsed=float(now-lastUpdate)*.001f;
+  images->moveViewPan(float(titleAxis)*elapsed,float(titleAxisY)*elapsed);
+ }
  if(titleViewActive()&&!fingerActive){titlePointer=std::clamp(titlePointer+titleAxis*double(now-lastUpdate)*.6,0.,1280.);title->view(titlePointer);}
  if(extrasVisible())updateExtras(double(now-lastUpdate));
  else if(!opening&&menu&&!titleStarting&&!gameMenu.visible())title->update(double(now-lastUpdate));
@@ -1592,12 +1676,12 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(movie->playing()&&!menuFadeLocksInput()){movie->update();
  if(!movie->playing()){if(movieOnly){done=true;
  break;
- }if(opening==2){showTitle();}else next();
+ }if(opening){nextMakerLogo();}else next();
  }}SDL_Event e;
  while(SDL_PollEvent(&e)){if(e.type==SDL_QUIT)done=true;
 else if(e.type==SDL_FINGERDOWN){if(!fingerActive){fingerActive=true;fingerId=e.tfinger.fingerId;fingerX=e.tfinger.x;fingerY=e.tfinger.y;touchTitleView(fingerX,fingerY);touchDrag(fingerX,fingerY,true);}}
  else if(e.type==SDL_FINGERMOTION&&fingerActive&&e.tfinger.fingerId==fingerId&&cgScreen->visible()&&cgScreen->inView()){touchDrag(e.tfinger.x,e.tfinger.y,false);}
- else if(e.type==SDL_FINGERMOTION&&fingerActive&&e.tfinger.fingerId==fingerId&&titleViewActive()&&!fingerUiDrag){touchTitleView(e.tfinger.x,e.tfinger.y);}
+ else if(e.type==SDL_FINGERMOTION&&fingerActive&&e.tfinger.fingerId==fingerId&&(titleViewActive()||images->hasViewPan())&&!fingerUiDrag){touchTitleView(e.tfinger.x,e.tfinger.y);}
  else if(e.type==SDL_FINGERMOTION&&fingerActive&&e.tfinger.fingerId==fingerId&&fingerUiDrag){touchDrag(e.tfinger.x,e.tfinger.y,false);}
  else if(e.type==SDL_FINGERUP&&fingerActive&&e.tfinger.fingerId==fingerId){fingerActive=false;
  float dx=(e.tfinger.x-fingerX)*1280,dy=(e.tfinger.y-fingerY)*720;

@@ -97,6 +97,7 @@ inline constexpr char replayMusic[] = "music/wbgm16.ogg";
 inline constexpr char titleStartFade[] = "^sentence,fade:rule:2000:雲.png:4";
 inline constexpr double titleStartWait = 2500, titleMusicFade = 2000, cautionWait = 4500;
 inline constexpr TitleLayout title{};
+inline constexpr char secondMakerLogo[] = "";
 inline constexpr bool extendedCgRoots=false;
 inline constexpr const char* extrasFlag=nullptr;
 inline constexpr unsigned storyAudioTracks=3;

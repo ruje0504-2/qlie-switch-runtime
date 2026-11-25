@@ -14,8 +14,39 @@ extern "C" {
 #include <algorithm>
 #include <iostream>
 #include <sstream>
+#include <string_view>
 namespace whj2 {
 namespace {
+qlie::Bytes audioSource(qlie::Assets&,const std::string&);
+
+DecodedPcm decodeSource(qlie::Assets& assets,const std::string& path){
+ constexpr std::string_view bathroom="@bathroom2:";
+ if(path.rfind(bathroom,0)!=0)return Audio::decodePcm(audioSource(assets,path));
+ const auto pcm=Audio::decodePcm(assets.read(path.substr(bathroom.size())));
+ const size_t frames=pcm.size()/2;
+ // WHJ5's authored dry/wet levels, delay, decay and room cutoff.
+ constexpr unsigned delay=44100*50/1000;
+ constexpr float cutoff=1.f-0.892278f; // 800 Hz, one-pole at 44100 Hz.
+ std::vector<float> echoes(delay*2);
+ std::array<float,2> lowPass{};
+ auto output=std::shared_ptr<int16_t>(new int16_t[pcm.size()],std::default_delete<int16_t[]>());
+ for(size_t frame=0;frame<frames;++frame){
+  for(unsigned side=0;side<2;++side){
+   const size_t index=frame*2+side, tap=(frame%delay)*2+side;
+   const float dry=pcm[index];
+   lowPass[side]+=cutoff*(echoes[tap]-lowPass[side]);
+   echoes[tap]=dry+lowPass[side]*.5f;
+   output.get()[index]=int16_t(std::clamp(dry*.8f+lowPass[side]*.6f,-32768.f,32767.f));
+  }
+ }
+ return {std::move(output),pcm.size()};
+}
+WarmAsset prepareSource(qlie::Assets& assets,const std::string& path){
+ WarmAsset ready;
+ ready.pcm=decodeSource(assets,path);
+ ready.bytes=ready.pcm.size()*sizeof(int16_t);
+ return ready;
+}
 WarmAsset preparePcm(const qlie::Bytes&bytes){
  WarmAsset ready;ready.pcm=Audio::decodePcm(bytes);
  ready.bytes=ready.pcm.size()*sizeof(int16_t);
@@ -97,19 +128,19 @@ DecodedPcm Audio::decodePcm(const qlie::Bytes&bytes,bool allowMissing){
  return {std::shared_ptr<const int16_t>(reinterpret_cast<const int16_t*>(raw),[](const int16_t*p){std::free(const_cast<int16_t*>(p));}),n/2};
 }
 void Audio::warmFile(qlie::Assets&assets,const std::string&path){
- if(readAhead)readAhead->request(qlie::canonical(path),[&assets,path]{return preparePcm(assets.read(path));});
+ if(readAhead)readAhead->request(qlie::canonical(path),[&assets,path]{return prepareSource(assets,path);});
 }
 void Audio::playFile(qlie::Assets&assets,unsigned ch,const std::string&path,bool loop,float gain,unsigned ms,unsigned category,unsigned delayMs){
- if(!readAhead){playDecoded(ch,decodePcm(assets.read(path)),loop,gain,ms,path,category,false,false,delayMs);return;}
+ if(!readAhead){playDecoded(ch,decodeSource(assets,path),loop,gain,ms,path,category,false,false,delayMs);return;}
  auto channel=channelFor(ch,loop,gain,ms,path,category);
  channel.delay=uint64_t(delayMs)*44100/1000;
  queue(ch,{std::move(channel),qlie::canonical(path),{}},
-       [&assets,path]{return preparePcm(assets.read(path));});
+       [&assets,path]{return prepareSource(assets,path);});
 }
 void Audio::playMusicFile(qlie::Assets&assets,const std::string&path,bool loop,float gain,unsigned ms,unsigned category,bool explicitFade){
- if(!readAhead){playDecoded(0,decodePcm(assets.read(path)),loop,gain,ms,path,category,true,explicitFade);return;}
+ if(!readAhead){playDecoded(0,decodeSource(assets,path),loop,gain,ms,path,category,true,explicitFade);return;}
  queue(0,{channelFor(0,loop,gain,ms,path,category),qlie::canonical(path),{},ms,true,explicitFade},
-       [&assets,path]{return preparePcm(assets.read(path));});
+       [&assets,path]{return prepareSource(assets,path);});
 }
 void Audio::play(unsigned ch,qlie::Bytes bytes,bool loop,float gain,unsigned ms,const std::string&path,unsigned category){
  if(!readAhead){playDecoded(ch,decodePcm(bytes),loop,gain,ms,path,category);return;}
@@ -334,7 +365,7 @@ WarmAsset Audio::prepareRestore(const qlie::Bytes&bytes,qlie::Assets&assets){
  r.end();
  for(auto&c:next){
   if(!c.path.empty()){
-   c.pcm=decodePcm(audioSource(assets,c.path));
+   c.pcm=decodeSource(assets,c.path);
    result.bytes+=c.pcm.size()*sizeof(int16_t);
   }
   if(c.pos>c.pcm.size()||c.pos%2)throw std::runtime_error("Invalid audio cursor");
@@ -352,7 +383,7 @@ void Audio::restore(const qlie::Bytes&bytes,qlie::Assets&assets){
 }
 void Audio::applyRestore(std::shared_ptr<PreparedAudioRestore> next,qlie::Assets&assets){
  auto&queued=next->queued;
- if(!readAhead)for(auto&clip:queued)if(clip)clip->channel.pcm=decodePcm(audioSource(assets,clip->channel.path));
+ if(!readAhead)for(auto&clip:queued)if(clip)clip->channel.pcm=decodeSource(assets,clip->channel.path);
 #if QLIE_DIAGNOSTICS
  std::ostringstream log;
  for(const auto&c:next->channels)if(!c.path.empty())
@@ -366,7 +397,7 @@ void Audio::applyRestore(std::shared_ptr<PreparedAudioRestore> next,qlie::Assets
   auto clip=std::move(*queued[ch]);
   if(readAhead){
    const auto path=clip.channel.path;
-   queue(ch,std::move(clip),[&assets,path]{return preparePcm(audioSource(assets,path));});
+   queue(ch,std::move(clip),[&assets,path]{return prepareSource(assets,path);});
   }else{
    auto pcm=std::move(clip.channel.pcm);
    installPending(ch,std::move(clip),std::move(pcm));

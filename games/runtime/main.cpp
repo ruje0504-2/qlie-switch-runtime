@@ -2485,7 +2485,7 @@ controllerKey(e.cbutton.button);
   snowStart=now;
   QLIE_LOGF("WHJ6 SNOW start_ms=%llu\n",(unsigned long long)snowStart);
  }
- const bool sampleSnow=snowStart&&menu&&!titleStarting&&now-snowStart<=9000&&now>=snowNextSample;
+ const bool sampleSnow=snowStart&&menu&&!titleStarting&&now-snowStart<=11000&&now>=snowNextSample;
 #endif
  draw();
  finishMenuFade();

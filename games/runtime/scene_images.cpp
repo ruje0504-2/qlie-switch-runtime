@@ -97,6 +97,21 @@ std::shared_ptr<const Image> sceneBitmap(Image pixels){
  pixels.version.publish();
  return std::make_shared<const Image>(std::move(pixels));
 }
+#ifdef QLIE_PROFILE_WHJ6
+std::shared_ptr<const Image> titleArtwork(Image pixels){
+ pixels.version.publish();
+ ImageAlphaBounds bounds{pixels.version.get(),pixels.width,pixels.height,0,0};
+ for(unsigned y=0;y<pixels.height;++y)for(unsigned x=0;x<pixels.width;++x){
+  if(!pixels.pixels[(size_t(y)*pixels.width+x)*4+3])continue;
+  bounds.left=std::min(bounds.left,x);
+  bounds.top=std::min(bounds.top,y);
+  bounds.right=std::max(bounds.right,x+1);
+  bounds.bottom=std::max(bounds.bottom,y+1);
+ }
+ if(bounds.right>bounds.left&&bounds.bottom>bounds.top) pixels.alphaBounds=bounds;
+ return std::make_shared<const Image>(std::move(pixels));
+}
+#endif
 bool sceneCompositePath(const std::string&path){
  const auto key=qlie::canonical(path);
  const auto dot=key.find_last_of('.');
@@ -500,6 +515,9 @@ struct Composite {
     // bitmap compressed until a caller draws the card without a replacement.
     else if(path==eyecatchPath&&members.empty())eyecatchFallback=std::move(m.data);
     else if(film&&path==eyecatchFilmPath&&m.name=="film")e.image=film->decode(std::move(m.data));
+#ifdef QLIE_PROFILE_WHJ6
+    else if(name=="script/title/frame.b"||name=="script/title/back01.b#Logo2")e.image=titleArtwork(image(m.data));
+#endif
     else e.image=sceneBitmap(image(m.data));
    }
    hasVideo=hasVideo||bool(e.video)||(e.nested&&e.nested->hasVideo);

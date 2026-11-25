@@ -9,7 +9,7 @@ namespace gpu { struct Scene; }
 class GpuRaster:public RenderTarget {
  std::unique_ptr<gpu::Scene> impl;
  bool fieldRequested=false,nextField=false,forcedField=false;
- void drawImage(const Image&,const Affine2D&,float,uint32_t,uint32_t,unsigned,unsigned);
+ void drawImage(const Image&,const Affine2D&,float,uint32_t,uint32_t,unsigned,unsigned,bool clipAlpha=true);
 protected:
  explicit GpuRaster(std::unique_ptr<gpu::Scene>);
 public:

@@ -408,7 +408,7 @@ bool GpuRaster::beginVideoSurface(const KVideoSurface&surface){fieldRequested=fa
 void GpuRaster::beginBatch(){++impl->batch;impl->inBatch=true;}
 void GpuRaster::endBatch(){impl->inBatch=false;}
 void GpuRaster::maskedImage(const Image&source,const Image&mask,const AnimationSample::Mask&settings,const Affine2D&m,float alpha,uint32_t add,uint32_t mul,unsigned blend,unsigned filter){
- auto&s=*impl;size_t before=s.current->commands.size();drawImage(source,m,alpha,add,mul,blend,filter);if(s.current->commands.size()==before)return;
+ auto&s=*impl;size_t before=s.current->commands.size();drawImage(source,m,alpha,add,mul,blend,filter,false);if(s.current->commands.size()==before)return;
  auto&draw=s.current->commands.back();
  float width=settings.width?settings.width:source.width,height=settings.height?settings.height:source.height;
  float maskWidth=settings.maskWidth?settings.maskWidth:mask.width,maskHeight=settings.maskHeight?settings.maskHeight:mask.height;
@@ -486,7 +486,8 @@ void GpuRaster::warmBitmap(const Image&image){
  bool opaque;
  impl->texture(image,identity,&opaque);
 }
-void GpuRaster::drawImage(const Image&i,const Affine2D&m,float alpha,uint32_t add,uint32_t mul,unsigned blend,unsigned filter){
+void GpuRaster::drawImage(const Image&i,const Affine2D&m,float alpha,uint32_t add,uint32_t mul,
+                          unsigned blend,unsigned filter,[[maybe_unused]] bool clipAlpha){
  const bool unit=m.a==1&&m.d==1&&m.b==0&&m.c==0;
  float det=m.a*m.d-m.b*m.c;if(std::abs(det)<1e-12f)return;Push p;p.p[0][0]=m.a;p.p[0][1]=m.b;p.p[0][2]=m.c;p.p[0][3]=m.d;p.p[1][0]=m.x;p.p[1][1]=m.y;p.p[1][2]=det;
  if(unit){
@@ -507,6 +508,27 @@ void GpuRaster::drawImage(const Image&i,const Affine2D&m,float alpha,uint32_t ad
    }
   }
  }
- float xmin=m.x,xmax=m.x,ymin=m.y,ymax=m.y;for(unsigned n=0;n<4;n++){float u=n&1?i.width:0,v=n&2?i.height:0;float x=m.a*u+m.b*v+m.x,y=m.c*u+m.d*v+m.y;xmin=std::min(xmin,x);xmax=std::max(xmax,x);ymin=std::min(ymin,y);ymax=std::max(ymax,y);}p.rect[0]=int(std::floor(xmin));p.rect[1]=int(std::floor(ymin));p.rect[2]=int(std::ceil(xmax));p.rect[3]=int(std::ceil(ymax));impl->dispatch(i,p,alpha,add,mul,blend,filter);}
+ float left=0,top=0,right=i.width,bottom=i.height;
+#ifdef QLIE_PROFILE_WHJ6
+ const auto& bounds=i.alphaBounds;
+ if(clipAlpha&&m.b==0.f&&m.c==0.f&&bounds.sourceVersion&&bounds.sourceVersion==i.version.get()){
+  // Keep a full texel at each edge for linear filtering. The texture origin,
+  // scale and sampler remain identical to the untrimmed draw.
+  left=bounds.left?bounds.left-1:0;
+  top=bounds.top?bounds.top-1:0;
+  right=bounds.right<i.width?bounds.right+1:i.width;
+  bottom=bounds.bottom<i.height?bounds.bottom+1:i.height;
+ }
+#endif
+ float xmin=INFINITY,xmax=-INFINITY,ymin=INFINITY,ymax=-INFINITY;
+ for(unsigned n=0;n<4;++n){
+  const float u=n&1?right:left,v=n&2?bottom:top;
+  const float x=m.a*u+m.b*v+m.x,y=m.c*u+m.d*v+m.y;
+  xmin=std::min(xmin,x);xmax=std::max(xmax,x);ymin=std::min(ymin,y);ymax=std::max(ymax,y);
+ }
+ p.rect[0]=int(std::floor(xmin));p.rect[1]=int(std::floor(ymin));
+ p.rect[2]=int(std::ceil(xmax));p.rect[3]=int(std::ceil(ymax));
+ impl->dispatch(i,p,alpha,add,mul,blend,filter);
+}
 void GpuRaster::triangle(const Image&i,const std::array<TextureVertex,3>&vertices,const Affine2D&post,float alpha,uint32_t add,uint32_t mul,unsigned blend,unsigned filter){auto v=vertices;for(auto&p:v){if(p.depth<10)return;float ratio=1000/p.depth;float x=640+(p.x-640)*ratio,y=360+(p.y-360)*ratio;p.x=post.a*x+post.b*y+post.x;p.y=post.c*x+post.d*y+post.y;}auto edge=[](const TextureVertex&a,const TextureVertex&b,float x,float y){return (b.x-a.x)*(y-a.y)-(b.y-a.y)*(x-a.x);};float area=edge(v[0],v[1],v[2].x,v[2].y);if(std::abs(area)<1e-6f)return;if(area<0){std::swap(v[1],v[2]);area=-area;}Push p;for(unsigned n=0;n<3;n++){p.p[n][0]=v[n].x;p.p[n][1]=v[n].y;p.p[n][2]=v[n].u;p.p[n][3]=v[n].v;p.p[3][n]=v[n].depth;}p.p[3][3]=area;p.meta[2]=65536;p.rect[0]=int(std::floor(std::min({v[0].x,v[1].x,v[2].x})));p.rect[1]=int(std::floor(std::min({v[0].y,v[1].y,v[2].y})));p.rect[2]=int(std::ceil(std::max({v[0].x,v[1].x,v[2].x})));p.rect[3]=int(std::ceil(std::max({v[0].y,v[1].y,v[2].y})));impl->dispatch(i,p,alpha,add,mul,blend,filter);}
 }

@@ -19,12 +19,17 @@ public:
 };
 struct VideoSurfaceImage;
 struct ImagePatches;
+struct ImageAlphaBounds {
+ uint64_t sourceVersion=0;
+ unsigned left=0,top=0,right=0,bottom=0;
+};
 struct Image {
  unsigned width=0,height=0;
  qlie::Bytes pixels; // BGRA8 straight alpha
  PixelVersion version{};
  std::shared_ptr<const VideoSurfaceImage> videoSurface{};
  std::shared_ptr<const ImagePatches> patches{};
+ ImageAlphaBounds alphaBounds{};
 };
 // Optional nonoverlapping regions for pixel-aligned GPU draws. Their versions
 // are independent, and the stamp prevents editable image copies using stale regions.

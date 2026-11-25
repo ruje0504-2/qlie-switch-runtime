@@ -76,6 +76,10 @@ Switch 的 `d19e881` 采样日志确认主菜单雪景在警告画面阶段已�
 
 《雪女》单独映射剧本指定的正文字体槽位。槽位 `5` 优先使用游戏资源中的 Tahoma，其余槽位使用对白字体。普通对白在 720p 下使用与 WHJ2 一致的 26 像素字号。选定字体后，字形缓存和正文增量渲染沿用各游戏的通用路径。[共用运行时的字形缓存与正文增量渲染](runtime.md#界面与持久化)
 
+对白字体使用与 WHJ2 中文版相同的 `localization/zh-cn/arshanghaisonggbpro_lt.otf`，与配套 `LICENSE-OFL-1.1.txt` 一起准备在资源根目录。此前 NRO 部署已复制这两项，NSP 打包清单遗漏了它们，导致安装版正文回退到系统字体。`tools/package_nsp.py` 现将两项列为 WHJ6 的必需资源，随八个分卷写入 RomFS；缺少字体或许可会在打包前报错。该清单调整只作用于 WHJ6，槽位 `5` 的字幕映射保持原实现。
+
+修复包已从最终 NSP 提取 RomFS，核对字体和许可与部署源文件逐字节一致。Mac 使用提取出的资源验证了正文和姓名确实选用该字体、输出与参考字体的像素一致，并保留字幕槽位映射。
+
 ## 验证方式
 
 在仓库根目录用 `QLIE_GAME=whj6 sh ./build-switch.sh` 生成正式 NRO。正式构建默认关闭采样。加入 `QLIE_SWITCH_DIAGNOSTICS=1` 会生成独立采样版，Switch 日志写到 `sdmc:/switch/whj6/snow-probe.log`。通过 `WHJ6 SCENE` 定位剧情页，使用 `DEKO3D PRESENT` 对照影片首帧、GPU 合成及 `fog_tiles`。冷启动从完全退出游戏后重开，动态 CG 从已解锁的同组项目做连续正向、反向和快速改选对照。

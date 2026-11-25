@@ -88,7 +88,10 @@ def main():
     elif game_profile == 'whj5':
         resources = [f'GameData/data{i}.pack' for i in range(10)] + ['reskey.fkey', 'patch.dat']
     elif game_profile == 'whj6':
-        resources = [f'GameData/data{i}.pack' for i in range(8)]
+        resources = [f'GameData/data{i}.pack' for i in range(8)] + [
+            'localization/zh-cn/arshanghaisonggbpro_lt.otf',
+            'localization/zh-cn/LICENSE-OFL-1.1.txt',
+        ]
     elif whj4:
         resources = [f'GameData/data{i}.pack' for i in range(9)] + ['reskey.fkey']
     else:

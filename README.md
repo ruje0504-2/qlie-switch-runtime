@@ -68,7 +68,7 @@ QLIE_GAME=whj6 ./build-switch.sh
 | WHJ3 | 十个 3.0 分卷、上述两份 DLL 目录密钥，可选 `patch.dat` | 双标题背景、序章马车与风声、指定图层的影片及运行时截图替换 |
 | WHJ4 | 九个 3.1 分卷、`reskey.fkey` | 日文原版和可选中文更新，保留本作 OGV/IMOAVI 媒体配置 |
 | WHJ5 | 十个 3.1 分卷、`reskey.fkey`、`patch.dat` | 简体中文与日文语音、姓名输入、历史回跳、长幅动态 CG |
-| WHJ6 | `GameData/data0.pack` 至 `data7.pack` | 3.1 分卷内嵌密钥、1920×1080 逻辑坐标映射到 1280×720、独立存档与鉴赏列表 |
+| WHJ6 | `GameData/data0.pack` 至 `data7.pack`，以及下述 `localization/zh-cn/` 字体和许可 | 3.1 分卷内嵌密钥、1920×1080 逻辑坐标映射到 1280×720、独立存档与鉴赏列表 |
 
 各目标在自己的 `saves/` 下写入存档。两平台均支持 `--engine-only`。`QLIE_SWITCH_VULKAN=0` 可省略 Vulkan 备用后端及其 SDK。
 
@@ -81,7 +81,7 @@ python3 tools/extract_reskey.py /absolute/path/to/original.exe /absolute/path/to
 
 WHJ5 读取 `data0.pack` 至 `data9.pack`，按编号升序叠加同名资源。本地 `patch.dat` 提供简体中文界面词条、字体及其许可。
 
-WHJ6 的 Mac 版本可直接传入包含 `GameData/` 的本地游戏目录作为第一个参数。Switch 将 NRO 放在 `sdmc:/switch/whj6/`，八个分卷放在该目录的 `game/GameData/`，再从 hbmenu 的完整内存模式启动。各分卷自带解码所需数据。WHJ6 默认构建 deko3d 和 CPU 后端。可通过 `QLIE_NRO_ICON` 传入本地 256×256 JPEG 图标。读取画面中的「直前の選択肢」可以恢复最近一次选择，普通存档栏位单独保存。
+WHJ6 的 Mac 版本可直接传入包含 `GameData/` 的本地游戏目录作为第一个参数。Switch 将 NRO 放在 `sdmc:/switch/whj6/`，八个分卷放在该目录的 `game/GameData/`，再从 hbmenu 的完整内存模式启动。各分卷自带解码所需数据。要使用与 WHJ2 中文版相同的正文字体，在资源根目录的 `localization/zh-cn/` 放入本地准备的 `arshanghaisonggbpro_lt.otf` 和配套 `LICENSE-OFL-1.1.txt`，NRO 对应 `sdmc:/switch/whj6/game/localization/zh-cn/`。WHJ6 默认构建 deko3d 和 CPU 后端。可通过 `QLIE_NRO_ICON` 传入本地 256×256 JPEG 图标。读取画面中的「直前の選択肢」可以恢复最近一次选择，普通存档栏位单独保存。
 
 雪女的剧本、动画和触摸由同一坐标变换映射到 720p，普通对白字号与 WHJ2 一致，为 26 像素。标题、设置、选择、存读档和鉴赏界面使用本作素材与布局。字形缓存、正文增量渲染、音视频解码和资源预读复用共用运行时；本作的字体槽位、界面规则及雾气、飘雪、暴风雪专用合成由 WHJ6 配置选择。
 
@@ -127,7 +127,7 @@ WHJ4 的构建和打包均选 `QLIE_GAME=whj4`。日文本体为 `01007F8E5C1400
 
 WHJ5 本地直装配置使用 Title ID `01007F8E5C150000`、版本 `1.0.0`，HOME 名称为「美少女万華鏡 -理與迷宮的少女-」。切换到 `QLIE_GAME=whj5` 使用上面的打包流程。
 
-WHJ6 本地直装配置使用 Title ID `01007F8E5C160000` 和版本 `1.0.1`，HOME 名称为「美少女万華鏡異聞 雪女」，发行方为「ωstar」。构建和打包均选择 `QLIE_GAME=whj6`。`--game` 指向包含八个 `GameData` 分卷的资源根目录；使用转码资源时指向补齐其余分卷后的目录。图标由本地 `icon.jpg` 提供，打包工具转换为 256×256 JPEG。
+WHJ6 本地直装配置使用 Title ID `01007F8E5C160000` 和版本 `1.0.1`，HOME 名称为「美少女万華鏡異聞 雪女」，发行方为「ωstar」。构建和打包均选择 `QLIE_GAME=whj6`。`--game` 指向包含八个 `GameData` 分卷及上述 `localization/zh-cn/` 字体和许可文件的资源根目录；使用转码资源时指向补齐其余分卷后的目录。打包工具将字体和许可一同放入 RomFS，缺少其中任一文件时停止打包。图标由本地 `icon.jpg` 提供，打包工具转换为 256×256 JPEG。
 
 ```sh
 QLIE_GAME=whj6 ./build-switch.sh --elf-only

@@ -95,7 +95,7 @@ void SceneTransition::loadRule(const std::string&path){
 void SceneTransition::loadAnimation(const std::string&path){
  if(cachedAnimationPath!=path){
   auto members=abmp(assets.read(path));
-  auto metadata=std::find_if(members.begin(),members.end(),[](const Member&m){return m.type=="abdata13"||m.type=="abdata12";});
+  auto metadata=std::find_if(members.begin(),members.end(),[](const Member&m){return m.type.rfind("abdata",0)==0;});
   if(metadata==members.end())throw std::runtime_error("Missing transition animation metadata "+path);
   auto definition=whj2::animation(metadata->type,metadata->data);
   if(definition.bounds[0]!=int(Width)||definition.bounds[1]!=int(Height)||definition.motions.empty())
@@ -103,8 +103,10 @@ void SceneTransition::loadAnimation(const std::string&path){
   captureAnimationTarget=false;
   std::istringstream comment(definition.comment);
   for(std::string field;std::getline(comment,field);)if(trim(field)=="*CaptureFadein=1")captureAnimationTarget=true;
-  // Native fdi uses abdata's end time as the playback span.
-  animationLength=definition.bounds[2];
+  // abdata15 stores the default action's playback end on the motion.
+  // Earlier headers keep it in the bounds, with abdata14 placing start first.
+  animationLength=metadata->type=="abdata15"?definition.motions.front().loopEnd:
+   definition.bounds[definition.loopStartFirst?3:2];
   if(!animation)animation=std::make_unique<SceneImages>(assets);
   else animation->clear();
   cachedAnimationPath=path;

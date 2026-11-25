@@ -475,9 +475,7 @@ struct Frontend {
  if(nativeGpu)title->setNativeVideoSurfaces(gpu->supportsVideoSurfaces());
 #endif
  choiceScreen=std::make_unique<whj2::ChoiceScreen>(assets,*messageText,gameSceneSize);
-#ifdef QLIE_PROFILE_WHJ6
- choiceScreen->prepare(*readAhead);
-#else
+#ifndef QLIE_PROFILE_WHJ6
  if(game_profile::story.legacyAvg)choiceScreen->prepare(*readAhead);
 #endif
  musicScreen=std::make_unique<whj2::MusicScreen>(assets,*audio,settings,font,*messageText,game_profile::musicTrackCount);
@@ -781,6 +779,10 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   if(!std::exchange(openingStoryWarmed,false))
 #endif
    warmNextScene(true);
+#ifdef QLIE_PROFILE_WHJ6
+  // Choice assets reserve read-ahead slots; let the logos and title consume theirs first.
+  choiceScreen->prepare(*readAhead);
+#endif
  }
  void invalidateHistoryRows(){historyRows={};historyViewOffset=-1;}
  void replaceHistory(std::vector<whj2::HistoryEntry> entries={}){

@@ -2641,6 +2641,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }
 #if defined(__SWITCH__) && defined(QLIE_PROFILE_WHJ6) && QLIE_DIAGNOSTICS
  uint64_t snowStart=0,snowNextSample=0;
+ uint64_t sceneNextSample=0;
 #endif
  uint64_t lastUpdate=SDL_GetTicks64();
  while(!done){auto now=SDL_GetTicks64();
@@ -2771,6 +2772,12 @@ controllerKey(e.cbutton.button);
   QLIE_LOGF("WHJ6 SNOW elapsed_ms=%llu update_ms=%llu draw_ms=%llu fps=%u asset_ready=%u asset_waited=%u asset_urgent=%u asset_cold=%u\n",
             (unsigned long long)(now-snowStart),(unsigned long long)(beforeDraw-now),(unsigned long long)(afterDraw-beforeDraw),
             fpsDisplay.fps(),loads.ready,loads.waited,loads.urgent,loads.cold);
+ }
+ if(!opening&&!menu&&!currentPageKey.empty()&&now>=sceneNextSample){
+  sceneNextSample=now+500;
+  QLIE_LOGF("WHJ6 SCENE at_ms=%llu page=%s fps=%u update_ms=%llu draw_ms=%llu\n",
+            (unsigned long long)now,currentPageKey.c_str(),fpsDisplay.fps(),
+            (unsigned long long)(beforeDraw-now),(unsigned long long)(afterDraw-beforeDraw));
  }
 #endif
  if(qlie::diagnostics&&afterDraw-now>=250)

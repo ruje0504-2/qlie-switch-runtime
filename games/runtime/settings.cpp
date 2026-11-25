@@ -7,9 +7,14 @@
 #include <stdexcept>
 namespace whj2 {
 namespace {
+#ifdef QLIE_PROFILE_WHJ6
+const char* settingActor(unsigned index){return whj6::profile::settingsCast[index].name;}
+#else
 constexpr const char* actors[]={"莲华","香恋","萌世歌","春","皇","舞斗","etc"};
-std::string muteKey(unsigned index){return std::string("CharacterVoiceMute.")+actors[index];}
-std::string gainKey(unsigned index){return std::string("CharacterVoiceGain.")+actors[index];}
+const char* settingActor(unsigned index){return actors[index];}
+#endif
+std::string muteKey(unsigned index){return std::string("CharacterVoiceMute.")+settingActor(index);}
+std::string gainKey(unsigned index){return std::string("CharacterVoiceGain.")+settingActor(index);}
 int settingMaximum(const std::string&key){
  if(key=="WindowAlpha")return 255;
  if(key.rfind("CharacterVoiceMute.",0)==0)return 1;
@@ -36,16 +41,26 @@ Settings::Settings(qlie::Assets&a,bool actorSettings,bool waitUsesZero):namedVoi
 }
 float Settings::characterVoiceGain(std::string_view actor)const{
  if(!namedVoices||actor=="none")return 1;
+#ifdef QLIE_PROFILE_WHJ6
+ unsigned index=0;
+ while(index<voiceActorCount()&&actor!=settingActor(index))++index;
+ if(index==voiceActorCount())return 1;
+#else
  if(actor=="蓮華")actor="莲华";
  if(actor=="もよか")actor="萌世歌";
  if(actor=="はる")actor="春";
  if(actor=="公暁")actor="皇";
  const auto end=std::end(actors)-1;
  const unsigned index=unsigned(std::find(std::begin(actors),end,actor)-std::begin(actors));
+#endif
  return characterVoiceMuted(index)?0.f:float(get(gainKey(index)))/256;
 }
 bool Settings::characterVoiceMuted(unsigned index)const{return get(muteKey(index))!=0;}
 void Settings::toggleCharacterVoice(unsigned index){set(muteKey(index),!characterVoiceMuted(index));}
+#ifdef QLIE_PROFILE_WHJ6
+int Settings::characterVoiceLevel(unsigned index)const{return get(gainKey(index));}
+void Settings::setCharacterVoiceLevel(unsigned index,int level){set(gainKey(index),level);}
+#endif
 int Settings::get(const std::string&key)const{return values.at(key);}
 void Settings::set(const std::string&key,int value){if(!values.count(key))throw std::runtime_error("Unknown settings key "+key);values[key]=std::clamp(value,0,settingMaximum(key));}
 std::array<float,5> Settings::gains()const{std::array<float,5> out;const char*keys[]={"BGMVolume","VoiceVolume","SEVolume","SysSEVolume","MovieVolume"};for(unsigned i=0;i<5;i++)out[i]=float((get(keys[i])*get("MasterVolume")/100)*256/100)/256;return out;}

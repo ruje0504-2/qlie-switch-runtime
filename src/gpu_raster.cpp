@@ -264,8 +264,10 @@ void Scene::dispatch(const Image&i,Push&p,float alpha,uint32_t add,uint32_t mul,
    p.meta[2]|=524288u;
   bool mayOcclude=blend<2&&p.meta[3]==255;
 #ifdef QLIE_PROFILE_WHJ6
-  // The snow pass can also use an opaque NV12 surface with screen blending.
-  mayOcclude|=blend==2&&p.meta[3]==255&&bool(i.videoSurface);
+  // The screen compositor needs opacity independently of occlusion. The
+  // full-resolution still is the moving cloud layer in the flight scene.
+  mayOcclude|=blend==2&&filter==0&&((p.meta[3]==255&&i.videoSurface)||
+             (i.width==1920&&i.height==1080&&!i.videoSurface));
 #endif
   p.colors[2]=texture(i,sources.primary,mayOcclude?&sources.opaque:nullptr);
   if(i.width==1&&i.height==1)std::memcpy(&sources.singlePixel,i.pixels.data(),4);
@@ -490,6 +492,19 @@ void GpuRaster::drawImage(const Image&i,const Affine2D&m,float alpha,uint32_t ad
                           unsigned blend,unsigned filter,[[maybe_unused]] bool clipAlpha){
  const bool unit=m.a==1&&m.d==1&&m.b==0&&m.c==0;
  float det=m.a*m.d-m.b*m.c;if(std::abs(det)<1e-12f)return;Push p;p.p[0][0]=m.a;p.p[0][1]=m.b;p.p[0][2]=m.c;p.p[0][3]=m.d;p.p[1][0]=m.x;p.p[1][1]=m.y;p.p[1][2]=det;
+ float left=0,top=0,right=i.width,bottom=i.height;
+#ifdef QLIE_PROFILE_WHJ6
+ const auto& bounds=i.alphaBounds;
+ if(clipAlpha&&bounds.sourceVersion&&bounds.sourceVersion==i.version.get()){
+  if(bounds.left==bounds.right||bounds.top==bounds.bottom)return;
+  // Retain a one-texel margin for linear sampling before transforming the
+  // bounds. The shader still addresses the original texture and origin.
+  left=bounds.left?bounds.left-1:0;
+  top=bounds.top?bounds.top-1:0;
+  right=bounds.right<i.width?bounds.right+1:i.width;
+  bottom=bounds.bottom<i.height?bounds.bottom+1:i.height;
+ }
+#endif
  if(unit){
   // Integer placements need no interpolation with either filter.
   if(std::abs(m.x)<4194304&&std::abs(m.y)<4194304&&std::trunc(m.x)==m.x&&std::trunc(m.y)==m.y)p.meta[2]|=524288u;
@@ -498,28 +513,17 @@ void GpuRaster::drawImage(const Image&i,const Affine2D&m,float alpha,uint32_t ad
   // so tile damage tracks texel changes, including at moving clip edges.
   else if(filter!=2&&std::abs(m.x)<=4096&&std::abs(m.y)<=4096){
    const double x=double(m.x)-0.5,y=double(m.y)-0.5;
-   const auto left=int(std::ceil(x)),top=int(std::ceil(y));
+   const auto originX=int(std::ceil(x)),originY=int(std::ceil(y));
    constexpr double margin=1./1024;
    if(std::abs(x-std::round(x))>margin&&std::abs(y-std::round(y))>margin){
-    p.p[1][0]=float(left);p.p[1][1]=float(top);p.meta[2]|=524288u;
-    p.rect[0]=left;p.rect[1]=top;p.rect[2]=left+int(i.width);p.rect[3]=top+int(i.height);
+    p.p[1][0]=float(originX);p.p[1][1]=float(originY);p.meta[2]|=524288u;
+    p.rect[0]=originX+int(left);p.rect[1]=originY+int(top);
+    p.rect[2]=originX+int(right);p.rect[3]=originY+int(bottom);
     impl->dispatch(i,p,alpha,add,mul,blend,filter);
     return;
    }
   }
  }
- float left=0,top=0,right=i.width,bottom=i.height;
-#ifdef QLIE_PROFILE_WHJ6
- const auto& bounds=i.alphaBounds;
- if(clipAlpha&&m.b==0.f&&m.c==0.f&&bounds.sourceVersion&&bounds.sourceVersion==i.version.get()){
-  // Keep a full texel at each edge for linear filtering. The texture origin,
-  // scale and sampler remain identical to the untrimmed draw.
-  left=bounds.left?bounds.left-1:0;
-  top=bounds.top?bounds.top-1:0;
-  right=bounds.right<i.width?bounds.right+1:i.width;
-  bottom=bounds.bottom<i.height?bounds.bottom+1:i.height;
- }
-#endif
  float xmin=INFINITY,xmax=-INFINITY,ymin=INFINITY,ymax=-INFINITY;
  for(unsigned n=0;n<4;++n){
   const float u=n&1?right:left,v=n&2?bottom:top;

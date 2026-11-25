@@ -74,9 +74,9 @@ uint blend(uint mode,uint source,uint dest,uint alpha){
  else if(mode==2u)v=w+d-w*d/256;
  else if(mode==3u||mode==6u){int f=(a>>1)+((a>>1)>>6);int x=255+shift7((s-255)*f);v=mode==3u?(x+(x>>7))*d/256:min(x,d);}
  else if(mode==4u)v=abs(w-d);else if(mode==5u)v=max(w,d);else if(mode==7u)v=w+d;else if(mode==8u)v=d-w;
- else if(mode==13u||mode==15u||mode==16u){
+ else if(mode==11u||mode==13u||mode==15u||mode==16u){
   int target;
-  if(mode==13u)target=s<128?2*s*d/255:255-2*(255-s)*(255-d)/255;
+  if(mode==11u||mode==13u)target=(mode==11u?d:s)<128?2*s*d/255:255-2*(255-s)*(255-d)/255;
   else if(mode==15u)target=clamp(d+2*s-255,0,255);
   else target=s<128?min(d,2*s):max(d,2*s-255);
   v=a==255?target:d+shift7((target-d)*((a+(a>>7))>>1));
@@ -106,9 +106,9 @@ uvec4 composite(uint mode,uvec4 s,uvec4 d){
  }
 #endif
 #ifndef DEKO_MOTION_KERNEL
- if(mode==13u){
-  // Invert the inputs and result above the hard-light midpoint.
-  uvec4 invert=uvec4(greaterThanEqual(s,uvec4(128u)))*255u;
+ if(mode==11u||mode==13u){
+  // Overlay branches on the backdrop, hard light on the source.
+  uvec4 invert=uvec4(greaterThanEqual(mode==11u?d:s,uvec4(128u)))*255u;
   uvec4 target=(2u*(s^invert)*(d^invert)/255u)^invert;
   if(a==255u)return target;
   return uvec4(ivec4(d)+((ivec4(target)-ivec4(d))*int((a+(a>>7u))>>1u)>>7));

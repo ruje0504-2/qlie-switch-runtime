@@ -43,9 +43,9 @@ uint8_t blendChannel(unsigned mode,uint8_t source,uint8_t destination,uint8_t al
   case 6:{int factor=(a>>1)+((a>>1)>>6);int v=255+shift7((s-255)*factor);value=std::min(v,d);break;}
   case 7:value=weighted+d;break;
   case 8:value=d-weighted;break;
-  case 13:case 15:case 16:{
+  case 11:case 13:case 15:case 16:{
    int target;
-   if(mode==13)target=s<128?2*s*d/255:255-2*(255-s)*(255-d)/255;
+   if(mode==11||mode==13)target=(mode==11?d:s)<128?2*s*d/255:255-2*(255-s)*(255-d)/255;
    else if(mode==15)target=std::clamp(d+2*s-255,0,255);
    else target=s<128?std::min(d,2*s):std::max(d,2*s-255);
    value=a==255?target:d+shift7((target-d)*((a+(a>>7))>>1));

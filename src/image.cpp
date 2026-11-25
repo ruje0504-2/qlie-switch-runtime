@@ -376,6 +376,25 @@ std::vector<Member> abmp(const qlie::Bytes&b){
 static Image canvas(unsigned w,unsigned h){if(!w||!h||w>16384||h>16384||uint64_t(w)*h>64*1024*1024)throw std::runtime_error("Invalid image dimensions");return {w,h,qlie::Bytes(size_t(w)*h*4)};}
 struct JError {jpeg_error_mgr base;jmp_buf jump;char message[JMSG_LENGTH_MAX];};
 static void jfail(j_common_ptr c){auto*e=reinterpret_cast<JError*>(c->err);(*c->err->format_message)(c,e->message);longjmp(e->jump,1);}
+ImageAlphaBounds findImageAlphaBounds(const Image& image){
+ const unsigned width=image.width,height=image.height;
+ auto alpha=[&](unsigned x,unsigned y){return image.pixels[(size_t(y)*width+x)*4+3];};
+ auto hasAlphaInRow=[&](unsigned y){
+  for(unsigned x=0;x<width;++x)if(alpha(x,y))return true;
+  return false;
+ };
+ unsigned top=0,bottom=height,left=0,right=width;
+ while(top<height&&!hasAlphaInRow(top))++top;
+ if(top==height)return {image.version.get(),0,0,0,0};
+ while(!hasAlphaInRow(bottom-1))--bottom;
+ auto hasAlphaInColumn=[&](unsigned x){
+  for(unsigned y=top;y<bottom;++y)if(alpha(x,y))return true;
+  return false;
+ };
+ while(!hasAlphaInColumn(left))++left;
+ while(!hasAlphaInColumn(right-1))--right;
+ return {image.version.get(),left,top,right,bottom};
+}
 Image image(const qlie::Bytes&b){if(b.size()<4)throw std::runtime_error("Short image");if(!std::memcmp(b.data(),"DPNG",4)){Cursor r{b,4};r.n(4);unsigned count=r.n(4),w=r.n(4),h=r.n(4);Image out=canvas(w,h);if(count>100000)throw std::runtime_error("Invalid DPNG tile count");for(unsigned i=0;i<count;i++){unsigned x=r.n(4),y=r.n(4),tw=r.n(4),th=r.n(4),size=r.n(4);r.skip(8);auto data=r.data(size);if(!size)continue;Image tile=image(data);if(tile.width!=tw||tile.height!=th||x>out.width||tw>out.width-x||y>out.height||th>out.height-y)throw std::runtime_error("DPNG tile bounds mismatch");for(unsigned yy=0;yy<th;yy++)std::memcpy(out.pixels.data()+(size_t(y+yy)*w+x)*4,tile.pixels.data()+size_t(yy)*tw*4,size_t(tw)*4);}if(r.p!=b.size())throw std::runtime_error("DPNG trailing bytes");return out;}
  if(b.size()>=8&&!png_sig_cmp(b.data(),0,8)){png_image pi{};pi.version=PNG_IMAGE_VERSION;if(!png_image_begin_read_from_memory(&pi,b.data(),b.size()))throw std::runtime_error(pi.message);Image out=canvas(pi.width,pi.height);pi.format=PNG_FORMAT_BGRA;if(!png_image_finish_read(&pi,nullptr,out.pixels.data(),0,nullptr)){std::string error=pi.message;png_image_free(&pi);throw std::runtime_error(error);}png_image_free(&pi);return out;}
  if(b[0]==255&&b[1]==216){jpeg_decompress_struct c{};JError e{};c.err=jpeg_std_error(&e.base);e.base.error_exit=jfail;if(setjmp(e.jump)){jpeg_destroy_decompress(&c);throw std::runtime_error(e.message);}jpeg_create_decompress(&c);jpeg_mem_src(&c,b.data(),b.size());jpeg_read_header(&c,TRUE);c.out_color_space=JCS_RGB;jpeg_start_decompress(&c);Image out=canvas(c.output_width,c.output_height);qlie::Bytes row(size_t(c.output_width)*3);while(c.output_scanline<c.output_height){unsigned y=c.output_scanline;auto*rp=row.data();jpeg_read_scanlines(&c,&rp,1);for(unsigned x=0;x<out.width;x++){auto*dst=out.pixels.data()+(size_t(y)*out.width+x)*4;dst[0]=row[3*x+2];dst[1]=row[3*x+1];dst[2]=row[3*x];dst[3]=255;}}jpeg_finish_decompress(&c);jpeg_destroy_decompress(&c);return out;}

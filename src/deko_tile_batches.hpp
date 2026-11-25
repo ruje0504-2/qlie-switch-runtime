@@ -28,7 +28,7 @@ inline bool opaqueBaseDraw(const DrawData& draw,const DrawSources& sources){
 
 #ifdef QLIE_PROFILE_WHJ6
 struct Whj6SnowDraw {
- enum Part : uint8_t { None,Panorama,Video,Flash };
+ enum Part : uint8_t { None,Panorama,Video,Fog,Flash };
  Part part=None;
  AxisBounds bounds{};
 
@@ -39,7 +39,9 @@ struct Whj6SnowDraw {
      p.p[0][1]!=0.f||p.p[0][2]!=0.f)return {};
   const unsigned blend=(p.meta[2]>>8)&255u;
   if(blend==7&&coversCanvasWithSolid(p))return {Flash,{}};
-  if(!sources.opaque||p.meta[3]!=255||p.colors[0]!=0||p.colors[1]!=0xffffff)return {};
+  if(!sources.opaque||p.colors[0]!=0||p.colors[1]!=0xffffff)return {};
+  if(blend==2&&p.meta[0]==1920&&p.meta[1]==1080)return {Fog,axisBounds(p)};
+  if(p.meta[3]!=255)return {};
   if(blend==0)return {Panorama,axisBounds(p)};
   if(blend==2&&p.meta[0]==1280&&p.meta[1]==720)return {Video,axisBounds(p)};
   return {};
@@ -64,6 +66,12 @@ private:
 #ifdef QLIE_PROFILE_WHJ6
  std::vector<Whj6SnowDraw> snowDraws;
  bool snowTile(const uint32_t* ids,unsigned layers,uint32_t control,unsigned x,unsigned y)const{
+  if(layers==1){
+   // The static backdrop is already in the prefix buffer. A tile touched
+   // by the moving eagle or a transition still uses the ordered renderer.
+   const auto& fog=snowDraws[ids[0]];
+   return control==0x80000000u&&fog.part==Whj6SnowDraw::Fog&&fog.bounds.covers(x,y,Tile,Tile);
+  }
   if(control||layers>3)return false;
   const auto& base=snowDraws[ids[0]];
   const auto& snow=snowDraws[ids[1]];
@@ -87,7 +95,7 @@ public:
    hasBase|=drawKinds[i]==Base;hasGeneral|=drawKinds[i]==General;
 #ifdef QLIE_PROFILE_WHJ6
    snowDraws[i]=Whj6SnowDraw::classify(draw,frame.sources[i]);
-   hasSnow|=snowDraws[i].part==Whj6SnowDraw::Video;
+   hasSnow|=snowDraws[i].part==Whj6SnowDraw::Video||snowDraws[i].part==Whj6SnowDraw::Fog;
 #endif
   }
   offsetWords.fill(0);
@@ -102,7 +110,7 @@ public:
    auto first=scene.workIndices.begin()+h[1];
    Kind kind=Motion;
 #ifdef QLIE_PROFILE_WHJ6
-   if(hasSnow&&h[2]>=2&&snowTile(scene.workIndices.data()+h[1],h[2],h[3],x,y))kind=Snow;
+   if(hasSnow&&h[2]&&snowTile(scene.workIndices.data()+h[1],h[2],h[3],x,y))kind=Snow;
    else
 #endif
    if(h[2]==1&&drawKinds[*first]==Base&&frame.covered[tile]&&frame.tiles[tile].size()==1)kind=Base;

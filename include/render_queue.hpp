@@ -8,7 +8,7 @@
 namespace whj2 {
 Affine2D affine(const Affine2D&parent,const Affine2D&local);
 Affine2D imagePlacement(float x,float y,float sx,float sy,float angle,float anchorX,float anchorY,unsigned width,unsigned height);
-constexpr bool supportsPixelBlend(unsigned mode){return mode<=8||mode==13||mode==15||mode==16;}
+constexpr bool supportsPixelBlend(unsigned mode){return mode<=8||mode==11||mode==13||mode==15||mode==16;}
 uint8_t blendChannel(unsigned mode,uint8_t source,uint8_t destination,uint8_t alpha);
 uint32_t colorAdd(uint32_t,uint32_t);
 uint32_t colorMultiply(uint32_t,uint32_t);

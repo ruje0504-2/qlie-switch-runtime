@@ -9,6 +9,20 @@ namespace whj6::profile {
 inline constexpr unsigned sceneReadAheadBytes=52u*1024*1024;
 inline constexpr std::array<unsigned,2> sceneSize{1920,1080};
 inline constexpr int sceneVideoMaxHeight=2700;
+inline constexpr int automaticSavePage=15,automaticSaveCount=8;
+inline constexpr char captionFontFile[]="system/font/tahoma.ttf";
+inline constexpr unsigned captionFontSlot=5;
+struct SettingsActor{const char* name;const char* portrait;const char* sample;const char* firstPage;};
+inline constexpr SettingsActor settingsCast[]={
+ {"姫","01_雪女","him0001","scenario/本編/y01-01.s:6313"},
+ {"直人","03_兄弟子","nao0001","scenario/本編/y01-01.s:642"},
+ {"百錬","04_師匠","hya0001","scenario/本編/y01-01.s:583"},
+ {"ふぶき","05_ふぶき","fub0001","scenario/本編/y01-01.s:4468"},
+ {"荒鷹","06_荒鷹","tak0001","scenario/本編/y03-03.s:1316"},
+ {"冬将軍","07_冬将軍","sho0001","scenario/本編/y11-01.s:5814"},
+ {"先生","08_その他男性","mo10001",nullptr},
+ {"隣の席の女子","09_その他女性","gir0001",nullptr}
+};
 // The cursor animation's embedded motion name includes a leading space.
 inline constexpr char autoCursorMotion[]=" Auto";
 inline constexpr int settingsPromptShift=-75,settingsTextShift=-58;
@@ -31,9 +45,9 @@ inline const whj2::StoryProfile story{
  {"sentence","format","message","name","face","bg01","bg02",
   "chara01","chara02","chara03","chara04","chara05","chara06","chara07","chara08","chara09","chara10",
   "music01","se01","se02","se03","sebgv","movie",
-  "ef01","ef02","ef03","ef04","effect","camera","textani"},
+  "ef01","ef02","ef03","ef04","effect","camera","textani","autosave","charaon"},
  "",{},"avg/preselect.s",true,"scenario/name/name.s","avg2/header.s","scenario/ed_movie.s",64,true,
- "",true,{"autosave","charaon"}
+ "",true
 };
 inline void applySentenceTiming(whj2::Event&){}
 inline bool emptyAnimationSlot(std::string_view path,unsigned slot,size_t slots){

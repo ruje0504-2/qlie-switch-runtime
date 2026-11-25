@@ -4,7 +4,7 @@
 struct KFont;
 namespace whj2 {
 std::string messageDisplayName(const std::string&);
-struct MessageStyle {unsigned width=920,height=300,fontWidth=26,fontHeight=26;uint32_t color=0xffffff;};
+struct MessageStyle {unsigned width=920,height=300,fontWidth=26,fontHeight=26;uint32_t color=0xffffff;unsigned fontSlot=0;};
 class MessageText {
  struct PositionedGlyph {uint32_t codepoint;unsigned x,y,width,height;bool bitmap;size_t source;};
  std::vector<PositionedGlyph> layout(const MessageStyle&,size_t count,std::vector<unsigned>* rowStarts=nullptr)const;

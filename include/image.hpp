@@ -38,6 +38,7 @@ struct ImagePatches {uint64_t sourceVersion=0;std::vector<ImagePatch> regions;};
 struct Member {std::string type,name;qlie::Bytes data;size_t dataOffset=0,storedSize=0;};
 std::vector<Member> abmp(const qlie::Bytes&);
 Image image(const qlie::Bytes&);
+ImageAlphaBounds findImageAlphaBounds(const Image&);
 void applySepia(qlie::Bytes&);
 Image filterImage(const Image&,const std::string&);
 }

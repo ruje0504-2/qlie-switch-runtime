@@ -18,7 +18,7 @@ class AssetReadAhead;
 struct SceneSoundEvent {bool stop=false,loop=false;unsigned channel=0,category=2;float gain=1;std::string source;qlie::Bytes bytes;};
 struct SpeakerStyle {int x=200,y=570;unsigned size=26,color=0xffffff;};
 class SceneImages {
- struct Tween {float from=0,to=0,power=100;double elapsed=0,duration=0;unsigned mode=1;};
+ struct Tween {float from=0,to=0,power=100;double elapsed=0,duration=0;unsigned mode=1;bool loop=false;};
  struct FilteredSlot {std::shared_ptr<const Image> source,result;std::string name;};
  struct Layer {mutable std::array<FilteredSlot,4> filtered;std::map<unsigned,std::shared_ptr<const Image>> uiSlots;std::map<std::string,Tween> tweens;std::map<std::string,std::string> params;std::string prefix,path;std::shared_ptr<const Image> pixels,scriptReplacement;std::shared_ptr<Composite> composite,extension,replacementVideo;std::array<float,16> external{};uint16_t externalMask=0;double milliseconds=0,audioMilliseconds=-1,waveMilliseconds=-1,extensionMilliseconds=0;bool audioStopPending=false;};
  unsigned windowAlpha=255;

@@ -2,6 +2,9 @@
 #pragma once
 #include "render_queue.hpp"
 #include "settings.hpp"
+#ifdef QLIE_PROFILE_WHJ6
+#include "profiles/whj6.hpp"
+#endif
 #include <map>
 #include <array>
 #include <functional>
@@ -33,7 +36,7 @@ class GameMenu {
 #endif
 public:
  enum Panel {None,Save,Load,History,Settings};
- enum Action {Nothing,Close,Slot,Quit,Title,Yes,No,SettingsChanged,ResetSettings,SceneReturn,ReplayVoice,TestVolume,DeleteSlot,PageChange,JumpHistory,SectionSkip,LoadChoiceBackup,SwitchSavePanel};
+ enum Action {Nothing,Close,Slot,Quit,Title,Yes,No,SettingsChanged,ResetSettings,SceneReturn,ReplayVoice,TestVolume,DeleteSlot,PageChange,JumpHistory,SectionSkip,LoadChoiceBackup,SwitchSavePanel,TestCharacterVoice};
  Panel panel=None;int focus=0,page=0,requestedPage=0,historyOffset=0;bool asking=false;
  Action requested=Nothing;
  bool settingsDirty=false,allowSceneReturn=false;
@@ -44,6 +47,12 @@ public:
 #ifdef QLIE_PROFILE_WHJ6
  static constexpr int ChoiceBackupFocus=16;
  bool choiceBackupAvailable=false,allowSavePanel=false;
+ unsigned characterPortraits=0,characterVoices=0,testVoiceActor=0;
+ bool automaticSavePage()const{return panel==Load&&page==whj6::profile::automaticSavePage;}
+ int savePageCount()const{return panel==Load?whj6::profile::automaticSavePage+1:whj6::profile::automaticSavePage;}
+ Action testFocusedCharacter();
+#else
+ int savePageCount()const{return 15;}
 #endif
  void setHistorySize(std::size_t entries);
  unsigned testVolumeCategory=0;

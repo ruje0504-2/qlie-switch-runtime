@@ -97,21 +97,20 @@ std::shared_ptr<const Image> sceneBitmap(Image pixels){
  pixels.version.publish();
  return std::make_shared<const Image>(std::move(pixels));
 }
+std::shared_ptr<const Image> decodeSceneBitmap(const qlie::Bytes&data,[[maybe_unused]] bool titleArtwork=false){
+ auto pixels=image(data);
 #ifdef QLIE_PROFILE_WHJ6
-std::shared_ptr<const Image> titleArtwork(Image pixels){
- pixels.version.publish();
- ImageAlphaBounds bounds{pixels.version.get(),pixels.width,pixels.height,0,0};
- for(unsigned y=0;y<pixels.height;++y)for(unsigned x=0;x<pixels.width;++x){
-  if(!pixels.pixels[(size_t(y)*pixels.width+x)*4+3])continue;
-  bounds.left=std::min(bounds.left,x);
-  bounds.top=std::min(bounds.top,y);
-  bounds.right=std::max(bounds.right,x+1);
-  bounds.bottom=std::max(bounds.bottom,y+1);
+ // PNG and DPNG can carry alpha. Scan only static large bitmaps to keep
+ // movie frames and the many small animation members off this path.
+ if(titleArtwork||(size_t(pixels.width)*pixels.height>=512*300&&
+    (data[0]==0x89||!std::memcmp(data.data(),"DPNG",4)))){
+  pixels.version.publish();
+  pixels.alphaBounds=findImageAlphaBounds(pixels);
+  return std::make_shared<const Image>(std::move(pixels));
  }
- if(bounds.right>bounds.left&&bounds.bottom>bounds.top) pixels.alphaBounds=bounds;
- return std::make_shared<const Image>(std::move(pixels));
-}
 #endif
+ return sceneBitmap(std::move(pixels));
+}
 bool sceneCompositePath(const std::string&path){
  const auto key=qlie::canonical(path);
  const auto dot=key.find_last_of('.');
@@ -136,6 +135,7 @@ float imageAnchor(std::string_view name,std::string_view farEdge){
 unsigned imageBlend(const std::string&mode){
  constexpr std::array<const char*,9> names{{"pass","normal","screen","multiple","difference","lighten","darken","add","sub"}};
  if(mode=="lineardodge")return 7;
+ if(mode=="overlay")return 11;
  if(mode=="hardlight")return 13;
  if(mode=="linearlight")return 15;
  if(mode=="pinlight")return 16;
@@ -143,6 +143,7 @@ unsigned imageBlend(const std::string&mode){
  if(found==names.end()){QLIE_LOG_LINE(<<"PENDING-IMAGE-BLEND "<<mode<<'\n');return 0;}
  return unsigned(found-names.begin());
 }
+constexpr unsigned elasticTween=15,loopingTweenFlag=256;
 struct JpegAnimation {
  qlie::Bytes data;
  std::vector<std::pair<size_t,size_t>> frames;
@@ -515,10 +516,7 @@ struct Composite {
     // bitmap compressed until a caller draws the card without a replacement.
     else if(path==eyecatchPath&&members.empty())eyecatchFallback=std::move(m.data);
     else if(film&&path==eyecatchFilmPath&&m.name=="film")e.image=film->decode(std::move(m.data));
-#ifdef QLIE_PROFILE_WHJ6
-    else if(name=="script/title/frame.b"||name=="script/title/back01.b#Logo2")e.image=titleArtwork(image(m.data));
-#endif
-    else e.image=sceneBitmap(image(m.data));
+    else e.image=decodeSceneBitmap(m.data,name=="script/title/frame.b"||name=="script/title/back01.b#Logo2");
    }
    hasVideo=hasVideo||bool(e.video)||(e.nested&&e.nested->hasVideo);
    members.push_back(std::move(e));
@@ -885,7 +883,7 @@ struct Composite {
 };
 std::shared_ptr<const Image> SceneImages::loadBitmap(const std::string&path){
  if(readAhead)if(auto ready=readAhead->take(qlie::canonical(path)))return std::move(ready->bitmap);
- return sceneBitmap(image(assets.read(path)));
+ return decodeSceneBitmap(assets.read(path));
 }
 std::shared_ptr<Composite> SceneImages::sceneComposite(const std::string&path){
  if(const auto cached=composites.find(path);cached!=composites.end()){
@@ -941,7 +939,7 @@ bool SceneImages::warmFile(const std::string&path,bool required,bool prepareVide
    if(prepareVideo&&!ready.composite->members.empty())
     if(const auto& jpeg=ready.composite->members.front().jpegAnimation;jpeg&&!jpeg->loop)
      ready.bytes+=jpeg->at(0)->pixels.size();
-  }else{ready.bitmap=sceneBitmap(image(bytes));ready.bytes=ready.bitmap->pixels.size();}
+  }else{ready.bitmap=decodeSceneBitmap(bytes);ready.bytes=ready.bitmap->pixels.size();}
   return ready;
  },required);
  return true;
@@ -1014,7 +1012,7 @@ std::string SceneImages::BitmapFilter::key()const{
 void SceneImages::warmBitmapFilter(const BitmapFilter&gradient,bool required){
  readAhead->request(gradient.key(),[&sourceAssets=assets,path=gradient.path,name=gradient.name,source=gradient.source]{
   WarmAsset ready;
-  ready.bitmap=source?source:sceneBitmap(image(sourceAssets.read(path)));
+  ready.bitmap=source?source:decodeSceneBitmap(sourceAssets.read(path));
   ready.filteredBitmap=sceneBitmap(filterImage(*ready.bitmap,name));
   ready.bytes=ready.filteredBitmap->pixels.size()+(source?0:ready.bitmap->pixels.size());
   return ready;
@@ -1448,7 +1446,12 @@ float SceneImages::value(const Layer&layer,const std::string&key,float fallback)
  return numeric(param->second);}
  const auto&t=tween->second;double q=t.duration>0?std::clamp(t.elapsed/t.duration,0.,1.):1;
  if(q<1){
-  const auto ease=animationProgress(t.mode,double(t.power)/100,q);
+  const double power=double(t.power)/100;
+  // A decaying oscillation approaches the target after the initial overshoot.
+  const auto ease=t.mode==elasticTween
+   ? std::optional<double>(1-std::pow(2.,-10*q)*std::cos(20.94395102393195*q)*power
+                            -(1-q)*(1-power))
+   : animationProgress(t.mode,power,q);
   if(!ease)throw std::runtime_error("Unsupported image tween mode");
   q=*ease;
  }
@@ -1464,14 +1467,17 @@ void SceneImages::transition(Layer&layer,const Layer&before,bool position,bool c
   else if(m->second=="outinquart")mode=7;
   else if(m->second=="inoutquart")mode=8;
   else if(m->second=="outback")mode=17;
+  else if(m->second=="outelastic")mode=elasticTween;
   else {QLIE_LOG_LINE(<<"PENDING-IMAGE-TWEEN mode="<<m->second<<"\n");mode=0;}
  }
  float power=layer.params.count("movepow")?numeric(layer.params.at("movepow")):100;
- auto add=[&](const std::string&key,float fallback){float from=value(before,key,fallback);auto found=layer.params.find(key);float to=found==layer.params.end()?fallback:numeric(found->second);
+ const auto moveLoop=layer.params.find("moveloop");
+ const bool loop=moveLoop!=layer.params.end()&&moveLoop->second=="true";
+ auto add=[&](const std::string&key,float fallback,bool repeat=false){float from=value(before,key,fallback);auto found=layer.params.find(key);float to=found==layer.params.end()?fallback:numeric(found->second);
   if(key=="x"||key=="y"||key=="z"){auto axial=layer.params.find(key=="x"?"ax":key=="y"?"ay":"az");if(axial!=layer.params.end())to+=numeric(axial->second);}
-  if(duration>0&&from!=to)layer.tweens[key]={from,to,power,0,duration,mode};else {layer.tweens.erase(key);if(key=="x"||key=="y"||key=="z")layer.tweens[key]={to,to,power,0,0,mode};}
+  if(duration>0&&from!=to)layer.tweens[key]={from,to,power,0,duration,mode,repeat};else {layer.tweens.erase(key);if(key=="x"||key=="y"||key=="z")layer.tweens[key]={to,to,power,0,0,mode};}
  };
- if(position){add("x",640);add("y",360);add("z",0);add("scalex",100);add("scaley",100);add("scalez",100);add("rotx",0);add("roty",0);add("rotz",0);add("pri",0);}
+ if(position){add("x",640,loop);add("y",360,loop);add("z",0,loop);add("scalex",100,loop);add("scaley",100,loop);add("scalez",100,loop);add("rotx",0,loop);add("roty",0,loop);add("rotz",0,loop);add("pri",0,loop);}
  if(color){add("alpha",255);add("addcolor",0);add("mulcolor",0xffffff);}
 }
 void SceneImages::update(double ms){for(auto&entry:layers){auto&layer=entry.second;
@@ -1482,7 +1488,9 @@ void SceneImages::update(double ms){for(auto&entry:layers){auto&layer=entry.seco
  layer.milliseconds+=ms*std::max(0.,speed)/100;
  if(layer.waveMilliseconds>=0)layer.waveMilliseconds+=ms;
  if(layer.extension)layer.extensionMilliseconds+=ms*std::max(0.,speed)/100;
- for(auto&t:layer.tweens)t.second.elapsed=std::min(t.second.duration,t.second.elapsed+ms);
+ for(auto&entry:layer.tweens){auto&t=entry.second;
+  t.elapsed=t.loop&&t.duration>0?std::fmod(t.elapsed+ms,t.duration):std::min(t.duration,t.elapsed+ms);
+ }
  if(layer.params.count("@hiding")&&layer.params.at("@hiding")=="true"&&layer.composite){auto*motion=findMotion(layer.composite->definition,"*Disable");if(motion){auto samples=sampleMotion(*motion,layer.milliseconds);if(std::none_of(samples.begin(),samples.end(),[](auto&sample){return sample.kind!=0;})){layer.params["show"]="false";layer.params.erase("@hiding");}}}
  }
  // Keep loaded animation data available, but inactive composites no longer
@@ -1744,7 +1752,7 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
   l.params[key]=v;
   continue;
  }
- if(message&&(key=="oncefontsizew"||key=="oncefontsizeh"||key=="oncefontcolor")){
+ if(message&&(key=="oncefontsizew"||key=="oncefontsizeh"||key=="oncefontcolor"||key=="oncefontno")){
   l.params["@"+key]=v;
   continue;
  }
@@ -1754,6 +1762,7 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
   if(key=="movetime"||(key=="oncetime"&&moveTime.empty()))moveTime=v;
   continue;
  }
+ if(key=="moveloop"){l.params[key]=v;continue;}
  if(key.size()==6&&key.rfind("value",0)==0&&key.back()>='0'&&key.back()<='9'){
   const unsigned index=key.back()-'0';
   l.params["@exv"+std::to_string(index)]=v;
@@ -1928,7 +1937,7 @@ void SceneImages::beginPage(){
  auto face=layers.find("face");
  if(face!=layers.end())face->second.params["@face-active"]="false";
  auto message=layers.find("message");
- if(message!=layers.end())for(auto key:{"@oncefontsizew","@oncefontsizeh","@oncefontcolor"})
+ if(message!=layers.end())for(auto key:{"@oncefontsizew","@oncefontsizeh","@oncefontcolor","@oncefontno"})
   message->second.params.erase(key);
 }
 std::string SceneImages::mappedFace(std::string file)const{
@@ -2041,6 +2050,9 @@ MessageStyle SceneImages::messageStyle()const{MessageStyle style;auto it=layers.
  property("fontsizew",style.fontWidth);property("fontsizeh",style.fontHeight);
  property("fontcolor",style.color);property("@oncefontsizew",style.fontWidth);
  property("@oncefontsizeh",style.fontHeight);property("@oncefontcolor",style.color);
+#ifdef QLIE_PROFILE_WHJ6
+ property("fontno",style.fontSlot);property("@oncefontno",style.fontSlot);
+#endif
  return style;
 }
 bool SceneImages::messageVisible()const{auto it=layers.find("message");return it!=layers.end()&&it->second.params.at("show")=="true";}
@@ -2290,7 +2302,7 @@ qlie::Bytes SceneImages::save()const{StateWriter w;
  w.n(uint64_t(l.milliseconds*1000));
  w.n(l.audioMilliseconds<0?0:uint64_t(l.audioMilliseconds*1000)+1);
  w.n(l.audioStopPending);
- w.n(l.tweens.size());for(auto&t:l.tweens){w.str(t.first);w.f(t.second.from);w.f(t.second.to);w.f(t.second.power);w.n(uint64_t(t.second.elapsed*1000));w.n(uint64_t(t.second.duration*1000));w.n(t.second.mode);}
+ w.n(l.tweens.size());for(auto&t:l.tweens){w.str(t.first);w.f(t.second.from);w.f(t.second.to);w.f(t.second.power);w.n(uint64_t(t.second.elapsed*1000));w.n(uint64_t(t.second.duration*1000));w.n(t.second.mode|(t.second.loop?loopingTweenFlag:0));}
  const bool activeExtension=l.extension&&l.params.at("extmotion")!="def";
  const auto replacement=l.params.find("@replacement");
  const bool captured=game_profile::captureReplacements&&l.scriptReplacement&&
@@ -2348,7 +2360,7 @@ void SceneImages::restore(const qlie::Bytes&b){StateReader r{b};
  l.milliseconds=r.n()/1000.;
  if(v4){auto cursor=r.n();l.audioMilliseconds=cursor?(cursor-1)/1000.:-1;}else l.audioMilliseconds=l.milliseconds;
  if(v5)l.audioStopPending=r.n()!=0;
- if(v6){auto count=r.n();if(count>16)throw std::runtime_error("Image tween count");while(count--){auto key=r.str();Tween t;t.from=r.f();t.to=r.f();t.power=r.f();t.elapsed=r.n()/1000.;t.duration=r.n()/1000.;t.mode=unsigned(r.n());l.tweens[key]=t;}}
+ if(v6){auto count=r.n();if(count>16)throw std::runtime_error("Image tween count");while(count--){auto key=r.str();Tween t;t.from=r.f();t.to=r.f();t.power=r.f();t.elapsed=r.n()/1000.;t.duration=r.n()/1000.;const auto mode=unsigned(r.n());t.loop=(mode&loopingTweenFlag)!=0;t.mode=mode&~loopingTweenFlag;l.tweens[key]=t;}}
  auto n=r.n();
  if(n>256)throw std::runtime_error("Image property count");
  bool savedExtension=false;
@@ -2362,6 +2374,12 @@ void SceneImages::restore(const qlie::Bytes&b){StateReader r{b};
  else if(k=="@extension-clock")l.extensionMilliseconds=std::stoull(v)/1000.;
  else l.params.emplace(std::move(k),std::move(v));
  }
+#ifdef QLIE_PROFILE_WHJ6
+ // Earlier builds stored the unsupported elastic curve as a step tween.
+ const auto movement=l.params.find("move");
+ if(movement!=l.params.end()&&movement->second=="outelastic")
+  for(auto& entry:l.tweens)if(entry.second.mode==0)entry.second.mode=elasticTween;
+#endif
  for(unsigned i=0;i<l.external.size();++i){
   const auto param=l.params.find("@exv"+std::to_string(i));
   if(param==l.params.end())continue;

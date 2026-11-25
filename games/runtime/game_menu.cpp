@@ -34,16 +34,20 @@ constexpr SettingToggle toggles[]={
 #ifdef QLIE_PROFILE_WHJ6
 constexpr float testButtonX=whj6::ui::to720(1727);
 constexpr int toggleX(int i,int column){return (i==0?1335:585)+240*column;}
+constexpr int actorX(unsigned i){return 1015+int(i%4)*185;}
+constexpr int actorY(unsigned i){return 560+int(i/4)*180;}
 #else
 constexpr float testButtonX=1070;
 #endif
 constexpr int SettingsFocusCount=22;
+#ifndef QLIE_PROFILE_WHJ6
 struct CharacterVoiceButton{float x,y;const char* label;};
 constexpr CharacterVoiceButton voiceButtons[]={
  {790,540,"Voice_蓮華.png"},{930,540,"Voice_香恋.png"},{1080,540,"Voice_もよか.png"},
  {790,570,"Voice_はる.png"},{930,570,"Voice_公暁.png"},{1080,570,"Voice_舞斗.png"},
  {790,600,nullptr}
 };
+#endif
 constexpr int HistoryVisibleRows=4, HistoryBrowserLimit=100;
 constexpr int HistoryBarX=1200,HistoryBarY=95;
 constexpr int HistoryTrackWidth=34,HistoryTrackHeight=528;
@@ -212,6 +216,11 @@ void GameMenu::move(int dx,int dy){if(panelClosing||panelTransitioning())return;
    if(focus==ChoiceBackupFocus){if(dx||dy)focus=dy<0?3:0;return;}
    if((dy<0&&focus==0)||(dy>0&&focus==3)){focus=ChoiceBackupFocus;return;}
   }
+  if(automaticSavePage()){
+   if(dx)focus=(focus+4)%8;
+   if(dy)focus=(focus+dy+8)%8;
+   return;
+  }
 #endif
   if(dx){int row=focus%4,column=(focus%8)/4*2+(focus>=8);for(int n=0;n<4;n++){column=(column+(dx<0?-1:1)+4)%4;int slot=column/2*4+row;focus=slot+(column%2)*8;if(focus<8||populatedSlots[slot])break;}}
   if(dy){int deletion=focus>=8?8:0;for(int n=0;n<8;n++){focus=(focus%8+dy+8)%8+deletion;if(!deletion||populatedSlots[focus%8])break;}}
@@ -222,7 +231,27 @@ void GameMenu::move(int dx,int dy){if(panelClosing||panelTransitioning())return;
   if(dy>0){if(focus>0)--focus;else historyOffset=std::max(0,historyOffset-1);}
   historyVoiceRow=focus;
  }
- else if(panel==Settings){const int count=SettingsFocusCount+int(settings.voiceActorCount());if(dy){focus=(focus+dy+count)%count;if(focus==16&&!allowSceneReturn)focus=(focus+dy+count)%count;}else if(dx&&focus>=3&&focus<=11){int index=focus-3;setPosition(settings,index,sliderPosition(settings,index)+dx);settingsDirty=true;}else if(dx&&(focus>=13&&focus<=15)){const char*key=toggles[focus-13].key;settings.set(key,1-settings.get(key));settingsDirty=true;}else if(dx){focus=(focus+dx+count)%count;if(focus==16&&!allowSceneReturn)focus=(focus+dx+count)%count;}}
+ else if(panel==Settings){
+  const int count=SettingsFocusCount+int(settings.voiceActorCount());
+  auto changeFocus=[&](int direction){
+   do{focus=(focus+direction+count)%count;}
+   while((focus==16&&!allowSceneReturn)
+#ifdef QLIE_PROFILE_WHJ6
+    ||(focus>=SettingsFocusCount&&!(characterVoices&(1u<<(focus-SettingsFocusCount))))
+#endif
+   );
+  };
+  if(dy)changeFocus(dy);
+  else if(dx&&focus>=3&&focus<=11){int index=focus-3;setPosition(settings,index,sliderPosition(settings,index)+dx);settingsDirty=true;}
+  else if(dx&&focus>=13&&focus<=15){const char*key=toggles[focus-13].key;settings.set(key,1-settings.get(key));settingsDirty=true;}
+#ifdef QLIE_PROFILE_WHJ6
+  else if(dx&&focus>=SettingsFocusCount){
+   const unsigned actor=unsigned(focus-SettingsFocusCount);
+   settings.setCharacterVoiceLevel(actor,settings.characterVoiceLevel(actor)+16*dx);settingsDirty=true;
+  }
+#endif
+  else if(dx)changeFocus(dx);
+ }
 }
 GameMenu::Action GameMenu::confirm(){
  if(panelClosing||panelTransitioning())return Nothing;
@@ -244,11 +273,23 @@ GameMenu::Action GameMenu::confirm(){
  if(focus==16&&allowSceneReturn)return SceneReturn;
  if(focus>=17&&focus<SettingsFocusCount){testVolumeCategory=unsigned(focus-17);return TestVolume;}
  if(focus>=SettingsFocusCount&&unsigned(focus-SettingsFocusCount)<settings.voiceActorCount()){
+#ifdef QLIE_PROFILE_WHJ6
+  if(!(characterVoices&(1u<<(focus-SettingsFocusCount))))return Nothing;
+#endif
   settings.toggleCharacterVoice(unsigned(focus-SettingsFocusCount));settingsDirty=true;return SettingsChanged;
  }
  if(focus>=13&&focus<=15){const char*key=toggles[focus-13].key;settings.set(key,1-settings.get(key));settingsDirty=true;return SettingsChanged;}
  return Nothing;
 }
+#ifdef QLIE_PROFILE_WHJ6
+GameMenu::Action GameMenu::testFocusedCharacter(){
+ if(panel!=Settings||focus<SettingsFocusCount||asking||panelClosing||panelTransitioning())return Nothing;
+ const unsigned i=unsigned(focus-SettingsFocusCount);
+ if(i>=settings.voiceActorCount()||!(characterVoices&(1u<<i)))return Nothing;
+ testVoiceActor=i;
+ return TestCharacterVoice;
+}
+#endif
 GameMenu::Action GameMenu::jumpHistory()const{
  return panel==History&&!asking&&!panelClosing&&focus<historyRows&&historyJumps[focus]?JumpHistory:Nothing;
 }
@@ -278,12 +319,28 @@ bool GameMenu::beginDrag(float x,float y){
   return false;
  }
  if(panel!=Settings||volumeTestAt(x,y)>=0)return false;
+#ifdef QLIE_PROFILE_WHJ6
+ for(unsigned i=0;i<settings.voiceActorCount();++i){
+  if(!(characterVoices&(1u<<i))||settings.characterVoiceMuted(i))continue;
+  if(whj6::ui::contains(x,y,actorX(i)+140,actorY(i),35,126)){
+   draggedSlider=9+int(i);focus=SettingsFocusCount+int(i);drag(rawX,rawY);return true;
+  }
+ }
+#endif
  for(int i=0;i<9;i++){const auto&s=sliders[i];if(std::abs(y-s.y)<=18&&x>=s.x-12&&x<=s.x+s.width+12){draggedSlider=i;focus=i+3;drag(rawX,rawY);return true;}}return false;}
 bool GameMenu::drag(float x,float y){
  if(panelClosing||panelTransitioning())return false;
  panelPoint(x,y);
  if(panel==History){if(historyDragRow==-2){historyOffset=historyOffsetAt(y,historyMaxOffset);return true;}if(historyDragRow>=0){historyTextOffset[historyDragRow]=std::clamp(historyDragOffset+int(std::round((historyDragY-y)/26)),0,historyTextMax[historyDragRow]);return true;}return false;}
  if(draggedSlider<0||panel!=Settings||asking)return false;
+#ifdef QLIE_PROFILE_WHJ6
+ if(draggedSlider>=9){
+  const unsigned actor=unsigned(draggedSlider-9);
+  const int before=settings.characterVoiceLevel(actor);
+  settings.setCharacterVoiceLevel(actor,int(std::lround((actorY(actor)+115-y*1.5f)*256/103)));
+  settingsDirty|=before!=settings.characterVoiceLevel(actor);return true;
+ }
+#endif
  const auto&s=sliders[draggedSlider];const auto* key=sliderKeys[draggedSlider];int before=settings.get(key);setPosition(settings,draggedSlider,int(std::round((x-s.x)*20/s.width)));settingsDirty|=before!=settings.get(key);return true;}
 GameMenu::Action GameMenu::tap(float x,float y){
  if(panelClosing||panelTransitioning())return Nothing;
@@ -296,16 +353,26 @@ GameMenu::Action GameMenu::tap(float x,float y){
   return Nothing;
  }
  if(panel==Load&&choiceBackupAvailable&&contains(x,y,30,1012,351,46)){focus=ChoiceBackupFocus;return LoadChoiceBackup;}
+ if(panel==Load&&contains(x,y,400,1012,285,46)){
+  requestedPage=automaticSavePage()?0:whj6::profile::automaticSavePage;return PageChange;
+ }
 #else
  if(asking){if(std::abs(y-325)<=20){if(std::abs(x-550)<=60){focus=0;return Yes;}if(std::abs(x-730)<=60){focus=1;return No;}}return Nothing;}
 #endif
  if(panel==Settings){
   int test=volumeTestAt(x,y);if(test>=0){focus=17+test;return confirm();}
   for(unsigned i=0;i<settings.voiceActorCount();++i){
+#ifdef QLIE_PROFILE_WHJ6
+   if(!(characterVoices&(1u<<i)))continue;
+   const auto ax=actorX(i),ay=actorY(i);
+   if(contains(x,y,ax+73,ay+130,28,30)){focus=SettingsFocusCount+int(i);return confirm();}
+   if(contains(x,y,ax+103,ay+130,28,30)){focus=SettingsFocusCount+int(i);return testFocusedCharacter();}
+#else
    const auto& button=voiceButtons[i];
    if(x>=button.x-16&&x<=button.x+111&&std::abs(y-button.y)<=13){
     focus=SettingsFocusCount+int(i);return confirm();
    }
+#endif
   }
  }
 #ifdef QLIE_PROFILE_WHJ6
@@ -314,7 +381,7 @@ GameMenu::Action GameMenu::tap(float x,float y){
    requestedPage=i;return PageChange;
   }
   for(int i=0;i<8;++i){
-   if(populatedSlots[i]&&contains(x,y,slotX(i)+816,slotY(i)-12,66,42)){focus=8+i;return DeleteSlot;}
+   if(!automaticSavePage()&&populatedSlots[i]&&contains(x,y,slotX(i)+816,slotY(i)-12,66,42)){focus=8+i;return DeleteSlot;}
    if(contains(x,y,slotX(i),slotY(i),910,160)){focus=i;return Slot;}
   }
  }
@@ -422,10 +489,10 @@ void GameMenu::drawWhj6Panel(RenderQueue& q){
   for(int i=0;i<8;++i){
    art(dir+"button_data.b#"+(focus==i?"1":"0"),slotX(i),slotY(i));
    art(dir+"file_sel_thumbnail.png",slotX(i)+20,slotY(i)+10);
-   const auto number=std::to_string(page*8+i+1);
+   const auto number=std::to_string(automaticSavePage()?i+1:page*8+i+1);
    for(unsigned digit=0;digit<number.size();++digit)
     art(dir+"num_"+number[digit]+".png",slotX(i)+360+int(digit)*18,slotY(i)+24);
-   if(populatedSlots[i])button(dir+"file_del",slotX(i)+849,slotY(i)+9,focus==8+i);
+   if(!automaticSavePage()&&populatedSlots[i])button(dir+"file_del",slotX(i)+849,slotY(i)+9,focus==8+i);
   }
   button(dir+"ゲームの終了",975,1035);
   button(dir+"タイトルへ戻る",1205,1035);
@@ -434,6 +501,7 @@ void GameMenu::drawWhj6Panel(RenderQueue& q){
   button(dir+"戻る",1665,1035);
   if(panel==Load&&choiceBackupAvailable)
    rectangle(q,20,675,234,30,focus==ChoiceBackupFocus?0x59697f:0x374861);
+  if(panel==Load)rectangle(q,267,675,190,30,automaticSavePage()?0x59697f:0x374861);
   return;
  }
  if(panel==History){
@@ -488,15 +556,18 @@ void GameMenu::drawWhj6Panel(RenderQueue& q){
   for(int i=0;i<6;++i)art(dir+"button_mute.b#4",1697,225+i*40,true);
   art(dir+"hscroll_bar.b#2",1230,440,false,180);
   art(dir+"scroll_button.b#2",1410,450,true,180);
-  constexpr const char* pictures[]={"hide_01_雪女","hide_03_兄弟子","hide_04_師匠","hide_05_ふぶき",
-   "hide_06_荒鷹","hide_07_冬将軍","08_その他男性","09_その他女性"};
-  for(int i=0;i<8;++i){
-   const int x=1015+(i%4)*185,y=560+(i/4)*180;
-   art(dir+"キャラアイコン_"+pictures[i]+".png",x,y);
-   art(dir+"scroll_bar.b#2",x+145,y);
-   art(dir+"scroll_button.b#2",x+157,y+12,true);
-   art(dir+"button_mute.b#4",x+87,y+145,true);
-   art(dir+"button_stest.b#4",x+117,y+145,true);
+  for(unsigned i=0;i<settings.voiceActorCount();++i){
+   const int x=actorX(i),y=actorY(i);
+   const auto& actor=whj6::profile::settingsCast[i];
+   const bool shown=(characterPortraits&(1u<<i))||!actor.firstPage;
+   const bool voice=characterVoices&(1u<<i),muted=settings.characterVoiceMuted(i);
+   const bool selected=focus==SettingsFocusCount+int(i);
+   art(dir+"キャラアイコン_"+(shown?"":"hide_")+actor.portrait+".png",x,y);
+   const auto slider=voice&&!muted?(selected?"1":"0"):"2";
+   art(dir+"scroll_bar.b#"+slider,x+145,y);
+   art(dir+"scroll_button.b#"+slider,x+157,y+115-settings.characterVoiceLevel(i)*103/256,true);
+   art(dir+"button_mute.b#"+(voice?(muted?(selected?"3":"2"):(selected?"1":"0")):"4"),x+87,y+145,true);
+   art(dir+"button_stest.b#"+(voice&&!muted?(selected?"1":"0"):"4"),x+117,y+145,true);
   }
   const char* names[]={"ゲームの終了","タイトルへ戻る","設定の初期化","戻る"};
   const int controls[]={2,1,12,0};
@@ -581,6 +652,7 @@ void GameMenu::render(qlie::Bytes*pixels,RenderTarget*target,const PanelContent&
   put(q,"script/config/scroll_button.b#"+part,slider.x+sliderPosition(settings,i)*slider.width/20,
       slider.y+slider.thumbY,true);
  }
+#ifndef QLIE_PROFILE_WHJ6
  for(unsigned i=0;i<settings.voiceActorCount();++i){
   const auto& button=voiceButtons[i];
   const unsigned part=(settings.characterVoiceMuted(i)?0:2)+(focus==SettingsFocusCount+int(i));
@@ -588,6 +660,7 @@ void GameMenu::render(qlie::Bytes*pixels,RenderTarget*target,const PanelContent&
   const std::string label=button.label?std::string("script/config/")+button.label:"script/config/button_check.b#4";
   put(q,label,button.x+49,button.y,true);
  }
+#endif
  put(q,std::string("script/config/確認_設定初期化")+(focus==12?"_on.png":"_off.png"),1079,694,true);
  for(const auto& option:toggles){
   const bool left=bool(settings.get(option.key))==option.leftValue;

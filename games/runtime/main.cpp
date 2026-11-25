@@ -217,6 +217,8 @@ struct Frontend {
  double extrasElapsed=PanelZoomMs;
 #ifdef QLIE_PROFILE_WHJ5
  whj2::Settings settings{assets,true};
+#elif defined(QLIE_PROFILE_WHJ6)
+ whj2::Settings settings{assets,true,gameSettingsLayout.classic};
 #else
  whj2::Settings settings{assets,false,gameSettingsLayout.classic};
 #endif
@@ -285,6 +287,17 @@ struct Frontend {
   if(name.rfind("【",0)==0){name.remove_prefix(3);name=name.substr(0,name.find("】"));}
   return std::string(name.substr(0,name.find("＠")));
  }
+#ifdef QLIE_PROFILE_WHJ6
+ static std::string whj6VoiceActor(std::string_view voice,const std::string& speaker){
+  if(voice.rfind("％",0)==0)voice.remove_prefix(3);
+  for(const auto& actor:whj6::profile::settingsCast){
+   std::string_view prefix=actor.sample;
+   prefix.remove_suffix(4);
+   if(voice.rfind(prefix,0)==0)return actor.name;
+  }
+  return dialogueVoiceActor(speaker);
+ }
+#endif
  static int audioTrack(const std::string&command){
   constexpr const char* names[]={"music01","se01","se02","se03","sebgv"};
   for(unsigned i=0;i<game_profile::storyAudioTracks;++i)if(command==names[i])return int(i);
@@ -301,6 +314,25 @@ struct Frontend {
  KFont*font=nullptr;
  std::unique_ptr<KFont,decltype(&kfont_close)> localizedFont{nullptr,kfont_close};
  KFont* storyFont() const {return localizedFont?localizedFont.get():font;}
+#ifdef QLIE_PROFILE_WHJ6
+ std::unique_ptr<KFont,decltype(&kfont_close)> captionFont{nullptr,kfont_close};
+ KFont* messageFont(unsigned slot){
+  if(slot!=whj6::profile::captionFontSlot)return storyFont();
+  if(!captionFont){
+   const auto* path=whj6::profile::captionFontFile;
+   if(assets.exists(path)){
+    const auto data=assets.read(path);
+    captionFont.reset(kfont_open_memory(data.data(),data.size(),1));
+   }
+#ifdef __APPLE__
+   if(!captionFont)captionFont.reset(kfont_open("/System/Library/Fonts/Supplemental/Tahoma.ttf",1));
+#endif
+   if(!captionFont)captionFont.reset(kfont_open(nullptr,1));
+   if(captionFont){kfont_set_antialias(captionFont.get(),2);kfont_set_style(captionFont.get(),1,0);}
+  }
+  return captionFont?captionFont.get():storyFont();
+ }
+#endif
  SDL_Window*window=nullptr;
  SDL_Renderer*renderer=nullptr;
  SDL_Texture*texture=nullptr;
@@ -449,6 +481,9 @@ struct Frontend {
  if(std::filesystem::exists(saveDir+"/system.progress"))progress.restore(qlie::file(saveDir+"/system.progress"));
  if(std::filesystem::exists(saveDir+"/settings.cfg"))settings.restore(qlie::file(saveDir+"/settings.cfg"));
  applySettings(false);
+#ifdef QLIE_PROFILE_WHJ6
+ refreshCharacterSettings();
+#endif
  prepareExtras();
  if(!game_profile::story.legacyAvg)for(auto type:{"music","sound"}){std::istringstream in(assets.text(std::string("avg/imoscripter_template_")+type+".txt"));
  std::string l;
@@ -498,6 +533,32 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }
  void flushProgress(){if(progressWriter)progressWriter->flush();}
  void syncProgress(){if(progress.capture(story))persistProgress();}
+#ifdef QLIE_PROFILE_WHJ6
+ static std::string characterProgressKey(const char* name){return std::string("whj6:portrait:")+name;}
+ static std::string voiceProgressKey(const char* name){return std::string("whj6:voice:")+name;}
+ void refreshCharacterSettings(){
+  gameMenu.characterPortraits=gameMenu.characterVoices=0;
+  for(unsigned i=0;i<settings.voiceActorCount();++i){
+   const auto& actor=whj6::profile::settingsCast[i];
+   if(!actor.firstPage||progress.visited(characterProgressKey(actor.name))||progress.wasRead(actor.firstPage))
+    gameMenu.characterPortraits|=1u<<i;
+   if(!actor.firstPage||progress.visited(voiceProgressKey(actor.name)))gameMenu.characterVoices|=1u<<i;
+  }
+ }
+ void unlockCharacter(const std::string& name,bool voice){
+  if(replayActive)return;
+  for(unsigned i=0;i<settings.voiceActorCount();++i){
+   const auto& actor=whj6::profile::settingsCast[i];
+   if(name!=actor.name||!actor.firstPage)continue;
+   auto& flags=voice?gameMenu.characterVoices:gameMenu.characterPortraits;
+   if(flags&(1u<<i))return;
+   flags|=1u<<i;
+   if(progress.markSceneComplete(voice?voiceProgressKey(actor.name):characterProgressKey(actor.name)))
+    persistProgress();
+   return;
+  }
+ }
+#endif
  void leaveCaution(){
   if(game_profile::cautionFade>0&&!cautionLeaving){cautionLeaving=true;openingElapsed=0;}
   else makerLogo();
@@ -884,12 +945,20 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }
  }
  void playVoice(const std::string&id,const std::string&speaker,bool historyReplay=false){
+#ifdef QLIE_PROFILE_WHJ6
+ const auto actor=whj6VoiceActor(id,speaker);
+ if(!id.empty()&&speaker.find("＠")==speaker.npos)unlockCharacter(actor,true);
+#endif
  if(!historyReplay&&!voices->forcePlay&&normalSkip){audio->stop(3);return;}
  if(id.empty())return;
  auto match=voices->resolve(id);
  if(!match){if constexpr (qlie::diagnostics){QLIE_LOG_LINE(<<"VOICE unresolved id="<<id);for(auto&candidate:voices->candidates(id))QLIE_LOG_LINE(<<" candidate="<<candidate);QLIE_LOG_LINE(<<"\n");}if(voices->fileErrors)throw std::runtime_error("Voice file not found: "+id);return;}
  if(settings.voiceActorCount()){
+#ifdef QLIE_PROFILE_WHJ6
+  voiceActor=actor;
+#else
   voiceActor=dialogueVoiceActor(speaker);
+#endif
   updateVoiceGains();
  }
  audio->playFile(assets,3,match->request,false,voices->gain,0,1);
@@ -903,7 +972,13 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   // one. Rebuilding it here would consume the file its command awaits.
   if(pendingScene)return;
   const auto started=qlie::diagnostics?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
-  images->setMessageImage(messageText->renderIncremental(storyFont(),images->messageStyle(),messageSurface),show);
+  const auto style=images->messageStyle();
+#ifdef QLIE_PROFILE_WHJ6
+  auto* selected=messageFont(style.fontSlot);
+#else
+  auto* selected=storyFont();
+#endif
+  images->setMessageImage(messageText->renderIncremental(selected,style,messageSurface),show);
   lastMessageVisible=messageText->visible();
   if constexpr (qlie::diagnostics){
    const auto elapsed=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
@@ -1148,11 +1223,17 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   continue;
  }
  if(e.type=="choice"){normalSkip=false;sentenceWait.cancel();resetOutgoingScene();transition->present();focus=0;choiceScreen->show(story.state.choices,storyFont());
+#ifdef QLIE_PROFILE_WHJ6
+ text=body;
+ messageText->start(text);messageText->reveal();refreshMessage(!text.empty());
+#else
  text=body.empty()?ui.text("選択してください"):body;
  messageText->start(text);messageText->reveal();refreshMessage(true);
+#endif
  name=speaker;
  images->selectFace(speaker,voiceId);
 #ifdef QLIE_PROFILE_WHJ6
+ saveScriptCheckpoint();
  save(ChoiceBackupSlot);
 #endif
  return;
@@ -1182,6 +1263,9 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  pendingHistoryStack=false;
  sentenceWait.page(true,audio->playing(3));
  recordHistoryCheckpoint();
+#ifdef QLIE_PROFILE_WHJ6
+ saveScriptCheckpoint();
+#endif
  advances++;warmNextScene();
  QLIE_LOGF("PAGE %s:%u\n",e.file.c_str(),e.line);
  return;
@@ -1202,7 +1286,20 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }if(game_profile::stackedHistory&&e.type=="command"&&(e.value=="^format,log:stack"||e.value=="^format,clear:def")){
   pendingHistoryStack=e.value=="^format,log:stack";
   continue;
- }if(e.type=="command"&&e.value.rfind("^movie,",0)==0){
+ }
+#ifdef QLIE_PROFILE_WHJ6
+ if(e.type=="command"&&(e.value=="^autosave"||e.value.rfind("^autosave,",0)==0)){
+  if(!replayActive&&!normalSkip){
+   auto fields=whj2::split(e.value,',');
+   auto note=fields.size()>1?std::move(fields[1]):std::string{};
+   if(note.size()>=2&&note.front()=='"'&&note.back()=='"')note=note.substr(1,note.size()-2);
+   story.state.vars["__whj6_script_checkpoint"]=std::move(note);
+  }
+  continue;
+ }
+ if(e.type=="command"&&e.value.rfind("^charaon,",0)==0){unlockCharacter(whj2::trim(e.value.substr(9)),false);continue;}
+#endif
+ if(e.type=="command"&&e.value.rfind("^movie,",0)==0){
  resetOutgoingScene();
  movie->open(e.value.substr(7));
  text="";
@@ -1327,7 +1424,51 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  static constexpr unsigned ManualSlotCount=120;
 #ifdef QLIE_PROFILE_WHJ6
  static constexpr unsigned ChoiceBackupSlot=ManualSlotCount+1;
+ static constexpr unsigned FirstAutomaticSlot=ChoiceBackupSlot+1;
+ static constexpr unsigned AutomaticSlotCount=whj6::profile::automaticSaveCount;
+ std::array<uint64_t,AutomaticSlotCount> automaticSequences{};
+ std::array<unsigned,AutomaticSlotCount> automaticOrder{};
+ bool automaticScanned=false;
+ void sortAutomaticSlots(){
+  for(unsigned i=0;i<AutomaticSlotCount;++i)automaticOrder[i]=i;
+  std::stable_sort(automaticOrder.begin(),automaticOrder.end(),[&](unsigned a,unsigned b){
+   return automaticSequences[a]>automaticSequences[b];
+  });
+ }
+ void scanAutomaticSlots(){
+  if(automaticScanned)return;
+  for(unsigned i=0;i<AutomaticSlotCount;++i){
+   const auto base=slotPrefix(FirstAutomaticSlot+i);
+   try{
+    if(!std::filesystem::is_regular_file(base+".story"))continue;
+    const auto data=qlie::file(base+".sequence");
+    whj2::StateReader reader{data};
+    const auto sequence=reader.n();reader.end();
+    if(sequence&&sequence<UINT64_MAX/2)automaticSequences[i]=sequence;
+   }catch(const std::exception&e){QLIE_LOGF("AUTOSAVE scan slot %u: %s\n",i+1,e.what());}
+  }
+  sortAutomaticSlots();automaticScanned=true;
+ }
+ void saveScriptCheckpoint(){
+  auto it=story.state.vars.find("__whj6_script_checkpoint");
+  if(it==story.state.vars.end())return;
+  auto note=std::move(it->second);
+  story.state.vars.erase(it);
+  scanAutomaticSlots();
+  const auto index=automaticOrder.back();
+  const auto sequence=automaticSequences[automaticOrder.front()]+1;
+  if(save(FirstAutomaticSlot+index,&note,sequence)){
+   automaticSequences[index]=sequence;sortAutomaticSlots();
+   QLIE_LOGF("AUTOSAVE wrote sequence %llu\n",static_cast<unsigned long long>(sequence));
+  }
+ }
 #endif
+ unsigned displayedSlot(unsigned index){
+#ifdef QLIE_PROFILE_WHJ6
+  if(gameMenu.automaticSavePage()){scanAutomaticSlots();return FirstAutomaticSlot+automaticOrder[index];}
+#endif
+  return unsigned(gameMenu.page)*8+index+1;
+ }
  unsigned newestManualSlot(){
   if(manualSlotsScanned)return latestManualSlot;
   latestManualSlot=1;
@@ -1348,17 +1489,24 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  std::string slotPrefix(unsigned slot=1)const{
 #ifdef QLIE_PROFILE_WHJ6
   if(slot==ChoiceBackupSlot)return saveDir+"/choice-backup";
+  if(slot>=FirstAutomaticSlot&&slot<FirstAutomaticSlot+AutomaticSlotCount)
+   return saveDir+"/auto-"+std::to_string(slot-FirstAutomaticSlot+1);
 #endif
   if(!slot||slot>ManualSlotCount)throw std::runtime_error("Save slot range");
   char number[16];std::snprintf(number,sizeof(number),"/slot%02u",slot);
   return saveDir+number;
  }
- bool save(unsigned slot=1){
+ bool save(unsigned slot=1,const std::string* caption=nullptr,uint64_t sequence=0){
   if(replayActive||menu||movie->playing())return false;
   if(pendingScene){status=ui.text("場面の準備中です。");return false;}
   try{
    flushProgress();
    whj2::SaveSlotWrite output(slotPrefix(slot));
+   if(caption){
+    whj2::StateWriter ordinal;ordinal.n(sequence);
+    output.write(".sequence",ordinal.bytes);
+    output.write(".caption",qlie::Bytes(caption->begin(),caption->end()));
+   }
    qlie::Bytes scene(1280*720*4,0);
    images->drawThumbnail(scene,float(saveThumbnailPriority));
    transition->blend(scene);
@@ -1406,8 +1554,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    QLIE_LOGF("SAVE slot %u failed: %s\n",slot,e.what());
    return false;
   }
+  slotPreviews.erase(slot);
   if(slot<=ManualSlotCount){
-   slotPreviews.erase(slot);
    latestManualSlot=slot;manualSlotsScanned=true;
    status=ui.text("現在の状態を保存しました。");
   }
@@ -1419,7 +1567,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
 #ifdef QLIE_PROFILE_WHJ6
   gameMenu.choiceBackupAvailable=gameMenu.panel==UI::Load&&std::filesystem::is_regular_file(slotPrefix(ChoiceBackupSlot)+".story");
 #endif
-  for(unsigned i=0;i<8;i++)gameMenu.populatedSlots[i]=slotPreview(unsigned(gameMenu.page)*8+i+1).exists;
+  for(unsigned i=0;i<8;i++)gameMenu.populatedSlots[i]=slotPreview(displayedSlot(i)).exists;
 #ifdef QLIE_PROFILE_WHJ6
  if(gameMenu.choiceBackupAvailable&&gameMenu.focus==UI::ChoiceBackupFocus)return;
 #endif
@@ -1607,6 +1755,11 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   syncProgress();
   progress.apply(story);
   text=std::move(saved.text);
+#ifdef QLIE_PROFILE_WHJ6
+  if(story.state.awaiting&&text==ui.text("選択してください")){
+   text.clear();saved.message->start("");
+  }
+#endif
   name=std::move(saved.name);
   readAhead->retain({});
   readAhead->retire(std::move(images));
@@ -1624,7 +1777,11 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    if(!story.state.vars.count("op_image"))images->removeUiLayer("ui_avg1_op_image");
   }
   bgvMode=saved.bgvMode;
+#ifdef QLIE_PROFILE_WHJ6
+  voiceActor=whj6VoiceActor(saved.voice,name);
+#else
   if(settings.voiceActorCount())voiceActor=dialogueVoiceActor(name);
+#endif
   updateVoiceGains();
   audio->applyRestore(std::move(preparedAudio),assets);
   bgvDucked=bgvMode&&audio->playing(3);
@@ -1721,6 +1878,12 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(action==UI::PageChange){changeSlotPage(gameMenu.requestedPage,0);return;}
 #ifdef QLIE_PROFILE_WHJ6
  if(action==UI::LoadChoiceBackup){startLoad(ChoiceBackupSlot);return;}
+ if(action==UI::TestCharacterVoice){
+  const auto& actor=whj6::profile::settingsCast[gameMenu.testVoiceActor];
+  if(auto sample=voices->resolve(actor.sample))
+   audio->playFile(assets,whj2::Audio::SettingsTestChannel,sample->request,false,settings.characterVoiceGain(actor.name),0,1);
+  return;
+ }
  if(action==UI::SwitchSavePanel){
   uiSound("Sys_OnClick");
   openPanel(gameMenu.panel==UI::Save?UI::Load:UI::Save);
@@ -1782,7 +1945,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }
  if(action==UI::Quit||action==UI::Title||action==UI::ResetSettings){gameMenu.ask(action);return;}
  if(action==UI::DeleteSlot){selectedSlot=unsigned(gameMenu.slot());if(std::filesystem::exists(slotPrefix(selectedSlot)+".story"))gameMenu.ask(UI::DeleteSlot);else status=ui.text("保存データがありません。");return;}
- if(action==UI::Slot){selectedSlot=unsigned(gameMenu.slot());
+ if(action==UI::Slot){selectedSlot=displayedSlot(unsigned(gameMenu.focus)%8);
  if(gameMenu.panel==UI::Save){if(std::filesystem::exists(slotPrefix(selectedSlot)+".story")){gameMenu.ask(UI::Slot);return;}save(selectedSlot);}
  else if(gameMenu.panel==UI::Load){auto&preview=slotPreview(selectedSlot);if(!preview.exists)status=ui.text("保存データがありません。");else if(preview.damaged)status=ui.text("保存データが不完全です。削除または上書きしてください。");else gameMenu.ask(UI::Slot);}
  }
@@ -1918,7 +2081,15 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   preview.exists=std::filesystem::exists(slotPrefix(slot)+".story");
   if(preview.exists){
    for(auto ext:{".text",".name",".images",".audio",".mixer"})if(!std::filesystem::exists(slotPrefix(slot)+ext))preview.damaged=true;
-   if(!preview.damaged){if(std::filesystem::exists(slotPrefix(slot)+".thumbnail")){preview.thumbnail={160,90,qlie::file(slotPrefix(slot)+".thumbnail")};if(preview.thumbnail.pixels.size()!=160*90*4)throw std::runtime_error("Thumbnail size");preview.thumbnail.version.publish();}auto content=qlie::file(slotPrefix(slot)+".text");preview.excerpt=utf8(std::string(content.begin(),content.end()));}
+   if(!preview.damaged){if(std::filesystem::exists(slotPrefix(slot)+".thumbnail")){preview.thumbnail={160,90,qlie::file(slotPrefix(slot)+".thumbnail")};if(preview.thumbnail.pixels.size()!=160*90*4)throw std::runtime_error("Thumbnail size");preview.thumbnail.version.publish();}
+    const auto base=slotPrefix(slot);
+    auto textPath=base+".text";
+#ifdef QLIE_PROFILE_WHJ6
+    if(slot>=FirstAutomaticSlot&&std::filesystem::is_regular_file(base+".caption"))textPath=base+".caption";
+#endif
+    auto content=qlie::file(textPath);
+    preview.excerpt=utf8(std::string(content.begin(),content.end()));
+   }
   }
  }catch(const std::exception&e){QLIE_LOG_LINE(<<"SAVE PREVIEW FAIL slot="<<slot<<" "<<e.what()<<"\n");preview.exists=true;preview.damaged=true;}
  if(preview.damaged){preview.thumbnail={};preview.excerpt=utf8(ui.text("保存データが不完全です"));}
@@ -2013,6 +2184,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   if(gameMenu.panel==UI::Settings)line("等待语音",217,632,19,0xffffff,&queue);
   if(gameMenu.panel==UI::Load&&gameMenu.choiceBackupAvailable)
    line("上一个选项",37,679,20,gameMenu.focus==UI::ChoiceBackupFocus?0xffea99:0xffffff,&queue);
+  if(gameMenu.panel==UI::Load)
+   line(gameMenu.automaticSavePage()?"返回手动存档":"自动存档",284,679,20,0xffffff,&queue);
 #else
   if(gameMenu.asking){auto prompt=gameMenu.requested==UI::Quit?ui.text("ゲームを終了しますか？"):gameMenu.requested==UI::Title?ui.text("タイトルに戻りますか？"):gameMenu.requested==UI::ResetSettings?ui.text("設定を初期状態に戻しますか？"):gameMenu.requested==UI::SectionSkip?(ui.simplified()?"跳过这个场景吗？":"このシーンをスキップしますか？"):gameMenu.requested==UI::DeleteSlot?ui.text("データを削除しますか？"):gameMenu.panel==UI::Load?ui.text("データをロードしますか？"):ui.text("データを上書き保存しますか？");line(prompt,440,275,28,0xffffff,&queue);return;}
 #endif
@@ -2022,7 +2195,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
                                    gameMenu.focus==16?0xffff88:0xffffff,&queue);
   }
   if(gameMenu.panel==UI::Save||gameMenu.panel==UI::Load)for(int i=0;i<8;i++){
-   unsigned slot=unsigned(gameMenu.page*8+i+1);
+   unsigned slot=displayedSlot(unsigned(i));
 #ifdef QLIE_PROFILE_WHJ6
    const auto slotX=whj6::ui::slotX(i),slotY=whj6::ui::slotY(i);
    const int x=int(whj6::ui::to720(float(slotX+292))),y=int(whj6::ui::to720(float(slotY+37)));
@@ -2326,7 +2499,28 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(cgScreen->visible()){if(button==SDL_CONTROLLER_BUTTON_B)back();else if(button==SDL_CONTROLLER_BUTTON_A)cgAction(cgScreen->confirm());else if(button==SDL_CONTROLLER_BUTTON_X)cgScreen->toggleZoom();else if(button==SDL_CONTROLLER_BUTTON_DPAD_UP)cgScreen->move(0,-1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_DOWN)cgScreen->move(0,1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_LEFT)cgScreen->move(-1,0);else if(button==SDL_CONTROLLER_BUTTON_DPAD_RIGHT)cgScreen->move(1,0);return;}
  if(replayScreen->visible()){if(button==SDL_CONTROLLER_BUTTON_B)back();else if(button==SDL_CONTROLLER_BUTTON_A)replayAction(replayScreen->confirm());else if(button==SDL_CONTROLLER_BUTTON_DPAD_UP)replayScreen->move(0,-1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_DOWN)replayScreen->move(0,1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_LEFT)replayScreen->move(-1,0);else if(button==SDL_CONTROLLER_BUTTON_DPAD_RIGHT)replayScreen->move(1,0);return;}
  if(musicScreen->visible()){if(button==SDL_CONTROLLER_BUTTON_B)back();else if(button==SDL_CONTROLLER_BUTTON_A)musicAction(musicScreen->confirm());else if(button==SDL_CONTROLLER_BUTTON_DPAD_UP)musicScreen->move(0,-1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_DOWN)musicScreen->move(0,1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_LEFT)musicScreen->move(-1,0);else if(button==SDL_CONTROLLER_BUTTON_DPAD_RIGHT)musicScreen->move(1,0);return;}
- if(gameMenu.visible()){if(gameMenu.closing()||gameMenu.panelTransitioning())return;refreshSlotFlags();if(button==SDL_CONTROLLER_BUTTON_B)back();else if(button==SDL_CONTROLLER_BUTTON_A)performUi(gameMenu.confirm());else if(button==SDL_CONTROLLER_BUTTON_X&&gameMenu.panel==UI::History)performUi(gameMenu.jumpHistory());else if(button==SDL_CONTROLLER_BUTTON_DPAD_UP)gameMenu.move(0,-1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_DOWN)gameMenu.move(0,1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_LEFT)gameMenu.move(-1,0);else if(button==SDL_CONTROLLER_BUTTON_DPAD_RIGHT)gameMenu.move(1,0);else if(button==SDL_CONTROLLER_BUTTON_LEFTSHOULDER&&!gameMenu.asking&&(gameMenu.panel==UI::Save||gameMenu.panel==UI::Load)){changeSlotPage((gameMenu.page+14)%15,gameMenu.focus%8);}else if(button==SDL_CONTROLLER_BUTTON_RIGHTSHOULDER&&!gameMenu.asking&&(gameMenu.panel==UI::Save||gameMenu.panel==UI::Load)){changeSlotPage((gameMenu.page+1)%15,gameMenu.focus%8);}refreshSlotFlags();if(gameMenu.settingsDirty){applySettings();uiSound("Sys_OnMouse");}return;}
+ if(gameMenu.visible()){
+  if(gameMenu.closing()||gameMenu.panelTransitioning())return;
+  refreshSlotFlags();
+  if(button==SDL_CONTROLLER_BUTTON_B)back();
+  else if(button==SDL_CONTROLLER_BUTTON_A)performUi(gameMenu.confirm());
+  else if(button==SDL_CONTROLLER_BUTTON_X&&gameMenu.panel==UI::History)performUi(gameMenu.jumpHistory());
+#ifdef QLIE_PROFILE_WHJ6
+  else if(button==SDL_CONTROLLER_BUTTON_X&&gameMenu.panel==UI::Settings)performUi(gameMenu.testFocusedCharacter());
+#endif
+  else if(button==SDL_CONTROLLER_BUTTON_DPAD_UP)gameMenu.move(0,-1);
+  else if(button==SDL_CONTROLLER_BUTTON_DPAD_DOWN)gameMenu.move(0,1);
+  else if(button==SDL_CONTROLLER_BUTTON_DPAD_LEFT)gameMenu.move(-1,0);
+  else if(button==SDL_CONTROLLER_BUTTON_DPAD_RIGHT)gameMenu.move(1,0);
+  else if(!gameMenu.asking&&(gameMenu.panel==UI::Save||gameMenu.panel==UI::Load)&&
+          (button==SDL_CONTROLLER_BUTTON_LEFTSHOULDER||button==SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)){
+   const int count=gameMenu.savePageCount(),step=button==SDL_CONTROLLER_BUTTON_LEFTSHOULDER?-1:1;
+   changeSlotPage((gameMenu.page+count+step)%count,gameMenu.focus%8);
+  }
+  refreshSlotFlags();
+  if(gameMenu.settingsDirty){applySettings();uiSound("Sys_OnMouse");}
+  return;
+ }
  if(button==SDL_CONTROLLER_BUTTON_Y&&!menu){upperMenu->offerSectionSkip(sceneSkipAvailable());upperMenu->toggle();return;}
  if(upperMenu->visible()){if(button==SDL_CONTROLLER_BUTTON_A)upperAction(upperMenu->confirm());else if(button==SDL_CONTROLLER_BUTTON_B)back();else if(button==SDL_CONTROLLER_BUTTON_DPAD_UP||button==SDL_CONTROLLER_BUTTON_DPAD_LEFT)upperMenu->move(-1);else if(button==SDL_CONTROLLER_BUTTON_DPAD_DOWN||button==SDL_CONTROLLER_BUTTON_DPAD_RIGHT)upperMenu->move(1);return;}
  if(menu){switch(button){case SDL_CONTROLLER_BUTTON_B:if(title->isExtraPage()){title->setExtraPage(false);uiSound("Sys_Cancel");}break;case SDL_CONTROLLER_BUTTON_A:activate();break;case SDL_CONTROLLER_BUTTON_DPAD_UP:case SDL_CONTROLLER_BUTTON_DPAD_LEFT:focus=title->move(-1);uiSound("Sys_OnMouse");break;case SDL_CONTROLLER_BUTTON_DPAD_DOWN:case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:focus=title->move(1);uiSound("Sys_OnMouse");break;case SDL_CONTROLLER_BUTTON_X:openPanel(UI::Settings);break;case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:openPanel(UI::Load);break;default:break;}return;}

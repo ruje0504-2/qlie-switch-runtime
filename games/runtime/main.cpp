@@ -91,6 +91,7 @@ struct PreparedSceneRestore {
  explicit PreparedSceneRestore(const SceneImages&live):images(live.makeRestoreTarget()){}
  std::unique_ptr<SceneImages> images;
  std::unique_ptr<SceneTransition> transition;
+ qlie::Bytes historyCheckpoints;
  void read(qlie::Assets&assets,const qlie::Bytes&state){
   images->restore(state);
   transition=std::make_unique<SceneTransition>(assets);
@@ -98,6 +99,11 @@ struct PreparedSceneRestore {
  void read(qlie::Assets&assets,const std::string&slot){
   read(assets,qlie::file(slot+".images"));
   if(std::filesystem::exists(slot+".transition"))transition->restore(qlie::file(slot+".transition"));
+  if(game_profile::story.historyJumpLimit){
+   try{
+    if(std::filesystem::exists(slot+".checkpoints"))historyCheckpoints=qlie::file(slot+".checkpoints");
+   }catch(const std::exception&e){QLIE_LOGF("LOAD optional history checkpoints: %s\n",e.what());}
+  }
  }
 };
 }
@@ -158,7 +164,6 @@ struct Frontend {
  std::optional<MenuFade> menuFade;
  std::vector<whj2::HistoryEntry>history;
  struct PlaybackState {
-  whj2::StoryState story;
   std::string text,name,body,speaker,voice,page;
   std::array<float,5> volumes{};
   std::array<bool,5> loops{};
@@ -170,9 +175,10 @@ struct Frontend {
  struct HistoryCheckpoint {
   size_t row=0;
   PlaybackState state;
-  qlie::Bytes scene,audio;
+  qlie::Bytes story,scene,audio;
  };
- std::deque<std::shared_ptr<const HistoryCheckpoint>> historyCheckpoints;
+ using HistoryCheckpoints=std::deque<std::shared_ptr<const HistoryCheckpoint>>;
+ HistoryCheckpoints historyCheckpoints;
  std::shared_ptr<const HistoryCheckpoint> pendingHistoryLoad;
  size_t requestedHistoryRow=0;
  bool historyVoicePlayed=false;
@@ -331,7 +337,11 @@ struct Frontend {
  }
 #endif
  voices=std::make_unique<whj2::VoiceResolver>(assets);
+#if defined(__SWITCH__) && defined(QLIE_PROFILE_WHJ5)
+ upperMenu=std::make_unique<whj2::UpperMenu>(assets,false);
+#else
  upperMenu=std::make_unique<whj2::UpperMenu>(assets);
+#endif
  title=std::make_unique<whj2::TitleScreen>(assets,game_profile::title);
  choiceScreen=std::make_unique<whj2::ChoiceScreen>(assets);
  musicScreen=std::make_unique<whj2::MusicScreen>(assets,*audio,settings,font);
@@ -522,7 +532,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   auto checkpoint=std::make_shared<HistoryCheckpoint>();
   checkpoint->row=history.size()-1;
   auto&state=checkpoint->state;
-  state.story=story.state;
+  checkpoint->story=story.save();
   state.text=text;state.name=name;state.body=pendingBody;state.speaker=pendingSpeaker;
   state.voice=pendingVoice;state.page=currentPageKey;
   state.volumes=volumes;state.loops=loops;state.times=audioTimes;state.types=audioTypes;
@@ -534,6 +544,62 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   if(!historyCheckpoints.empty()&&historyCheckpoints.back()->row==checkpoint->row)historyCheckpoints.pop_back();
   historyCheckpoints.push_back(std::move(checkpoint));
   if(historyCheckpoints.size()>game_profile::story.historyJumpLimit)historyCheckpoints.pop_front();
+ }
+ qlie::Bytes saveHistoryCheckpoints(uint32_t storyHash,uint32_t historyHash)const{
+  whj2::StateWriter writer;
+  writer.str("QLIE-history-checkpoints-1");
+  writer.n(storyHash);writer.n(historyHash);
+  writer.n(historyCheckpoints.size());
+  for(const auto&checkpoint:historyCheckpoints){
+   const auto&state=checkpoint->state;
+   writer.n(checkpoint->row);
+   writer.blob(checkpoint->story);
+   for(const auto*value:{&state.text,&state.name,&state.body,&state.speaker,&state.voice,&state.page})
+    writer.str(*value);
+   for(unsigned i=0;i<game_profile::storyAudioTracks;++i){
+    writer.f(state.volumes[i]);
+    writer.n(state.loops[i]);writer.n(state.times[i]);writer.n(state.types[i]);
+   }
+   writer.n(state.bgvMode);
+   writer.blob(state.wait.save());
+   writer.blob(state.autoPlay.save());
+   writer.blob(checkpoint->scene);
+   writer.blob(checkpoint->audio);
+  }
+  return std::move(writer.bytes);
+ }
+ HistoryCheckpoints restoreHistoryCheckpoints(const qlie::Bytes&bytes,size_t historySize,uint32_t storyHash,uint32_t historyHash)const{
+  if(bytes.empty())return {};
+  whj2::StateReader reader{bytes};
+  if(reader.str()!="QLIE-history-checkpoints-1")throw std::runtime_error("History checkpoint version");
+  if(reader.n()!=storyHash||reader.n()!=historyHash)throw std::runtime_error("History checkpoints belong to another save");
+  auto count=reader.n();
+  if(count>game_profile::story.historyJumpLimit||count>historySize)
+   throw std::runtime_error("Invalid history checkpoint count");
+  HistoryCheckpoints checkpoints;
+  while(count--){
+   const auto row=reader.n();
+   if(row>=historySize||(!checkpoints.empty()&&row<=checkpoints.back()->row))
+    throw std::runtime_error("Invalid history checkpoint row");
+   auto checkpoint=std::make_shared<HistoryCheckpoint>();
+   checkpoint->row=size_t(row);
+   checkpoint->story=reader.blob();
+   auto&state=checkpoint->state;
+   for(auto*value:{&state.text,&state.name,&state.body,&state.speaker,&state.voice,&state.page})
+    *value=reader.str();
+   for(unsigned i=0;i<game_profile::storyAudioTracks;++i){
+    state.volumes[i]=reader.f();
+    state.loops[i]=reader.n()!=0;state.times[i]=unsigned(reader.n());state.types[i]=unsigned(reader.n());
+   }
+   state.bgvMode=reader.n()!=0;
+   state.wait.restore(reader.blob());
+   state.autoPlay.restore(reader.blob());
+   checkpoint->scene=reader.blob();
+   checkpoint->audio=reader.blob();
+   checkpoints.push_back(std::move(checkpoint));
+  }
+  reader.end();
+  return checkpoints;
  }
  void applySettings(bool persist=true){
  audio->setUserGains(settings.gains());images->setWindowAlpha(unsigned(settings.get("WindowAlpha")));messageText->setSpeed(settings.get("TextSpeed"));if(!text.empty())refreshMessage();if(persist)qlie::write_file(saveDir+"/settings.cfg",settings.save());gameMenu.settingsDirty=false;}
@@ -1059,8 +1125,12 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    }
    if constexpr (game_profile::storyAudioTracks>3)mixer.n(bgvMode);
    output.write(".mixer",mixer.bytes);
-   output.write(".history",whj2::saveHistory(history));
-   output.write(".story",story.save());
+   const auto historyData=whj2::saveHistory(history);
+   const auto storyData=story.save();
+   output.write(".history",historyData);
+   if(game_profile::story.historyJumpLimit)
+    output.write(".checkpoints",saveHistoryCheckpoints(qlie::hash(storyData),qlie::hash(historyData)));
+   output.write(".story",storyData);
    output.publish();
   }catch(const std::exception&e){
    status=ui.text("保存できませんでした。");
@@ -1078,7 +1148,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   bool removed=false;
   try{
    std::filesystem::remove(slotPrefix(slot)+".story");removed=true;
-   for(auto ext:{".text",".name",".images",".transition",".flow",".message",".auto",".choice",".audio",".mixer",".history",".thumbnail"})std::filesystem::remove(slotPrefix(slot)+ext);
+   for(auto ext:{".text",".name",".images",".transition",".flow",".message",".auto",".choice",".audio",".mixer",".history",".checkpoints",".thumbnail"})std::filesystem::remove(slotPrefix(slot)+ext);
    status=ui.text("データを削除しました。");
   }catch(const std::exception&e){QLIE_LOG_LINE(<<"DELETE FAIL "<<e.what()<<"\n");status=removed?ui.text("データを削除しましたが、一部のファイルが残っています。"):ui.text("削除できませんでした。");}
   try{whj2::commitSavePath(saveDir+"/");}catch(const std::exception&e){QLIE_LOG_LINE(<<"DELETE COMMIT FAIL "<<e.what()<<"\n");status=ui.text("削除結果を保存できませんでした。");}
@@ -1141,6 +1211,14 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   if(checkpoint){
    SavedSlotState saved;
    static_cast<PlaybackState&>(saved)=checkpoint->state;
+   try{saved.story=story.decodeSave(checkpoint->story);}
+   catch(const std::exception&e){
+    readAhead->retire(std::move(scene));
+    soundReadAhead->retire(std::move(prepared));
+    status=ui.text("データを読み込めませんでした。");
+    QLIE_LOGF("LOAD history checkpoint story: %s\n",e.what());
+    return;
+   }
    saved.message=std::make_unique<whj2::MessageText>(*messageText);
    saved.message->start(saved.text);
    saved.message->reveal();
@@ -1150,13 +1228,18 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   beginMenuFade(MenuFadeKind::Load,std::move(before));
  }
  struct SavedSlotState:PlaybackState {
+  whj2::StoryState story;
+  HistoryCheckpoints checkpoints;
+  uint32_t storyHash=0,historyHash=0;
   std::unique_ptr<whj2::MessageText> message;
   std::unique_ptr<whj2::ChoiceScreen> choice;
   std::vector<whj2::HistoryEntry> history;
  };
  SavedSlotState readSlotState(const std::string&path){
   SavedSlotState result;
-  result.story=story.decodeSave(qlie::file(path+".story"));
+  const auto storyData=qlie::file(path+".story");
+  result.story=story.decodeSave(storyData);
+  if(game_profile::story.historyJumpLimit)result.storyHash=qlie::hash(storyData);
   const auto t=qlie::file(path+".text"),n=qlie::file(path+".name");
   result.text.assign(t.begin(),t.end());
   result.name.assign(n.begin(),n.end());
@@ -1199,7 +1282,11 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   result.message->setSpeed(settings.get("TextSpeed"));
   if(std::filesystem::exists(path+".auto"))result.autoPlay.restore(qlie::file(path+".auto"));
   else result.autoPlay.page(settings.get("AutoClickWait"));
-  if(std::filesystem::exists(path+".history"))result.history=whj2::restoreHistory(qlie::file(path+".history"));
+  if(std::filesystem::exists(path+".history")){
+   const auto historyData=qlie::file(path+".history");
+   result.history=whj2::restoreHistory(historyData);
+   if(game_profile::story.historyJumpLimit)result.historyHash=qlie::hash(historyData);
+  }
   if(result.story.awaiting){
    result.choice=std::make_unique<whj2::ChoiceScreen>(assets);
    result.choice->show(result.story.choices,storyFont());
@@ -1219,6 +1306,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
     preparedScene=std::make_shared<whj2::PreparedSceneRestore>(*images);
     preparedScene->read(assets,path);
    }
+   try{saved.checkpoints=restoreHistoryCheckpoints(preparedScene->historyCheckpoints,saved.history.size(),saved.storyHash,saved.historyHash);}
+   catch(const std::exception&e){QLIE_LOGF("LOAD optional history checkpoints ignored: %s\n",e.what());}
    if(!preparedAudio)preparedAudio=whj2::Audio::prepareRestore(qlie::file(path+".audio"),assets).audioRestore;
   }catch(const std::exception&e){
    if(preparedScene)readAhead->retire(std::move(preparedScene));
@@ -1262,7 +1351,10 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   messageText=std::move(saved.message);
   refreshMessage();
   autoPlay=saved.autoPlay;
-  if(jumpRow==SIZE_MAX)replaceHistory(std::move(saved.history));
+  if(jumpRow==SIZE_MAX){
+   replaceHistory(std::move(saved.history));
+   historyCheckpoints=std::move(saved.checkpoints);
+  }
   else{
    history.resize(jumpRow+1);
    while(!historyCheckpoints.empty()&&historyCheckpoints.back()->row>jumpRow)historyCheckpoints.pop_back();

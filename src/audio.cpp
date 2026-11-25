@@ -35,20 +35,26 @@ DecodedPcm decodeSource(qlie::Assets& assets,const std::string& path){
  if(path.rfind(bathroom,0)!=0)return Audio::decodePcm(audioSource(assets,path));
  const auto pcm=Audio::decodePcm(assets.read(path.substr(bathroom.size())));
  const size_t frames=pcm.size()/2;
- // WHJ5's authored dry/wet levels, delay, decay and room cutoff.
- constexpr unsigned delay=44100*50/1000;
- constexpr float cutoff=1.f-0.892278f; // 800 Hz, one-pole at 44100 Hz.
- std::vector<float> echoes(delay*2);
+ // QLIE uses 8.8 gains, with a truncated low-pass sample for both
+ // feedback and wet mix. The delay is in 44100 Hz stereo sample frames.
+ constexpr size_t delay=(44100*50+500)/1000;
+ constexpr int wet=60*256/100,dryGain=80*256/100,feedback=(100-50)*256/100;
+ const float cutoff=float(2*std::sin(3.14159265358979323846*800/44100));
+ std::array<std::array<int,2>,delay> echoes{};
  std::array<float,2> lowPass{};
+ size_t tap=0;
  auto output=std::shared_ptr<int16_t>(new int16_t[pcm.size()],std::default_delete<int16_t[]>());
  for(size_t frame=0;frame<frames;++frame){
+  auto& echo=echoes[tap];
   for(unsigned side=0;side<2;++side){
-   const size_t index=frame*2+side, tap=(frame%delay)*2+side;
-   const float dry=pcm[index];
-   lowPass[side]+=cutoff*(echoes[tap]-lowPass[side]);
-   echoes[tap]=dry+lowPass[side]*.5f;
-   output.get()[index]=int16_t(std::clamp(dry*.8f+lowPass[side]*.6f,-32768.f,32767.f));
+   const size_t index=frame*2+side;
+   const int dry=pcm[index];
+   lowPass[side]=float((double(echo[side])-lowPass[side])*cutoff+lowPass[side]);
+   const int filtered=int(lowPass[side]);
+   echo[side]=dry+filtered*feedback/256;
+   output.get()[index]=int16_t(std::clamp((dry*dryGain+filtered*wet)/256,-32768,32767));
   }
+  if(++tap==delay)tap=0;
  }
  return {std::move(output),pcm.size()};
 }

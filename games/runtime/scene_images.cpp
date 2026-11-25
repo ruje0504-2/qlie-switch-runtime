@@ -434,7 +434,7 @@ struct Composite {
    }
   }
   for(auto&motion:definition.motions)for(auto&layer:motion.layers){if(layer.mode>2)warn("layer-mode="+std::to_string(layer.mode));
- for(auto&k:layer.keys)if(k[4]!=0&&k[4]!=1&&k[4]!=3&&k[4]!=4&&k[4]!=5&&k[4]!=6&&k[4]!=9&&k[4]!=10&&k[4]!=15&&k[4]!=16&&k[4]!=17&&k[4]!=18&&k[4]!=20)warn("primitive="+std::to_string(k[4]));
+ for(auto&k:layer.keys)if(k[4]!=0&&k[4]!=1&&k[4]!=2&&k[4]!=3&&k[4]!=4&&k[4]!=5&&k[4]!=6&&k[4]!=9&&k[4]!=10&&k[4]!=15&&k[4]!=16&&k[4]!=17&&k[4]!=18&&k[4]!=20)warn("primitive="+std::to_string(k[4]));
  }
  }
  size_t closeVideoClips(AssetReadAhead*worker){
@@ -559,7 +559,7 @@ struct Composite {
   for(size_t index=0;index<samples.size();index++){
  auto&k=samples[index];if(filterOverride)k.textureFilter=filterOverride;
  if(parentBlend)k.flags=parentBlend;
- for(auto&w:k.unsupported)if(w!="primitive=20"&&!(w=="3d-rotation"&&(k.kind==18||k.kind==3||k.kind==4)))warn(w);
+ for(auto&w:k.unsupported)if(w!="primitive=20"&&!(w=="3d-rotation"&&(k.kind==18||k.kind==2||k.kind==3||k.kind==4)))warn(w);
  if(!motion->layers[index].flags||!k.kind)continue;
  if(k.kind==5){queue.requestFieldPresentation();continue;}
  k.alpha=int(k.alpha)*int(opacity)/255;if(messageSurface.value_or(nullptr)&&messageSlot!=0&&k.kind==4&&k.resource==0)k.alpha=int(k.alpha)*int(windowAlpha)/255;k.addColor=colorAdd(k.addColor,parentAdd);k.mulColor=colorMultiply(k.mulColor,parentMul);
@@ -668,7 +668,7 @@ struct Composite {
   }
   continue;
  }
- if(k.kind!=3&&k.kind!=4)continue;
+ if(k.kind!=2&&k.kind!=3&&k.kind!=4)continue;
  if(k.resource>=members.size())throw std::runtime_error("Composite image index "+path);
    auto&e=members[k.resource];
  const bool textSlot=messageSurface&&k.resource==messageSlot;

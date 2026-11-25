@@ -2,7 +2,9 @@
 
 [![GPL-2.0-or-later](https://img.shields.io/badge/license-GPL--2.0--or--later-blue)](LICENSE)
 
-面向 Nintendo Switch/Horizon 和 macOS 的 QLIE 运行时。WHJ2 和 WHJ4 均已完成 Switch 实机使用测试。WHJ4 支持日文本体和可选汉化更新。WHJ5 使用简体中文脚本和日文语音，已由项目维护者在 Switch 实机验收通过。WHJ2.5 和 WHJ3 提供日文本体和独立中文更新。
+QLIE 引擎的 Switch 端口，同时提供 macOS 构建。
+
+项目维护者已在 Switch 实机测试 WHJ1、WHJ2、WHJ2.5、WHJ3、WHJ4 和 WHJ5。
 
 [优化手册](docs/optimization/README.md)记录 deko3d 渲染、影片硬解、资源预读、音频和界面的实现及测量范围。
 
@@ -32,7 +34,7 @@ Switch 需要 devkitPro、devkitA64、libnx 和 Switch portlibs。
 
 ```sh
 python3 tools/fetch_graphics_sdk.py
-QLIE_GAME=whj1 ./build-switch.sh
+QLIE_GAME=whj1 QLIE_SWITCH_VULKAN=0 ./build-switch.sh
 QLIE_GAME=whj2 ./build-switch.sh
 QLIE_GAME=whj25 ./build-switch.sh
 QLIE_GAME=whj3 ./build-switch.sh
@@ -87,7 +89,7 @@ QLIE_GAME=whj2 python3 tools/package_nsp.py \
   --output /absolute/path/to/whj2.nsp
 ```
 
-WHJ1 日文本体 `1.0.0` 的 Title ID 为 `01007F8E5C110000`，中文更新 `1.0.1` 为 `01007F8E5C110800`。汉化原包 `data8.pack` 的覆盖资源通过单独的 `patch.dat` 安装。WHJ1 是本地验证候选。
+WHJ1 日文本体 `1.0.0` 的 Title ID 为 `01007F8E5C110000`，中文更新 `1.0.1` 为 `01007F8E5C110800`。汉化原包 `data8.pack` 的覆盖资源通过单独的 `patch.dat` 安装。Mac 已验证日中剧情、鉴赏、存读档和片尾。Switch 已完成构建与安装包校验，实机运行待验。
 
 WHJ2 直装配置为 Title ID `01007F8E5C120000`、版本 `1.0.1`。包内游戏数据通过 RomFS 读取，直装启动要求成功挂载系统 SaveData。
 

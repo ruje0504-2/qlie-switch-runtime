@@ -42,5 +42,6 @@ struct TitleLayout {
  double startBlackFadeAtMs=0,startBlackFadeMs=0;
  const char* buttonPush=nullptr;
  const char* confirmSound=nullptr;
+ bool asyncBackdropVideo=false;
 };
 }

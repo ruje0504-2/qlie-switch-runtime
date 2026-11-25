@@ -24,6 +24,7 @@ public:
  explicit TitleScreen(qlie::Assets&,TitleLayout={},std::array<unsigned,2> sceneSize={1280,720});
  bool rollAlternate();
  bool prepareOpening(AssetReadAhead*loader,bool unlocked=false);
+ void setNativeVideoSurfaces(bool enabled){scene.setNativeVideoSurfaces(layout.asyncBackdropVideo&&enabled);}
  void beginExit();
  void leave(){scene.clear(true);}
  void warmBackdrop(bool alternate);
@@ -33,8 +34,8 @@ public:
  void setExtraPage(bool);bool isExtraPage()const{return extraPage;}
  void update(double);void skipIntro();bool ready()const{return elapsed>=layout.introMs+layout.buttonEntranceMs;}
  int selection()const{return selected;}int move(int);bool select(int);int hit(float,float)const;
- void draw(RenderTarget&)const;
- Action confirm();void draw(qlie::Bytes&)const;
+ void draw(RenderTarget&,bool live=false)const;
+ Action confirm();void draw(qlie::Bytes&,bool live=false)const;
  void press(float,float);
  void release();
 };

@@ -422,6 +422,9 @@ struct Frontend {
  upperMenu=std::make_unique<whj2::UpperMenu>(assets);
 #endif
  title=std::make_unique<whj2::TitleScreen>(assets,game_profile::title,gameSceneSize);
+#ifdef WHJ2_WITH_GPU
+ if(nativeGpu)title->setNativeVideoSurfaces(gpu->supportsVideoSurfaces());
+#endif
  choiceScreen=std::make_unique<whj2::ChoiceScreen>(assets,*messageText,gameSceneSize);
  if(game_profile::story.legacyAvg)choiceScreen->prepare(*readAhead);
  musicScreen=std::make_unique<whj2::MusicScreen>(assets,*audio,settings,font,*messageText,game_profile::musicTrackCount);
@@ -2028,7 +2031,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  fieldRequested=false;
  SDL_UpdateTexture(texture,nullptr,display,1280*4);SDL_RenderClear(renderer);SDL_RenderCopy(renderer,texture,nullptr,nullptr);framePacer.wait();SDL_RenderPresent(renderer);fpsDisplay.presented(SDL_GetTicks64());}
 #ifdef WHJ2_WITH_GPU
- void composeNative(const whj2::RenderQueue*scene){
+ void composeNative(const whj2::RenderQueue*scene,bool liveTitle=false){
  if(sceneSkipRunning()){gpu->begin(0xff000000u);drawSceneSkip(*frameTarget);}
  else if(gameMenu.coversScene()){gpu->begin(0xff000000u);drawPanel();}
  else if(extrasVisible()){
@@ -2051,7 +2054,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
     transition->blend(*frameTarget);
     if(const auto opacity=titleStartOpacity();opacity<255)frameTarget->dim(opacity,255);
    }
-   else title->draw(*frameTarget);
+   else title->draw(*frameTarget,liveTitle);
   }
   else{
    scene->draw(*frameTarget,1280,720);transition->blend(*frameTarget);
@@ -2075,7 +2078,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   gpu->begin(pixels);frameTarget=gpu.get();
   if(fieldRequested)frameTarget->requestFieldPresentation();
  }else{
-  frameTarget=gpu.get();composeNative(scene);
+  frameTarget=gpu.get();composeNative(scene,true);
  }
  drawMenuFade(*frameTarget);
  recordShown();if(fpsVisible)fpsDisplay.draw(*frameTarget);frameTarget=nullptr;
@@ -2118,10 +2121,10 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   }
   else{
 #ifdef WHJ2_WITH_GPU
-   if(gpu){gpu->begin(pixels);title->draw(*gpu);gpu->end(pixels);}
+   if(gpu){gpu->begin(pixels);title->draw(*gpu,liveVideo);gpu->end(pixels);}
    else
 #endif
-   title->draw(pixels);
+   title->draw(pixels,liveVideo);
   }
  }else if(!hidden&&gameMenu.panel!=whj2::GameMenu::History){images->drawMessages(pixels);
  drawDialogueSpeaker();
@@ -2529,8 +2532,10 @@ controllerKey(e.cbutton.button);
 #else
  const unsigned times[]={1000,4500,7000};
 #endif
- if(openingTitleCaptures<3&&elapsed>=times[openingTitleCaptures]){snapshot("opening-title-"+std::to_string(times[openingTitleCaptures])+".bmp");openingTitleCaptures++;}
- if(openingTitleCaptures==3){if(!title->ready())throw std::runtime_error("Title entrance did not finish");QLIE_LOG_LINE(<<"OPENING PASS caution / maker movie / title animation\n");done=true;}}if(++frames>=smoke&&!done){throw std::runtime_error("Opening sequence timeout");}continue;}
+ if(openingTitleCaptures<3&&elapsed>=times[openingTitleCaptures]&&(openingTitleCaptures<2||title->ready())){
+  snapshot("opening-title-"+std::to_string(times[openingTitleCaptures])+".bmp");openingTitleCaptures++;
+ }
+ if(openingTitleCaptures==3){QLIE_LOG_LINE(<<"OPENING PASS caution / maker movie / title animation\n");done=true;}}if(++frames>=smoke&&!done){throw std::runtime_error("Opening sequence timeout");}continue;}
  if(musicTest){
  if(frames==1){settings.set("MusicModeVolume",100);if(!progress.extras())throw std::runtime_error("Music smoke needs earned progress");title->select(2);controllerKey(SDL_CONTROLLER_BUTTON_A);titlePhase=1;}
  else if(titlePhase==1&&title->ready()){title->select(2);controllerKey(SDL_CONTROLLER_BUTTON_A);titlePhase=2;}

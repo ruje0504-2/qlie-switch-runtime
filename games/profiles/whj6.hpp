@@ -57,6 +57,7 @@ inline constexpr auto title=[] {
  layout.buttonX={1630,1630};layout.buttonY={495,495};layout.buttonStep={100,100};
  layout.introMs=8800;layout.returnBackdropMs=7500;
  layout.alternateHits=0;layout.alternateRange=1;
+ layout.asyncBackdropVideo=true;
  layout.lockedEnter="*OnLockEnable";layout.lockedIdle="*OnLockOffMouse";
  layout.buttonOff="_off.png";layout.buttonOn="_on.png";
  layout.buttonPush="_push.png";layout.confirmSound="misc/Sys_OnClickTitle.ogg";

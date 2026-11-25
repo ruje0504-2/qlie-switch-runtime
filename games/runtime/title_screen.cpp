@@ -145,13 +145,13 @@ unsigned TitleScreen::openingBrightness()const{
  if(layout.fadeInMs<=0||elapsed>=layout.fadeInMs)return 255;
  return unsigned(255*elapsed/layout.fadeInMs);
 }
-void TitleScreen::draw(RenderTarget&target)const{
- scene.draw(target);
+void TitleScreen::draw(RenderTarget&target,bool live)const{
+ scene.draw(target,live&&layout.asyncBackdropVideo);
  const auto brightness=openingBrightness();
  if(brightness<255)target.dim(brightness,255);
 }
-void TitleScreen::draw(qlie::Bytes&pixels)const{
- scene.draw(pixels);
+void TitleScreen::draw(qlie::Bytes&pixels,bool live)const{
+ scene.draw(pixels,live&&layout.asyncBackdropVideo);
  const auto brightness=openingBrightness();
  if(brightness<255)for(size_t i=0;i<pixels.size();i+=4)
   for(unsigned c=0;c<3;c++)pixels[i+c]=uint8_t(unsigned(pixels[i+c])*brightness/255);

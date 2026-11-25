@@ -30,6 +30,7 @@ int kvideo_copy_surface(KVideo *v,KImage *screen);
 struct AVFrame *kvideo_clone_frame(const struct AVFrame *frame);
 void kvideo_free_frame(struct AVFrame *frame);
 int kvideo_read_frame(const struct AVFrame *frame,KImage *screen,char *error,size_t error_size);
+int kvideo_read_software_picture(const uint8_t *data,size_t size,uint64_t tick,KImage *target);
 KVideo *kvideo_open_mode(const uint8_t *data,size_t size,KVideoMode mode);
 int kvideo_stats(const KVideo *v,KVideoStats *stats);
 /* Reopen the same bytes in software and seek back to a keyframe for tick.

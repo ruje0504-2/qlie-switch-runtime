@@ -40,6 +40,18 @@ Story::Script&Story::script(const std::string&n){
    else if(inc==profile.footer)sc.ops.push_back({"!free",ln});
    // The direct-label form invokes the already active AVG for its choice.
    else if(inc==profile.selectionPrelude)continue;
+   else if(!profile.replayPrelude.empty()&&inc==profile.replayPrelude){
+    const auto lastSlash=name.rfind('/');
+    const auto relative=lastSlash==name.npos?inc:name.substr(0,lastSlash+1)+inc;
+    std::istringstream prelude(assets.text(relative));
+    for(std::string command;std::getline(prelude,command);){
+     command=trim(command);
+     if(command.empty()||command.rfind("//",0)==0)continue;
+     if(command.rfind("^include,",0)!=0)
+      throw std::runtime_error("Unsupported command in replay prelude: "+relative);
+     sc.ops.push_back({std::move(command),ln});
+    }
+   }
    else throw std::runtime_error("Unsupported story include "+line+" in "+name);
    continue;
   }
@@ -201,6 +213,33 @@ std::vector<std::string> Story::upcomingAssetCommands(bool opening){
  }
  return out;
 }
+bool Story::beforeNextPresentation(bool hasBody,const std::function<bool(const Event&)>&match){
+ struct RestorePreview {
+  Story& story;
+  StoryState state;
+  std::set<std::string> visited;
+  uint64_t operations;
+  ~RestorePreview(){
+   story.state=std::move(state);
+   story.visited=std::move(visited);
+   story.operations=operations;
+  }
+ } restore{*this,state,std::move(visited),operations};
+ visited.clear();
+ for(;;){
+  auto event=next();
+  if(event.type=="command"){
+   if(event.value.rfind("^movie,",0)==0)return false;
+   if(match(event))return true;
+  }else if(event.type=="text"){
+   if(event.value.rfind("【",0)!=0&&event.value.rfind("％",0)!=0)hasBody=true;
+  }else if(event.type=="page"){
+   if(hasBody)return false;
+  }else if(event.type=="visual-wait"||event.type=="interlude"||event.type=="wait"||
+           event.type=="click-wait"||event.type=="choice"||event.type=="await-choice"||
+           event.type=="finish"||event.type=="finished"||event.type=="create"||event.type=="free")return false;
+ }
+}
 bool Story::historyJumpEnabled()const{
  const auto locked=state.vars.find("__log_jump_locked");
  return profile.historyJumpLimit&&(locked==state.vars.end()||locked->second=="0");
@@ -306,6 +345,14 @@ void Story::caret(const Op&o){auto a=split(o.text,44);std::string cmd=lower(a[0]
   }else throw std::runtime_error("Unsupported route fragment assignment");
   return;
  }
+ if(cmd=="frag"&&profile.arithmeticFragments&&a.size()==4&&(a[1]=="+"||a[1]=="-")){
+  const auto key="#flag:"+value(a[2]);
+  const auto found=state.vars.find(key);
+  const int64_t prior=found==state.vars.end()?0:std::stoi(found->second);
+  const int64_t delta=std::stoi(value(a[3]));
+  state.vars[key]=std::to_string(prior+(a[1]=="+"?delta:-delta));
+  return;
+ }
  if(cmd=="fragcal"&&a.size()==2){
   const auto expression=value(a[1]);
   const auto bracket=expression.find(']');
@@ -338,6 +385,7 @@ void Story::caret(const Op&o){auto a=split(o.text,44);std::string cmd=lower(a[0]
   state.pending.push_back(event("command",endingMovieCommand(media->second),o.line));
   return;
  }
+ if(profile.ignoredCaretCommands.count(cmd))return;
  if(!profile.sceneCommands.count(cmd))throw std::runtime_error("Unsupported story command: "+o.text);
  state.pending.push_back(event("command",o.text,o.line));
 }

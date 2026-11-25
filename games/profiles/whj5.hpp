@@ -45,6 +45,16 @@ inline constexpr whj2::TitleLayout title{
 };
 inline constexpr double cautionFade = 450, cautionExitWait = 500;
 inline constexpr char secondMakerLogo[] = "script/makerlogo/seikeiproduction.ogv";
+inline constexpr bool explicitCharacterExtensions=false;
+inline constexpr bool captureReplacements=false;
+inline constexpr bool relativeCameraDepth=false;
+inline constexpr bool extendedCameraFields=true;
+inline constexpr bool separateLayerTiming=true;
+inline constexpr bool stackedHistory=false;
+inline constexpr bool malformedLayerPriority=false;
+inline constexpr bool deferredSceneChanges=false;
+inline constexpr bool localizedHistory=true;
+inline constexpr int musicTrackCount=37;
 inline constexpr bool extendedCgRoots=true;
 inline constexpr char extrasFlag[]="#spopenflag";
 inline constexpr unsigned storyAudioTracks=5;

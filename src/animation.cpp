@@ -6,6 +6,25 @@
 #include <algorithm>
 #include <cmath>
 namespace whj2 {
+std::optional<double> animationProgress(unsigned mode,double power,double t){
+ const double exponent=1+1.4*power;
+ switch(mode){
+  case 0:return 0;
+  case 1:return t;
+  case 3:return 1-std::pow(1-t,exponent);
+  case 4:return std::pow(t,exponent);
+  case 7:return t<.5?.5*(1-std::pow(1-t*2,exponent)):.5+.5*std::pow(t*2-1,exponent);
+  case 8:return t<.5?.5*std::pow(t*2,exponent):1-.5*std::pow((1-t)*2,exponent);
+  case 17:{
+   // Same 1024-step cosine phase as the shared QLIE outback curve.
+   const float angle=float(3.14159265L*float(t));
+   const int phase=int(static_cast<long double>(angle)*512*0.3183098865475128L);
+   const float cosine=float(std::sin((phase+256)*6.283185307179586/1024));
+   return 1-(1-t)*cosine;
+  }
+  default:return {};
+ }
+}
 struct AnimReader {const qlie::Bytes&b;
  size_t p=0;
  uint32_t n(unsigned size=4){if(size>b.size()-p)throw std::runtime_error("Truncated animation");

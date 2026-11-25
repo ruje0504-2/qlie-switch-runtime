@@ -99,8 +99,18 @@ inline constexpr double titleStartWait = 2500, titleMusicFade = 2000, cautionWai
 inline constexpr TitleLayout title{};
 inline constexpr double cautionFade = 0, cautionExitWait = 0;
 inline constexpr char secondMakerLogo[] = "";
+inline constexpr bool explicitCharacterExtensions=false;
+inline constexpr bool captureReplacements=false;
+inline constexpr bool relativeCameraDepth=false;
+inline constexpr bool extendedCameraFields=false;
+inline constexpr bool separateLayerTiming=false;
+inline constexpr bool stackedHistory=false;
+inline constexpr bool malformedLayerPriority=false;
+inline constexpr bool deferredSceneChanges=false;
 inline constexpr bool extendedCgRoots=false;
 inline constexpr const char* extrasFlag=nullptr;
+inline constexpr bool localizedHistory=false;
+inline constexpr int musicTrackCount=18;
 inline constexpr unsigned storyAudioTracks=3;
 inline constexpr float storyMusicGain=.4f;
 inline constexpr char mixerSignature[]="WHJ2-mixer-2";

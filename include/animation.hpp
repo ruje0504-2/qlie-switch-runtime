@@ -2,7 +2,9 @@
 #include "qlie.hpp"
 #include "particles.hpp"
 #include <array>
+#include <optional>
 namespace whj2 {
+std::optional<double> animationProgress(unsigned mode,double power,double fraction);
 struct AnimationLayer {std::string name;unsigned version;uint8_t flags,mode;std::vector<qlie::Bytes> keys;};
 struct Motion {std::string name;std::vector<AnimationLayer> layers;int32_t loopStart=0,loopEnd=0;};
 struct Animation {

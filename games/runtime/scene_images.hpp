@@ -47,7 +47,8 @@ class SceneImages {
  static std::string filterName(const std::map<std::string,std::string>&,unsigned);
  void loadCharacterExtension(Layer&,const std::string&);
  void loadReplacement(Layer&,const std::string&);
- void transition(Layer&,const Layer&,bool,bool);
+ void transition(Layer&,const Layer&,bool position,bool color,const std::string& durationOverride={});
+ static void clearWave(Layer&);
  void setWave(Layer&,std::string);
  static std::array<float,3> sampleWave(const Layer&);
  bool cameraCommand(const std::string&);
@@ -89,6 +90,7 @@ public:
  void takePortraitGradient(PortraitGradient&);
  void installPortraitGradient(const PortraitGradient&);
  void prepareRestoredPortraitGradients();
+ bool changesCapturedScene(const std::string&)const;
  bool warmFile(const std::string&,bool required=false,bool prepareVideo=true);
  void draw(RenderTarget&,bool liveVideo=false,const Affine2D* view=nullptr)const;
  void drawScene(RenderTarget&,bool liveVideo=false)const;void drawFaces(RenderTarget&)const;void drawMessages(RenderTarget&)const;

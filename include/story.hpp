@@ -1,6 +1,7 @@
 #pragma once
 #include "qlie.hpp"
 #include <deque>
+#include <functional>
 #include <set>
 namespace whj2 {
 std::string trim(std::string);
@@ -23,6 +24,9 @@ struct StoryProfile {
  std::string nameEntryScript{}, alternateHeader{}, endingMovieScript{};
  unsigned historyJumpLimit=0;
  bool sceneSkip=false;
+ std::string replayPrelude{};
+ bool arithmeticFragments=false;
+ std::set<std::string> ignoredCaretCommands{};
 };
 class Story {
  enum class After {None,Interlude,VisualWait};
@@ -48,6 +52,7 @@ public:
  void start();void startReplay(const std::string&script);
  Event next();
  std::vector<std::string> upcomingAssetCommands(bool opening=false);
+ bool beforeNextPresentation(bool hasBody,const std::function<bool(const Event&)>& match);
  void choose(unsigned);
  bool setPlayerName(std::string);
  bool historyJumpEnabled()const;

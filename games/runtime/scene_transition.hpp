@@ -34,6 +34,7 @@ public:
  static std::string ruleKey(const std::string&);
  std::vector<std::string> ruleAssets(const std::string&)const;
  void warmRule(const std::string&,bool required=false);
+ bool needsCapture(const std::string&)const;
  bool command(const std::string&,const qlie::Bytes& scene,SentenceWait* wait=nullptr);
  bool commandWithCapture(const std::string&,const std::function<qlie::Bytes()>&,SentenceWait* wait=nullptr,bool animate=true);
  void startAnimation(const std::string&,double,const qlie::Bytes&);

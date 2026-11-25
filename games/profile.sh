@@ -7,6 +7,19 @@ case "$qlie_game" in
     qlie_nro_title="QLIE Switch Runtime (Development)"
     qlie_nro_version=0.0.2
     ;;
+  whj25|whj2.5)
+    qlie_game=whj25
+    qlie_profile_flags=-DQLIE_PROFILE_WHJ25
+    qlie_binary=whj25-switch-runtime
+    qlie_nro_title="美少女万華鏡 -かつて少女だった君へ-"
+    qlie_nro_version=1.0.0
+    ;;
+  whj3)
+    qlie_profile_flags=-DQLIE_PROFILE_WHJ3
+    qlie_binary=whj3-switch-runtime
+    qlie_nro_title="美少女万華鏡 -神が造りたもうた少女たち-"
+    qlie_nro_version=1.0.0
+    ;;
   whj4)
     qlie_profile_flags=-DQLIE_PROFILE_WHJ4
     qlie_binary=whj4-switch-runtime
@@ -20,7 +33,7 @@ case "$qlie_game" in
     qlie_nro_version=1.0.0
     ;;
   *)
-    echo "QLIE_GAME must be whj2, whj4, or whj5" >&2
+    echo "QLIE_GAME must be whj2, whj25, whj3, whj4, or whj5" >&2
     exit 2
     ;;
 esac

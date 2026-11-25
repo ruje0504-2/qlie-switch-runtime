@@ -3,6 +3,7 @@
 #include "image.hpp"
 #include "story.hpp"
 #include <array>
+#include "render_queue.hpp"
 #include <png.h>
 #include <cstdio>
 #include <jpeglib.h>
@@ -12,6 +13,9 @@
 #include <limits>
 #include <algorithm>
 #include <array>
+#include <charconv>
+#include <cmath>
+#include <string_view>
 namespace whj2 {
 namespace {
 template<unsigned Radius>
@@ -49,6 +53,211 @@ Image boxBlur(const Image&source){
    for(unsigned c=0;c<4;c++)center[x][c]=center[x][c]+entering[c]-leaving[c];
  }
  return out;
+}
+Image characterBlurCanvas(const Image&source){
+ // The authored canvas,10,10,10,0 adds left/top/right/bottom margins.
+ // WHJ3's canvas handler fills the margin with transparent 0x00888888.
+ constexpr unsigned left=10,top=10,right=10;
+ const unsigned width=source.width+left+right,height=source.height+top;
+ Image padded{width,height,qlie::Bytes(size_t(width)*height*4,0x88)};
+ for(size_t i=3;i<padded.pixels.size();i+=4)padded.pixels[i]=0;
+ for(unsigned y=0;y<source.height;++y)
+  std::memcpy(padded.pixels.data()+(size_t(y+top)*width+left)*4,
+              source.pixels.data()+size_t(y)*source.width*4,size_t(source.width)*4);
+ return padded;
+}
+
+using FilterFields=std::vector<std::string_view>;
+FilterFields filterFields(std::string_view expression,char delimiter){
+ FilterFields result;
+ while(!expression.empty()){
+  const auto split=expression.find(delimiter);
+  result.push_back(expression.substr(0,split));
+  if(split==std::string_view::npos)break;
+  expression.remove_prefix(split+1);
+ }
+ return result;
+}
+int filterNumber(std::string_view field){
+ const auto base=!field.empty()&&field.front()=='$'?16:10;
+ if(base==16)field.remove_prefix(1);
+ int number=0;
+ const auto parsed=std::from_chars(field.data(),field.data()+field.size(),number,base);
+ if(parsed.ec!=std::errc{}||parsed.ptr!=field.data()+field.size())
+  throw std::runtime_error("Invalid image filter parameter "+std::string(field));
+ return number;
+}
+void colorRamp(std::array<uint32_t,256>&ramp,unsigned first,unsigned last,uint32_t from,uint32_t to){
+ if(first==last){ramp[first]=to;return;}
+ for(unsigned level=first;level<=last;level++){
+  const auto weight=(level-first)*1024/(last-first);
+  for(unsigned shift:{0u,8u,16u}){
+   const unsigned channel=(((from>>shift)&255)*(1024-weight)+((to>>shift)&255)*weight)>>10;
+   ramp[level]=(ramp[level]&~(255u<<shift))|(channel<<shift);
+  }
+ }
+}
+Image applyLumaRamp(const Image&source,const std::array<uint32_t,256>&ramp){
+ Image result=source;
+ for(size_t i=0;i<result.pixels.size();i+=4){
+  auto*pixel=result.pixels.data()+i;
+  const auto color=ramp[(unsigned(pixel[2])*77+unsigned(pixel[1])*150+unsigned(pixel[0])*29)>>8];
+  for(unsigned c=0;c<3;c++)pixel[c]=uint8_t(color>>(8*c));
+ }
+ return result;
+}
+Image gradientMap(const Image&source,const FilterFields&args){
+ // WHJ2.5 4d8888 builds two ramps. 4d6fd0 indexes them with 8-bit luma.
+ std::array<uint32_t,256> ramp{};
+ const auto shadow=uint32_t(filterNumber(args[1]))&0xffffff;
+ const auto midtone=uint32_t(filterNumber(args[2]))&0xffffff;
+ const auto highlight=uint32_t(filterNumber(args[3]))&0xffffff;
+ const auto pivot=unsigned(std::clamp(filterNumber(args[4]),0,255));
+ colorRamp(ramp,0,pivot,shadow,midtone);
+ colorRamp(ramp,pivot,255,midtone,highlight);
+ return applyLumaRamp(source,ramp);
+}
+Image binaryMap(const Image&source,const FilterFields&args){
+ // WHJ2.5 4d38a4 builds a constant/ramp/constant luminance lookup.
+ const int threshold=std::clamp(filterNumber(args[1]),0,255);
+ const auto low=uint32_t(filterNumber(args[2]))&0xffffff;
+ const auto high=uint32_t(filterNumber(args[3]))&0xffffff;
+ const int halfWidth=int(128*(1-std::clamp(filterNumber(args[4]),0,100)/100.f)+.5f);
+ const auto black=unsigned(std::max(0,threshold-halfWidth));
+ const auto white=unsigned(std::min(255,threshold+halfWidth));
+ std::array<uint32_t,256> ramp{};
+ colorRamp(ramp,0,black,low,low);
+ colorRamp(ramp,black,white,low,high);
+ colorRamp(ramp,white,255,high,high);
+ return applyLumaRamp(source,ramp);
+}
+float percent(std::string_view value){
+ return std::clamp(filterNumber(value),-100,100)/100.f;
+}
+Image chromaImage(const Image&source,const FilterFields&args){
+ // 4d6958 mixes each channel with equal contributions from its two neighbors.
+ const int others=int(std::round(-percent(args[1])*85));
+ const int main=255-others*2;
+ Image result=source;
+ for(size_t i=0;i<source.pixels.size();i+=4){
+  const int total=source.pixels[i]+source.pixels[i+1]+source.pixels[i+2];
+  for(unsigned c=0;c<3;c++){
+   const int own=source.pixels[i+c];
+   result.pixels[i+c]=uint8_t(std::clamp((own*main+(total-own)*others)/256,0,255));
+  }
+ }
+ return result;
+}
+int towardLimit(int value,float amount){
+ if(amount<0)return int(value*(1+amount)+.5f);
+ return int(value*(1-amount)+255*amount+.5f);
+}
+Image hueChromaImage(const Image&source,const FilterFields&args){
+ // 4d46cc/4d482c convert 8-bit RGB using integer HSV and a 256-step sector.
+ const int hueShift=std::clamp(filterNumber(args[1]),-180,180);
+ const float saturationChange=percent(args[2]),intensity=percent(args[3]);
+ const bool absolute=filterNumber(args[4])==1;
+ Image result=source;
+ for(size_t i=0;i<source.pixels.size();i+=4){
+  const int red=source.pixels[i+2],green=source.pixels[i+1],blue=source.pixels[i];
+  const int top=std::max({red,green,blue});
+  const int span=top-std::min({red,green,blue});
+  int hue=0,sat=0;
+  if(span){
+   if(top==red)hue=(green-blue)*256/span;
+   if(top==green)hue=(blue-red)*256/span+512;
+   if(top==blue)hue=(red-green)*256/span+1024;
+   hue=hue*60/256;
+   sat=span*256/top;
+  }
+  hue=((absolute?hueShift:hue+hueShift)+720)%360;
+  sat=std::clamp(towardLimit(sat,saturationChange),0,255);
+  const int sector=hue/60;
+  const int step=(hue%60)*256/60;
+  const int floor=(255-sat)*top/256;
+  const int mix=(255-sat*(sector%2?step:256-step)/256)*top/256;
+  const std::array<std::array<int,3>,6> colors{{
+   {floor,mix,top},{floor,top,mix},{mix,top,floor},
+   {top,mix,floor},{top,floor,mix},{mix,floor,top}
+  }};
+  for(unsigned c=0;c<3;c++){
+   const int value=colors[sector][c];
+   result.pixels[i+c]=uint8_t(intensity==0?value:towardLimit(value,intensity));
+  }
+ }
+ return result;
+}
+Image brightnessImage(const Image&source,const FilterFields&args){
+ // 4d65c8 converts brightness/contrast to source and destination endpoints.
+ const float brightness=percent(args[1]),contrast=percent(args[2]);
+ const int adjustment=int(std::round(brightness*250));
+ const int margin=int(std::round(std::abs(contrast)*125));
+ const int inputLow=contrast>=0?margin-adjustment:0;
+ const int inputHigh=contrast>=0?int(std::round(255-contrast*125))-adjustment:255;
+ const int outputLow=contrast>=0?0:margin+adjustment;
+ const int outputHigh=contrast>=0?255:int(std::round(255+contrast*125))+adjustment;
+ const float slope=float(outputHigh-outputLow)/(inputHigh-inputLow);
+ std::array<uint8_t,256> ramp{};
+ for(unsigned i=0;i<ramp.size();i++)
+  ramp[i]=uint8_t(std::clamp(int(std::round(outputLow+slope*(int(i)-inputLow))),0,255));
+ Image result=source;
+ for(size_t i=0;i<result.pixels.size();i+=4)
+  for(unsigned c=0;c<3;c++)result.pixels[i+c]=ramp[result.pixels[i+c]];
+ return result;
+}
+Image sphereImage(const Image&source,const FilterFields&args){
+ // WHJ2.5 4d4c08 and 4d4d5c project the original 16-by-16 mesh
+ // before rasterizing it. A disabled axis does not contribute to its depth.
+ constexpr unsigned divisions=16;
+ if(source.width<divisions||source.height<divisions)return source;
+ const float strength=std::clamp(filterNumber(args[1]),-100,100)/100.f;
+ const bool horizontal=filterNumber(args[2])==1,vertical=filterNumber(args[3])==1;
+ if(!strength||(!horizontal&&!vertical))return source;
+ constexpr float halfPi=1.5707963267948966f;
+ const float centerX=source.width*.5f,centerY=source.height*.5f;
+ std::array<float,divisions+1> xCurve{},yCurve{};
+ for(unsigned i=0;i<=divisions;i++){
+  const float normalized=std::abs(2.f*i/divisions-1.f);
+  xCurve[i]=horizontal?std::cos(halfPi*normalized):0.f;
+  yCurve[i]=vertical?std::cos(halfPi*normalized):0.f;
+ }
+ std::array<std::array<TextureVertex,divisions+1>,divisions+1> vertices{};
+ const float weight=horizontal&&vertical?.5f:1.f;
+ for(unsigned y=0;y<=divisions;y++)for(unsigned x=0;x<=divisions;x++){
+  const float u=float(source.width*x)/divisions,v=float(source.height*y)/divisions;
+  const float scale=1000.f/(1000.f-(xCurve[x]+yCurve[y])*weight*strength*600.f);
+  vertices[y][x]={centerX+(u-centerX)*scale,centerY+(v-centerY)*scale,1000.f,u,v};
+ }
+ RenderQueue renderer;
+ for(unsigned y=0;y<divisions;y++)for(unsigned x=0;x<divisions;x++){
+  const auto&topLeft=vertices[y][x];const auto&topRight=vertices[y][x+1];
+  const auto&bottomLeft=vertices[y+1][x];const auto&bottomRight=vertices[y+1][x+1];
+  renderer.triangle(source,{topLeft,topRight,bottomRight},0,255,0,0xffffff,0,2);
+  renderer.triangle(source,{topLeft,bottomRight,bottomLeft},0,255,0,0xffffff,0,2);
+ }
+ Image result{source.width,source.height,qlie::Bytes(source.pixels.size())};
+ renderer.draw(result.pixels,result.width,result.height);
+ return result;
+}
+Image imageFilterChain(const Image&source,std::string_view expression){
+ Image result;
+ const Image* current=&source;
+ for(const auto operation:filterFields(expression,'/')){
+  const auto fields=filterFields(operation,',');
+  if(fields.size()==5&&fields[0]=="gmap3")result=gradientMap(*current,fields);
+  else if(fields.size()==4&&fields[0]=="sphere")result=sphereImage(*current,fields);
+  else if(fields.size()==5&&fields[0]=="binalize")result=binaryMap(*current,fields);
+  else if(fields.size()==2&&fields[0]=="chroma")result=chromaImage(*current,fields);
+  else if(fields.size()==5&&fields[0]=="huechroma")result=hueChromaImage(*current,fields);
+  else if(fields.size()==3&&fields[0]=="bright")result=brightnessImage(*current,fields);
+  else if(operation=="blur,10,10")result=boxBlur<5>(*current);
+  else if(operation=="blur,15,15")result=boxBlur<7>(*current);
+  else if(operation=="blur,20,20")result=boxBlur<10>(*current);
+  else throw std::runtime_error("Unsupported image filter "+std::string(operation));
+  current=&result;
+ }
+ if(current==&source)throw std::runtime_error("Empty image filter list");
+ return result;
 }
 }
 static Image gradientOverlay(const Image&source,const std::string&name){
@@ -100,11 +309,14 @@ Image filterImage(const Image&source,const std::string&name){
  if(const auto separator=name.find('\\');separator!=name.npos)
   return filterImage(filterImage(source,name.substr(0,separator)),name.substr(separator+1));
  if(name.rfind("\"goverlay,",0)==0&&name.back()=='"')return gradientOverlay(source,name);
- if(name=="blur2")return boxBlur<1>(source);
+ if(name=="charablur10")return boxBlur<5>(characterBlurCanvas(source));
+ if(name=="blur2"||name=="[blur,2,2]")return boxBlur<1>(source);
  if(name=="blur5"||name=="\"blur,4,4\""||name=="\"blur,5,5\"")return boxBlur<2>(source);
  if(name=="blur8")return boxBlur<4>(source);
  if(name=="blur10")return boxBlur<5>(source);
  if(name=="blur20")return boxBlur<10>(source);
+ if(name.size()>2&&name.front()=='['&&name.back()==']')
+  return imageFilterChain(source,std::string_view(name).substr(1,name.size()-2));
  Image out{source.width,source.height,source.pixels};
  if(name=="none"||name.empty())return out;
  if(name=="sepia"){applySepia(out.pixels);return out;}

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "diagnostics.h"
 #include "scene_images.hpp"
+#include "profile.hpp"
 #include "video_surface_image.hpp"
 #include "asset_read_ahead.hpp"
 #include "story.hpp"
@@ -26,12 +27,38 @@ extern "C" {
 #include <string_view>
 namespace whj2 {
 namespace {
+constexpr char captureReplacement[]="%%%capture_999";
+constexpr char capturePixels[]="@capture-bgra";
+bool isCaptureReplacement(std::string_view name){
+ return name=="$capture"||name==captureReplacement;
+}
+constexpr unsigned captureWidth=1280,captureHeight=720;
+constexpr size_t captureBytes=size_t(captureWidth)*captureHeight*4;
 float numeric(const std::string&s){return !s.empty()&&s[0]=='$'?float(std::stoul(s.substr(1),nullptr,16)):std::stof(s);
  }
 std::string characterImageName(const std::string&name,std::string&prefix){
  auto parts=split(name,':');
  if(parts.size()>1)prefix=parts[1];
  return parts[0].find('/')==std::string::npos?prefix+parts[0]:parts[0];
+}
+std::vector<std::string> sceneFields(const std::string&arguments){
+ std::vector<std::string> fields;
+ bool quoted=false;
+ unsigned bracketDepth=0;
+ size_t start=0;
+ for(size_t i=0;i<arguments.size();++i){
+  const auto ch=arguments[i];
+  if(ch=='"')quoted=!quoted;
+  if(quoted)continue;
+  if(ch=='[')++bracketDepth;
+  else if(ch==']'&&bracketDepth)--bracketDepth;
+  else if(ch==','&&!bracketDepth){
+   fields.push_back(trim(arguments.substr(start,i-start)));
+   start=i+1;
+  }
+ }
+ fields.push_back(trim(arguments.substr(start)));
+ return fields;
 }
 bool characterPart(const std::string&key){
  return key.size()==5&&key.compare(0,4,"file")==0&&key.back()>='0'&&key.back()<='7';
@@ -250,6 +277,8 @@ struct EmbeddedDecoder {
     retained->surface=surface;
     retained->source=source;
     retained->readFrame=kvideo_read_frame;
+    retained->encoded=bytes;
+    retained->tick=due;
     output->videoSurface=std::move(retained);
    }else output->videoSurface.reset();
    if(borrowed)spare=std::move(frame);
@@ -412,6 +441,15 @@ struct Composite {
      return slot.image&&(slot.name==material.name||(!material.texture.empty()&&slot.name==material.texture));
     });
     size_t slot=picture==members.end()?SIZE_MAX:size_t(picture-members.begin());
+    if(slot==SIZE_MAX&&!material.texture.empty()){
+     const auto path=qlie::canonical(material.texture);
+     const auto leaf=path.substr(path.find_last_of('/')+1);
+     for(const auto&alias:game_profile::title.modelTextures){
+      if(!alias.container||alias.container!=name||alias.source!=leaf)continue;
+      auto it=std::find_if(members.begin(),members.end(),[&](const auto&entry){return entry.image&&entry.name==alias.member;});
+      if(it!=members.end())slot=size_t(it-members.begin());
+     }
+    }
     // Legacy embedded models can name an external texture in MQO and
     // supply its only image through a linked ABMP member.
     if(slot==SIZE_MAX&&!material.texture.empty()&&member.mesh->materials.size()==1&&linkedSlots.size()==1)
@@ -816,7 +854,8 @@ std::optional<SceneImages::BackgroundBlur> SceneImages::backgroundBlur(const std
  if(!current.pixels||current.composite)return {};
  auto params=current.params;
  // Only precompute filters that operate on the currently loaded bitmap.
- for(const auto&field:split(line.substr(comma+1),',')){
+ // Commands replacing the image or expanding a template use the normal path.
+ for(const auto&field:sceneFields(line.substr(comma+1))){
   auto colon=field.find(':');
   if(colon==field.npos)return {};
   auto name=field.substr(0,colon);
@@ -840,6 +879,13 @@ void SceneImages::warmBackgroundBlur(const BackgroundBlur&blur,bool required){
 void SceneImages::installBackgroundBlur(const BackgroundBlur&blur){
  if(auto ready=readAhead->takeReady(blur.key()))
   layers.at(blur.layer).filtered[0]={blur.source,std::move(ready->bitmap),blur.name};
+}
+bool SceneImages::changesCapturedScene(const std::string&line)const{
+ const auto comma=line.find(',');
+ if(comma==line.npos)return false;
+ const auto object=line.substr(1,comma-1);
+ return object.rfind("chara",0)==0||object.rfind("bg",0)==0||
+        object=="effect"||object=="env"||(object=="camera"&&hasCamera)||imageObjects.count(object);
 }
 static bool portraitFilterProperty(const std::string&name){
  return name=="imgfilter"||name=="imgfilterbase"||name=="imgfilter0";
@@ -909,9 +955,9 @@ std::vector<std::string> SceneImages::warmPaths(const std::string&line,Character
    for(const auto&param:layer->second.params)if(characterPart(param.first))parts.insert(param);
   }
  }
- std::string base;
+ std::string base,extension;
  // An authored template can supply the window, effect or actor's motion file.
- auto args=split(expand(line.substr(comma+1),multipart?"chara8e":chara?"chara":face?"face":message?"message":"image"),',');
+ auto args=sceneFields(expand(line.substr(comma+1),multipart?"chara8e":chara?"chara":face?"face":message?"message":"image"));
  if(multipart){
   if(collectCharacterParts(args,parts))args.push_back("file:"+characterPartsName(parts));
   if(future)future->parts.insert_or_assign(cmd,std::move(parts));
@@ -936,7 +982,7 @@ std::vector<std::string> SceneImages::warmPaths(const std::string&line,Character
    portrait.replaced=layer!=layers.end()&&layer->second.uiSlots.count(0);
  }
  for(auto&field:args){
-  if(field=="clear:def"){base.clear();if(chara)stem.clear();}
+  if(field=="clear:def"){base.clear();extension.clear();if(chara)stem.clear();}
   auto sep=field.find(':');if(sep==field.npos)continue;
   auto key=field.substr(0,sep),name=field.substr(sep+1);
   if(predictPortrait){
@@ -950,6 +996,7 @@ std::vector<std::string> SceneImages::warmPaths(const std::string&line,Character
   }
   if(key=="file"&&!chara)name=split(name,':').front();
   if((chara||face)&&key=="base"){base=std::move(name);continue;}
+  if(multipart&&key=="extfile"){extension=std::move(name);continue;}
   if(name.empty()||name=="none"||name=="none:none"||name.find('$')!=name.npos)continue;
   bool replacement=key.size()==4&&key.rfind("rep",0)==0;
   if(key!="file"&&!replacement)continue;
@@ -1050,7 +1097,11 @@ void SceneImages::loadCharacterExtension(Layer&layer,const std::string&file){
  if(file.empty()||file=="none"){layer.extension.reset();return;}
  const auto path=sceneResource(assets,"chara/"+file,false);
  if(path.empty())throw std::runtime_error("Missing character extension "+file);
- layer.extension=sceneComposite(path);
+ auto extension=sceneComposite(path);
+ if constexpr(game_profile::explicitCharacterExtensions){
+  if(!findMotion(extension->definition,layer.params.at("extmotion"))){layer.extension.reset();return;}
+ }
+ layer.extension=std::move(extension);
 }
 void SceneImages::loadReplacement(Layer&layer,const std::string&path){
  layer.params["@replacement"]=path;
@@ -1186,17 +1237,23 @@ float SceneImages::value(const Layer&layer,const std::string&key,float fallback)
  if(key=="texfilter"){if(param->second=="pass")return 0;if(param->second=="point")return 1;if(param->second=="linear")return 2;}
  return numeric(param->second);}
  const auto&t=tween->second;double q=t.duration>0?std::clamp(t.elapsed/t.duration,0.,1.):1;
- double exponent=1+1.4*t.power/100;
- if(q<1)switch(t.mode){case 0:q=0;break;case 1:break;case 3:q=1-std::pow(1-q,exponent);break;case 4:q=std::pow(q,exponent);break;
-  case 8:q=q<.5?.5*std::pow(q*2,exponent):1-.5*std::pow((1-q)*2,exponent);break;
-  default:throw std::runtime_error("Unsupported image tween mode");}
- if(key=="mulcolor"||key=="addcolor"){uint32_t result=0;for(unsigned shift=0;shift<24;shift+=8){int from=(uint32_t(t.from)>>shift)&255,to=(uint32_t(t.to)>>shift)&255;result|=uint32_t(from+(to-from)*q)<<shift;}return float(result);}
+ if(q<1){
+  const auto ease=animationProgress(t.mode,double(t.power)/100,q);
+  if(!ease)throw std::runtime_error("Unsupported image tween mode");
+  q=*ease;
+ }
+ if(key=="mulcolor"||key=="addcolor"){q=std::clamp(q,0.,1.);uint32_t result=0;for(unsigned shift=0;shift<24;shift+=8){int from=(uint32_t(t.from)>>shift)&255,to=(uint32_t(t.to)>>shift)&255;result|=uint32_t(from+(to-from)*q)<<shift;}return float(result);}
  return float(t.from+(t.to-t.from)*q);
 }
-void SceneImages::transition(Layer&layer,const Layer&before,bool position,bool color){
- double duration=layer.params.count("time")?numeric(layer.params.at("time")):0;
+void SceneImages::transition(Layer&layer,const Layer&before,bool position,bool color,const std::string&durationOverride){
+ const auto durationParam=layer.params.find("time");
+ const double duration=!durationOverride.empty()?numeric(durationOverride):
+                       durationParam!=layer.params.end()?numeric(durationParam->second):0;
  unsigned mode=1;auto m=layer.params.find("move");if(m!=layer.params.end()){
-  if(m->second=="step")mode=0;else if(m->second=="linear")mode=1;else if(m->second=="outquart"||m->second=="square")mode=3;else if(m->second=="inquart"||m->second=="invsqare")mode=4;else if(m->second=="inoutquart")mode=8;
+  if(m->second=="step")mode=0;else if(m->second=="linear")mode=1;else if(m->second=="outquart"||m->second=="square")mode=3;else if(m->second=="inquart"||m->second=="invsqare")mode=4;
+  else if(m->second=="outinquart")mode=7;
+  else if(m->second=="inoutquart")mode=8;
+  else if(m->second=="outback")mode=17;
   else {QLIE_LOG_LINE(<<"PENDING-IMAGE-TWEEN mode="<<m->second<<"\n");mode=0;}
  }
  float power=layer.params.count("movepow")?numeric(layer.params.at("movepow")):100;
@@ -1239,14 +1296,18 @@ void SceneImages::update(double ms){for(auto&entry:layers){auto&layer=entry.seco
   if(ms>=1000.0/60)QLIE_LOGF("LOAD video_cleanup_ms=%.3f clips=%zu\n",ms,closed);
  }
 }
+void SceneImages::clearWave(Layer&layer){
+ for(auto entry=layer.params.lower_bound("wave_");entry!=layer.params.end()&&entry->first.rfind("wave_",0)==0;)
+  entry=layer.params.erase(entry);
+ layer.waveMilliseconds=-1;
+}
 void SceneImages::setWave(Layer&layer,std::string recipe){
- if(recipe.size()>=2&&recipe.front()=='"'&&recipe.back()=='"')recipe=recipe.substr(1,recipe.size()-2);
+ if(recipe.size()>=2&&((recipe.front()=='['&&recipe.back()==']')||
+                      (recipe.front()=='"'&&recipe.back()=='"')))recipe=recipe.substr(1,recipe.size()-2);
  const auto named=waveRecipes.find(recipe);
  if(named!=waveRecipes.end())recipe=named->second;
- for(auto i=layer.params.lower_bound("wave_");i!=layer.params.end()&&i->first.rfind("wave_",0)==0;)
-  i=layer.params.erase(i);
- layer.waveMilliseconds=-1;
- if(recipe=="none"||recipe.empty())return;
+ clearWave(layer);
+ if(recipe.empty()||recipe=="none")return;
  for(const auto&item:split(recipe,',')){
   const auto separator=item.find(':');
   if(separator!=item.npos)layer.params["wave_"+item.substr(0,separator)]=item.substr(separator+1);
@@ -1256,14 +1317,16 @@ void SceneImages::setWave(Layer&layer,std::string recipe){
 std::array<float,3> SceneImages::sampleWave(const Layer&layer){
  const auto mode=layer.params.find("wave_mode");
  if(mode==layer.params.end()||mode->second=="none")return {};
- const double time=(layer.waveMilliseconds>=0?layer.waveMilliseconds:layer.milliseconds)-value(layer,"wave_delay",0);
- const double duration=value(layer,"wave_time",0);
- const bool repeat=layer.params.count("wave_infinity")&&layer.params.at("wave_infinity")=="true";
- if(time<0||(!repeat&&time>=duration))return {};
- const auto phase=time/std::max(1.f,value(layer,"wave_cycle",100));
+ const double waveTime=(layer.waveMilliseconds>=0?layer.waveMilliseconds:layer.milliseconds)-value(layer,"wave_delay",0);
+ const bool unlimited=layer.params.count("wave_time")&&layer.params.at("wave_time")=="infinity";
+ const double waveDuration=unlimited?0:value(layer,"wave_time",0);
+ const bool repeat=unlimited||(layer.params.count("wave_infinity")&&layer.params.at("wave_infinity")=="true");
+ if(waveTime<0||(!repeat&&waveTime>=waveDuration))return {};
+ const auto phase=waveTime/std::max(1.f,value(layer,"wave_cycle",100));
  const auto fade=layer.params.find("wave_fade");
- const auto elapsed=std::clamp(time/std::max(1.,duration),0.,1.);
- const double envelope=fade==layer.params.end()?1:fade->second=="in"?elapsed:fade->second=="out"?1-elapsed:1;
+ const auto elapsed=unlimited?0:std::clamp(waveTime/std::max(1.,waveDuration),0.,1.);
+ const double envelope=fade==layer.params.end()?1:fade->second=="in"||fade->second=="inlinear"?elapsed:
+                       fade->second=="out"||fade->second=="outlinear"?1-elapsed:1;
  const auto amplitude=[&](unsigned axis){
   if(mode->second=="sin"||mode->second=="abssin"){
    constexpr double tau=6.283185307179586;
@@ -1296,7 +1359,7 @@ bool SceneImages::cameraCommand(const std::string&arguments){
  const char*transformKeys[]={"x","y","z","scalex","scaley","rotz"};
  auto duration=camera.params["time"];
  bool moved=false;
- for(const auto&field:split(expand(arguments,"camera"),',')){
+ for(const auto&field:sceneFields(expand(arguments,"camera"))){
   const auto colon=field.find(':');
   if(colon==field.npos)throw std::runtime_error("Unknown camera template "+field);
   const auto key=field.substr(0,colon),value=field.substr(colon+1);
@@ -1308,6 +1371,11 @@ bool SceneImages::cameraCommand(const std::string&arguments){
    continue;
   }
   if(key=="genfilter"){setWave(camera,value);continue;}
+  if(game_profile::extendedCameraFields&&key=="gmode1"){clearWave(camera);camera.milliseconds=0;camera.params["wave_mode"]=value;continue;}
+  if(game_profile::extendedCameraFields&&key.size()>2&&key.front()=='g'&&key.back()=='1'){
+   camera.params["wave_"+key.substr(1,key.size()-2)]=value;
+   continue;
+  }
   if(key=="time")camera.params[key]=duration=value;
   if(key=="movetime")duration=value;
   if(key=="pri1"||key=="pri2"||key=="move"||key=="movepow"||key=="texfilter")camera.params[key]=value;
@@ -1347,6 +1415,23 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  bool chara=cmd.rfind("chara",0)==0,face=cmd=="face",message=cmd=="message",ui=cmd.rfind("ui_",0)==0;
  if(!ui&&!chara&&!face&&!message&&cmd.rfind("bg",0)!=0&&cmd!="effect"&&cmd!="env"&&!imageObjects.count(cmd))return false;
  const bool multipart=splitCharacters.count(cmd)!=0;
+ auto args=sceneFields(expand(p==line.npos?"":line.substr(p+1),multipart?"chara8e":chara?"chara":face?"face":message?"message":"image"));
+ std::shared_ptr<const Image> snapshot;
+ if constexpr(game_profile::captureReplacements){
+  const auto capture=[](const std::string& field){
+   return field.rfind("rep0:",0)==0&&isCaptureReplacement(std::string_view(field).substr(5));
+  };
+  if(std::any_of(args.begin(),args.end(),capture)){
+   // GameThreadImageZ,999 samples the scene below the message window
+   // before loading the effect that owns this snapshot.
+   Image image{captureWidth,captureHeight,qlie::Bytes(captureBytes)};
+   for(size_t i=0;i<captureBytes;i+=4){
+    image.pixels[i]=35;image.pixels[i+1]=25;image.pixels[i+2]=20;image.pixels[i+3]=255;
+   }
+   drawThumbnail(image.pixels,999);
+   snapshot=sceneBitmap(std::move(image));
+  }
+ }
  auto&l=layers[cmd];
  const std::map<std::string,std::string> faceDefaults{{"mode","auto"},{"disp","once"},{"show","false"},{"x","0"},{"y","0"},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri","0"},{"align","left:top"},{"@face-active","false"}};
  // Imo_Image_DefaultParam is merged by clear:def, including animation state.
@@ -1384,8 +1469,7 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  if(chara&&resetsMotion("motion","motionkeep")){
   l.params["motion"]="def";l.milliseconds=0;l.audioMilliseconds=-1;
  }
- if(multipart&&resetsMotion("extmotion","extmotionkeep"))l.params["extmotion"]="def";
- auto args=split(expand(p==line.npos?"":line.substr(p+1),multipart?"chara8e":chara?"chara":face?"face":message?"message":"image"),44);
+ if(!game_profile::explicitCharacterExtensions&&multipart&&resetsMotion("extmotion","extmotionkeep"))l.params["extmotion"]="def";
  if(multipart){
   std::map<std::string,std::string> parts;
   for(const auto&param:l.params)if(characterPart(param.first))parts.insert(param);
@@ -1397,7 +1481,8 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
   }
  }
  Layer before=l;bool file=false,baseChanged=false,position=false,color=false,messageShow=false;bool replacementChanged[4]={};
- std::string colorTime,moveTime;
+ bool startExtension=false;
+ std::string colorTime,moveTime,onceTime;
  std::map<std::string,std::string> beginPosition;
  if(std::any_of(args.begin(),args.end(),[](const std::string&arg){return arg.rfind("file:",0)==0;})){
   l.replacementVideo.reset();l.scriptReplacement.reset();l.params.erase("@replacement");for(unsigned i=0;i<4;i++)l.params.erase("rep"+std::to_string(i));
@@ -1408,6 +1493,11 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  auto key=s.substr(0,c),v=s.substr(c+1);
  // Imo_Image_Excute keeps only the first value after the property name.
  if(key=="file"&&!chara)v=split(v,':').front();
+ if(game_profile::malformedLayerPriority&&key=="addpri"){
+  try{(void)numeric(v);}
+  catch(const std::invalid_argument&){v="0";}
+  catch(const std::out_of_range&){v="0";}
+ }
  if(multipart&&characterPart(key)){
   if(v=="none")l.params.erase(key);
   else l.params[key]=v;
@@ -1418,12 +1508,28 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
   l=Layer{};
   l.params=message?messageDefaults:chara?charaDefaults:imageDefaults;
   file=baseChanged=position=color=messageShow=false;
-  colorTime.clear();moveTime.clear();beginPosition.clear();
+  colorTime.clear();moveTime.clear();onceTime.clear();beginPosition.clear();startExtension=false;
   std::fill(std::begin(replacementChanged),std::end(replacementChanged),false);continue;
  }
  if(face&&key=="clear"&&v=="def"){l=Layer{};l.params=faceDefaults;continue;}
  if(key=="imgfilter"&&(!l.params.count(key)||l.params.at(key)!=v))l.filtered={};
+ if(message&&(key=="textarea"||key=="fontsize"||key=="oncefontsize")){
+  const auto parts=split(v,':');
+  const auto prefix=key=="oncefontsize"?"@oncefontsize":key;
+  l.params[prefix+"w"]=parts[0];
+  l.params[prefix+"h"]=parts.size()>1?parts[1]:parts[0];
+  continue;
+ }
+ if(message&&(key=="textareaw"||key=="textareah"||key=="fontsizew"||key=="fontsizeh")){
+  l.params[key]=v;
+  continue;
+ }
+ if(message&&(key=="oncefontsizew"||key=="oncefontsizeh"||key=="oncefontcolor")){
+  l.params["@"+key]=v;
+  continue;
+ }
  if(key=="colortime"||key=="movetime"||key=="oncetime"){
+  if(key=="oncetime"&&game_profile::separateLayerTiming){onceTime=v;continue;}
   if(key=="colortime"||(key=="oncetime"&&colorTime.empty()))colorTime=v;
   if(key=="movetime"||(key=="oncetime"&&moveTime.empty()))moveTime=v;
   continue;
@@ -1443,8 +1549,14 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  if(multipart&&(key=="hide"||key=="extfile"||key=="extmotion"||key=="extmotionkeep"||
                   key=="extax"||key=="extay"||key=="extaz"||key=="extsx"||key=="extsy")){
   l.params[key]=v;
-  if(key=="extfile"){l.extension.reset();l.params["extmotion"]="def";l.params["extmotionkeep"]="false";}
-  if(key=="extmotion"){l.extensionMilliseconds=0;l.params["extmotionkeep"]="false";}
+  if(key=="extfile"){
+   l.extension.reset();
+   if constexpr (!game_profile::explicitCharacterExtensions){
+    l.params["extmotion"]="def";l.params["extmotionkeep"]="false";
+   }
+  }
+  if(game_profile::explicitCharacterExtensions&&key=="hide")l.extension.reset();
+  if(key=="extmotion"){startExtension=true;l.extensionMilliseconds=0;l.params["extmotionkeep"]="false";}
   continue;
  }
  if(key=="balpha"||key=="baddcolor"||key=="bmulcolor"){
@@ -1476,10 +1588,12 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
   l.params[pairKey]=pair[0]+":"+pair[1];
   continue;
  }
+ if(game_profile::explicitCharacterExtensions&&multipart&&key=="show")l.extension.reset();
  l.params[key]=v;
  if(message&&key=="show")messageShow=true;
  if(key=="file"){l.filtered={};file=true;if(face)l.params["@face-active"]="true";}
  if((chara||face)&&key=="base")baseChanged=true;
+ if(multipart&&key=="motionkeep")continue;
  if(key=="x"||key=="y"||key=="z"||key=="ax"||key=="ay"||key=="az"||key=="scalex"||key=="scaley"||key=="scalez"||key=="rotx"||key=="roty"||key=="rotz"||key=="pri")position=true;
  if(key=="alpha"||key=="mulcolor"||key=="addcolor")color=true;
  if(key=="vol"&&std::stof(v)==0)l.audioStopPending=true;
@@ -1494,6 +1608,12 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  // Imoscripter applies rep0..rep3 in order, each to member zero.
  for(unsigned i=0;i<4;i++)if(replacementChanged[i]){
   auto replacement=l.params.at("rep"+std::to_string(i));std::string path;
+  if(snapshot&&i==0&&isCaptureReplacement(replacement)){
+   l.params["@replacement"]=captureReplacement;
+   l.replacementVideo.reset();
+   l.scriptReplacement=std::move(snapshot);
+   continue;
+  }
   if(!replacement.empty()&&replacement!="none"){
    path=sceneResource(assets,"image/"+replacement,false);
    if(path.empty())throw std::runtime_error("Missing replacement image "+replacement);
@@ -1518,24 +1638,18 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
   }
  }
  if(multipart&&l.params.count("extfile")&&l.params.count("extmotion")&&
-    l.params.at("extmotion")!="def"&&!l.extension)
+    l.params.at("extmotion")!="def"&&
+    (game_profile::explicitCharacterExtensions?(startExtension&&(!l.params.count("hide")||l.params.at("hide")!="true")):!l.extension))
   loadCharacterExtension(l,l.params.at("extfile"));
- if(position&&!moveTime.empty()){
-  const auto time=l.params.find("time");
-  const std::optional<std::string> original=time==l.params.end()?std::nullopt:std::optional<std::string>(time->second);
-  l.params["time"]=moveTime;
-  transition(l,before,true,false);
-  if(original)l.params["time"]=*original;else l.params.erase("time");
-  position=false;
- }
- transition(l,before,position,color&&colorTime.empty());
- if(color&&!colorTime.empty()){
-  const auto duration=l.params.find("time");
-  const auto originalTime=duration==l.params.end()?std::string{}:duration->second;
-  l.params["time"]=colorTime;
-  transition(l,before,false,true);
-  if(originalTime.empty())l.params.erase("time");
-  else l.params["time"]=originalTime;
+ if(position||color){
+  const auto& positionDuration=moveTime.empty()?onceTime:moveTime;
+  const auto& colorDuration=colorTime.empty()?onceTime:colorTime;
+  if(position&&color&&positionDuration!=colorDuration){
+   transition(l,before,true,false,positionDuration);
+   transition(l,before,false,true,colorDuration);
+  }else{
+   transition(l,before,position,color,position?positionDuration:colorDuration);
+  }
  }
  auto loadBase=[&](){auto base=l.params.find("base");if((!chara&&!face)||base==l.params.end()||base->second=="none"||base->second.empty())return false;
   std::string path=(face?"face/":"chara/")+base->second;if(!assets.exists(path)&&assets.exists(path+".b"))path+=".b";
@@ -1581,7 +1695,14 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  }
  }return true;
  }
-void SceneImages::beginPage(){faceWarning=false;auto i=layers.find("face");if(i!=layers.end())i->second.params["@face-active"]="false";}
+void SceneImages::beginPage(){
+ faceWarning=false;
+ auto face=layers.find("face");
+ if(face!=layers.end())face->second.params["@face-active"]="false";
+ auto message=layers.find("message");
+ if(message!=layers.end())for(auto key:{"@oncefontsizew","@oncefontsizeh","@oncefontcolor"})
+  message->second.params.erase(key);
+}
 std::string SceneImages::mappedFace(std::string file)const{
  if(file.rfind("chara/",0)==0)file.erase(0,6);
  for(auto&entry:faceRepFile){size_t pos=0;while((pos=file.find(entry.first,pos))!=file.npos){file.replace(pos,entry.first.size(),entry.second);pos+=entry.second.size();}}
@@ -1643,7 +1764,12 @@ void SceneImages::pointViewPan(float x,float y){
 MessageStyle SceneImages::messageStyle()const{MessageStyle style;auto it=layers.find("message");if(it==layers.end())return style;auto&params=it->second.params;
  auto pair=[&](const std::string&key,unsigned&a,unsigned&b){auto found=params.find(key);if(found==params.end())return;auto values=split(found->second,':');a=unsigned(numeric(values[0]));b=values.size()>1?unsigned(numeric(values[1])):a;};
  pair("textarea",style.width,style.height);pair("fontsize",style.fontWidth,style.fontHeight);
-auto color=params.find("fontcolor");if(color!=params.end())style.color=uint32_t(numeric(color->second));return style;
+ auto property=[&](const char*key,auto&value){auto found=params.find(key);if(found!=params.end())value=numeric(found->second);};
+ property("textareaw",style.width);property("textareah",style.height);
+ property("fontsizew",style.fontWidth);property("fontsizeh",style.fontHeight);
+ property("fontcolor",style.color);property("@oncefontsizew",style.fontWidth);
+ property("@oncefontsizeh",style.fontHeight);property("@oncefontcolor",style.color);
+ return style;
 }
 bool SceneImages::messageVisible()const{auto it=layers.find("message");return it!=layers.end()&&it->second.params.at("show")=="true";}
 void SceneImages::setMessageImage(Image image,bool show){setMessageImage(sceneBitmap(std::move(image)),show);}
@@ -1688,6 +1814,7 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
   }else{
    x+=wave[0];y+=wave[1];viewZ+=wave[2];
   }
+  if constexpr(game_profile::relativeCameraDepth)viewZ=-viewZ;
   view=imagePlacement(640+x,360+y,zoomX/100,zoomY/100,value(layer,"rotz",0),.5f,.5f,1280,720);
   nearPriority=value(layer,"pri1",-100);farPriority=value(layer,"pri2",999);
   cameraFilter=unsigned(value(layer,"texfilter",0));
@@ -1856,12 +1983,30 @@ qlie::Bytes SceneImages::save()const{StateWriter w;
  w.n(l.audioStopPending);
  w.n(l.tweens.size());for(auto&t:l.tweens){w.str(t.first);w.f(t.second.from);w.f(t.second.to);w.f(t.second.power);w.n(uint64_t(t.second.elapsed*1000));w.n(uint64_t(t.second.duration*1000));w.n(t.second.mode);}
  const bool activeExtension=l.extension&&l.params.at("extmotion")!="def";
- w.n(l.params.size()+(l.waveMilliseconds>=0)+activeExtension);
- if(activeExtension){w.str("@extension-clock");w.str(std::to_string(uint64_t(l.extensionMilliseconds*1000)));}
+ const auto replacement=l.params.find("@replacement");
+ const bool captured=game_profile::captureReplacements&&l.scriptReplacement&&
+                     replacement!=l.params.end()&&replacement->second==captureReplacement;
+ w.n(l.params.size()+(l.waveMilliseconds>=0)+activeExtension+captured);
+ auto writeProperties=[&]{
+  for(const auto& item:l.params){w.str(item.first);w.str(item.second);}
+ };
+ // WHJ3/2.5 version-7 saves put authored properties before transient clocks.
+ if constexpr(game_profile::explicitCharacterExtensions)writeProperties();
+ if(captured){
+  w.str(capturePixels);
+  const auto& pixels=l.scriptReplacement->pixels;
+  w.str(std::string(reinterpret_cast<const char*>(pixels.data()),pixels.size()));
+ }
+ if(activeExtension){
+  if constexpr(game_profile::explicitCharacterExtensions){
+   w.str("@extension-ms");w.str(std::to_string(l.extensionMilliseconds));
+  }else{
+   w.str("@extension-clock");w.str(std::to_string(uint64_t(l.extensionMilliseconds*1000)));
+  }
+ }
  if(l.waveMilliseconds>=0){w.str("@wave-clock");w.str(std::to_string(uint64_t(l.waveMilliseconds*1000)));}
- for(auto&p:l.params){w.str(p.first);
- w.str(p.second);
- }if(l.composite)l.composite->saveIdentity(w);
+ if constexpr(!game_profile::explicitCharacterExtensions)writeProperties();
+ if(l.composite)l.composite->saveIdentity(w);
  }return w.bytes;
  }
 SceneImages::SceneImages(const SceneImages&live,RestoreTarget)
@@ -1897,9 +2042,14 @@ void SceneImages::restore(const qlie::Bytes&b){StateReader r{b};
  if(v6){auto count=r.n();if(count>16)throw std::runtime_error("Image tween count");while(count--){auto key=r.str();Tween t;t.from=r.f();t.to=r.f();t.power=r.f();t.elapsed=r.n()/1000.;t.duration=r.n()/1000.;t.mode=unsigned(r.n());l.tweens[key]=t;}}
  auto n=r.n();
  if(n>256)throw std::runtime_error("Image property count");
+ bool savedExtension=false;
  while(n--){auto k=r.str();
  auto v=r.str();
  if(k=="@wave-clock")l.waveMilliseconds=std::stoull(v)/1000.;
+ else if(game_profile::captureReplacements&&k==capturePixels){
+  if(v.size()!=captureBytes)throw std::runtime_error("Captured layer dimensions");
+  l.scriptReplacement=sceneBitmap(Image{captureWidth,captureHeight,qlie::Bytes(v.begin(),v.end())});
+ }else if(k=="@extension-ms"){savedExtension=true;l.extensionMilliseconds=std::stod(v);}
  else if(k=="@extension-clock")l.extensionMilliseconds=std::stoull(v)/1000.;
  else l.params.emplace(std::move(k),std::move(v));
  }
@@ -1916,9 +2066,15 @@ void SceneImages::restore(const qlie::Bytes&b){StateReader r{b};
  l.pixels=it->second;
  }if(l.composite&&l.params.count("@portrait")&&l.path!=l.params.at("@portrait")){auto portrait=l.params.at("@portrait");auto it=cache.find(portrait);if(it==cache.end())it=cache.emplace(portrait,loadBitmap(portrait)).first;l.pixels=it->second;}
  if(v3&&l.composite)l.composite->restoreIdentity(r);
- if(l.params.count("extfile")&&l.params.count("extmotion")&&l.params.at("extmotion")!="def")
+ if((!game_profile::explicitCharacterExtensions||savedExtension)&&l.params.count("extfile")&&
+    l.params.count("extmotion")&&l.params.at("extmotion")!="def")
   loadCharacterExtension(l,l.params.at("extfile"));
- if(l.params.count("@replacement"))loadReplacement(l,l.params.at("@replacement"));
+ if(auto replacement=l.params.find("@replacement");replacement!=l.params.end()){
+  if(!game_profile::captureReplacements||replacement->second!=captureReplacement)
+   loadReplacement(l,replacement->second);
+  else if(!l.scriptReplacement)throw std::runtime_error("Captured layer pixels missing");
+ }
+
  next[name]=std::move(l);
  }r.end();
  layers=std::move(next);

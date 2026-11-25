@@ -545,6 +545,31 @@ int kvideo_advance(KVideo *v,uint64_t tick,KImage *screen,uint8_t **pcm,size_t *
     return result;
 }
 
+int kvideo_read_software_picture(const uint8_t *data,size_t size,uint64_t tick,KImage *target){
+    KVideo *video=kvideo_open_mode(data,size,KVIDEO_SOFTWARE);
+    if(!video)return -1;
+    kvideo_disable_audio(video);
+    uint8_t *pcm=NULL;size_t bytes=0;
+    int rc=kvideo_advance(video,0,target,&pcm,&bytes);
+    if(rc>=0&&tick){
+        // Use the same timestamp origin and backward keyframe seek as
+        // standalone recovery. Keep a sequential decoder if seeking fails.
+        if(tick>=60){
+            KVideo *seeked=kvideo_reopen_software(video,tick);
+            if(seeked){
+                kvideo_disable_audio(seeked);
+                kvideo_close(video);
+                video=seeked;
+            }
+        }
+        rc=kvideo_advance(video,tick,target,&pcm,&bytes);
+    }
+    const int ok=rc>=0&&kvideo_written_frames(video)>0;
+    free(pcm);
+    kvideo_close(video);
+    return ok?0:-1;
+}
+
 int kvideo_has_audio(const KVideo *v){return v&&v->audio!=NULL;}
 void kvideo_disable_audio(KVideo *v){
     v->ai=-1;avcodec_free_context(&v->audio);swr_free(&v->resample);

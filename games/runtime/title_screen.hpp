@@ -8,18 +8,22 @@ namespace whj2 {
 class TitleScreen {
  SceneImages scene;double elapsed=0;float viewX=0,viewTarget=640;bool shown=false,hover=false,extras=false,extraPage=false;int selected=0;
  std::array<std::string,5> buttonMotions{};
+ unsigned shownButtons=0;
+ double backdropExitRemaining=-1;
  TitleLayout layout;
  std::mt19937 random;
  void setBackdrop(bool alternate);
  void setFrame(bool alternate,bool visible);
  const char*entryMotion(int);
  std::string buttonPosition(unsigned,bool)const;
- void enable();void highlight();
+ void enable();void showNextButton();void highlight();
+ unsigned openingBrightness()const;
 public:
  enum Action {None,Start,Load,Extra,Settings,Quit,CG,Memory,Sound,Back};
  explicit TitleScreen(qlie::Assets&,TitleLayout={});
  bool rollAlternate();
  bool prepareOpening(AssetReadAhead*loader,bool unlocked=false);
+ void beginExit();
  void leave(){scene.clear(true);}
  void warmBackdrop(bool alternate);
  void returnToExtras(bool alternate);
@@ -28,7 +32,7 @@ public:
  void setExtraPage(bool);bool isExtraPage()const{return extraPage;}
  void update(double);void skipIntro();bool ready()const{return elapsed>=layout.introMs+layout.buttonEntranceMs;}
  int selection()const{return selected;}int move(int);bool select(int);int hit(float,float)const;
- void draw(RenderTarget&target)const{scene.draw(target);}
- Action confirm();void draw(qlie::Bytes&pixels)const{scene.draw(pixels);}
+ void draw(RenderTarget&)const;
+ Action confirm();void draw(qlie::Bytes&)const;
 };
 }

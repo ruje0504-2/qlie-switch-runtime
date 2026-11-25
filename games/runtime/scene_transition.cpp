@@ -34,6 +34,25 @@ double fadeTime(const std::vector<std::string>&fields){
 bool hasFadeAsset(const std::vector<std::string>&fields){
  return fields.size()>3&&!fields[3].empty()&&fields[3]!="none";
 }
+bool timedMode(const std::string&mode){
+ return mode=="overlap"||mode=="rule"||mode=="mosaic"||mode=="anime";
+}
+unsigned captureUses(const std::vector<std::vector<std::string>>&fieldsList,bool captured){
+ unsigned uses=0;
+ for(const auto&fields:fieldsList){
+  if(fields.empty())continue;
+  if(fields[0]=="clear"&&fields.size()>1&&fields[1]=="def")captured=false;
+  if(fields[0]!="fade")continue;
+  const auto mode=fields.size()>1?fields[1]:"cut";
+  if(mode=="catch"){++uses;captured=true;}
+  else if(mode=="cut")captured=false;
+  else if(timedMode(mode)){
+   if(fadeTime(fields)>0&&!captured)++uses;
+   captured=false;
+  }
+ }
+ return uses;
+}
 std::shared_ptr<const Image> readRule(qlie::Assets&assets,const std::string&path){
  auto decoded=image(assets.read(path));
  if(!decoded.width||!decoded.height)throw std::runtime_error("Empty transition rule");
@@ -181,24 +200,16 @@ std::vector<std::string> SceneTransition::ruleAssets(const std::string&line)cons
  }
  return paths;
 }
+bool SceneTransition::needsCapture(const std::string&line)const{
+ return captureUses(sentenceFields(line),caught)>0;
+}
 bool SceneTransition::commandWithCapture(const std::string&line,const std::function<qlie::Bytes()>&capture,SentenceWait*wait,bool animate){
  if(line.rfind("^sentence",0)!=0)return false;
  if(line.find(',')==line.npos)return true;
  const auto fieldsList=sentenceFields(line);
  // A command can contain more than one fade/clear. Determine its snapshot
  // demand before mutating the old transition, then capture the original once.
- unsigned uses=0;bool captured=caught;
- auto timedMode=[](const std::string&name){return name=="overlap"||name=="rule"||name=="mosaic"||name=="anime";};
- if(animate)for(const auto&fields:fieldsList){
-  if(fields.empty())continue;
-  if(fields[0]=="clear"&&fields.size()>1&&fields[1]=="def")captured=false;
-  if(fields[0]=="fade"){
-   auto mode=fields.size()>1?fields[1]:"cut";
-   if(mode=="catch"){++uses;captured=true;}
-   else if(mode=="cut")captured=false;
-   else if(timedMode(mode)){if(fadeTime(fields)>0&&!captured)++uses;captured=false;}
-  }
- }
+ unsigned uses=animate?captureUses(fieldsList,caught):0;
  qlie::Bytes scene;
  if(uses){scene=capture();if(scene.size()!=FrameBytes)throw std::runtime_error("Transition scene dimensions");}
  auto storeSnapshot=[&]{

@@ -7,7 +7,7 @@ void CgScreen::prepareLayout(){
  auto add=[&](const std::string&id,const std::string&file,int x,int y,int pri){menuScene.command("^"+id+",file:script/albummode/"+file+",x:"+std::to_string(x)+",y:"+std::to_string(y)+",pri:"+std::to_string(pri));};
  add("ui_cg_bg","背景.png",0,0,100);add("ui_cg_upper","アッパーフレーム.png",0,0,100);add("ui_cg_lower","アンダーフレーム.png",0,656,100);
  for(unsigned i=0;i<24;i++)add("ui_cg_item"+std::to_string(i),"Button_Thum.b",85+int(i%6)*190,135+int(i/6)*130,110);
- for(unsigned i=0;i<(catalog.items().size()+23)/24;i++){auto id="ui_cg_page"+std::to_string(i);add(id,"Button_Page.b",1148+int(i)*40,90,110);auto name="script/albummode/ページ_0"+std::to_string(i+1);menuScene.uiSlot(id,0,name+"_off.png");menuScene.uiSlot(id,1,name+"_on.png");}
+ for(int i=0;i<pageCount();i++){auto id="ui_cg_page"+std::to_string(i);add(id,"Button_Page.b",1148+int(i)*40,90,110);auto name="script/albummode/ページ_0"+std::to_string(i+1);menuScene.uiSlot(id,0,name+"_off.png");menuScene.uiSlot(id,1,name+"_on.png");}
  const char*names[]={"CG観賞","回想観賞","音楽鑑賞","戻る"};for(int i=0;i<4;i++){auto id="ui_cg_nav"+std::to_string(i);add(id,"Button_l.b",820+i*130,695,110);menuScene.uiSlot(id,0,"script/albummode/"+std::string(names[i])+"_off.png");menuScene.uiSlot(id,1,"script/albummode/"+std::string(names[i])+"_on.png");}
  menuScene.prepareUiBitmap("script/albummode/サムネイル_no_image.png");
  const char*buttons[]={"ViewPrev_n.png","ViewZoom_n.png","ViewQuit_n.png","ViewNext_n.png"};
@@ -28,14 +28,16 @@ void CgScreen::prepare(){
 void CgScreen::open(){
  close();
  if(!prepared)prepare();
- opened=true;page=0;selected=0;
+ opened=true;page=0;selected=pageCount()?0:navigationStart()+3;
  setup();
 }
 void CgScreen::setup(){elapsed=0;menuScene.resetUiAnimations();for(unsigned i=0;i<24;i++){auto index=page*24+i;auto id="ui_cg_item"+std::to_string(i);if(index>=catalog.items().size()){menuScene.command("^"+id+",show:false");continue;}menuScene.command("^"+id+",show:true,motion:*Enable");menuScene.uiSlot(id,0,catalog.unlocked(index,progress)?catalog.items()[index].thumbnail:"script/albummode/サムネイル_no_image.png");}highlight();}
-bool CgScreen::exists(int n)const{return n>=0&&(n<24?page*24+unsigned(n)<catalog.items().size():n<30);}
+int CgScreen::pageCount()const{return int((catalog.items().size()+23)/24);}
+int CgScreen::navigationStart()const{return 24+pageCount();}
+bool CgScreen::exists(int item)const{return item>=0&&item<24&&page*24+unsigned(item)<catalog.items().size();}
 void CgScreen::highlight(){for(unsigned i=0;i<24;i++){auto index=page*24+i;if(index>=catalog.items().size())continue;auto mode=!catalog.unlocked(index,progress)?"*OnLock":selected==int(i)?"*OnMouse":"*OffMouse";menuScene.setUiMotion("ui_cg_item"+std::to_string(i),mode);}
- for(int i=0;i<2;i++)menuScene.setUiMotion("ui_cg_page"+std::to_string(i),page==unsigned(i)?"*OnCheck":selected==24+i?"*OnMouse":"*OffMouse");
- for(int i=0;i<4;i++)menuScene.setUiMotion("ui_cg_nav"+std::to_string(i),i==0?"*OnLock":selected==26+i?"*OnMouse":"*OffMouse");}
+ for(int i=0;i<pageCount();i++)menuScene.setUiMotion("ui_cg_page"+std::to_string(i),page==unsigned(i)?"*OnCheck":selected==24+i?"*OnMouse":"*OffMouse");
+ for(int i=0;i<4;i++)menuScene.setUiMotion("ui_cg_nav"+std::to_string(i),i==0?"*OnLock":selected==navigationStart()+i?"*OnMouse":"*OffMouse");}
 void CgScreen::cancelViewRequest(){
  if(readAhead&&!pendingView.empty())readAhead->discard(pendingView);
  pendingView.clear();
@@ -91,14 +93,29 @@ void CgScreen::panDelta(float x,float y){pan(pointerX+x,pointerY+y);}
 void CgScreen::toggleZoom(){if(viewing&&viewReady){zoom=zoom==1?2:1;positionView();}}
 CgScreen::Action CgScreen::back(){if(viewing){if(zoom==2){zoom=1;positionView();}else closeView();}else return Back;return None;}
 void CgScreen::move(int x,int y){if(!opened||elapsed<250)return;if(viewing){if(x){auto count=catalog.items()[group].files.size();requestView(unsigned((int(requestedVariant)+x+int(count))%int(count)));}if(y)panDelta(0,y*40);return;}
- if(selected<24){if(y<0)selected=selected<6?24:selected-6;else if(y>0){int n=selected+6;selected=n>=24||!exists(n)?29:n;}else if(x){int n=selected+x;if(n<24&&exists(n))selected=n;}}
- else if(selected<26){if(y>0)selected=0;else if(x)selected=24+(selected-24+x+2)%2;}
- else{if(y<0)selected=page==0?18:6;else if(y>0)selected=24;else if(x){do{selected=26+(selected-26+x+4)%4;}while(selected==26);}}highlight();}
+ const int navigation=navigationStart();
+ if(selected<24){
+  if(y<0)selected=selected<6?24:selected-6;
+  else if(y>0)selected=exists(selected+6)?selected+6:navigation+3;
+  else if(x&&exists(selected+x))selected+=x;
+ }else if(selected<navigation){
+  if(y>0)selected=0;
+  else if(x)selected=24+(selected-24+x+pageCount())%pageCount();
+ }else if(pageCount()&&y<0){
+  int item=page==0?18:6;
+  while(item>0&&!exists(item))item-=6;
+  selected=item;
+ }else if(pageCount()&&y>0)selected=24;
+ else if(x){
+  do{selected=navigation+(selected-navigation+x+4)%4;}while(selected==navigation+0);
+ }
+ highlight();
+}
 CgScreen::Action CgScreen::confirm(){if(!opened||elapsed<250)return None;if(viewing){move(1,0);return None;}if(selected<24){auto index=page*24+unsigned(selected);if(index<catalog.items().size()&&catalog.unlocked(index,progress)){group=index;variant=0;zoom=1;pointerX=640;pointerY=360;viewing=true;requestView(0);}return None;}
- if(selected<26){page=unsigned(selected-24);selected=0;setup();return None;}return selected==27?Replay:selected==28?Music:selected==29?Back:None;}
+ if(selected<navigationStart()){page=unsigned(selected-24);selected=0;setup();return None;}return selected==navigationStart()+1?Replay:selected==navigationStart()+2?Music:selected==navigationStart()+3?Back:None;}
 CgScreen::Action CgScreen::tap(float x,float y){if(!opened||elapsed<250)return None;if(viewing){for(int i=0;i<4;i++)if(viewScene.uiHit("ui_cg_viewbutton"+std::to_string(i),x,y)){if(i==0)move(-1,0);else if(i==1)toggleZoom();else if(i==2)return back();else move(1,0);return None;}return confirm();}
  for(int i=0;i<24;i++)if(exists(i)&&menuScene.uiHit("ui_cg_item"+std::to_string(i),x,y)){selected=i;highlight();return confirm();}
- for(int i=0;i<2;i++)if(menuScene.uiHit("ui_cg_page"+std::to_string(i),x,y)){selected=24+i;return confirm();}
- for(int i=1;i<4;i++)if(menuScene.uiHit("ui_cg_nav"+std::to_string(i),x,y)){selected=26+i;return confirm();}
+ for(int i=0;i<pageCount();i++)if(menuScene.uiHit("ui_cg_page"+std::to_string(i),x,y)){selected=24+i;return confirm();}
+ for(int i=1;i<4;i++)if(menuScene.uiHit("ui_cg_nav"+std::to_string(i),x,y)){selected=navigationStart()+i;return confirm();}
  return None;}
 }

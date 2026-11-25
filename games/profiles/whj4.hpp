@@ -40,8 +40,18 @@ inline constexpr whj2::TitleLayout title{
 };
 inline constexpr double cautionFade = 0, cautionExitWait = 0;
 inline constexpr char secondMakerLogo[] = "";
+inline constexpr bool explicitCharacterExtensions=false;
+inline constexpr bool captureReplacements=false;
+inline constexpr bool relativeCameraDepth=false;
+inline constexpr bool extendedCameraFields=false;
+inline constexpr bool separateLayerTiming=false;
+inline constexpr bool stackedHistory=false;
+inline constexpr bool malformedLayerPriority=false;
+inline constexpr bool deferredSceneChanges=false;
 inline constexpr bool extendedCgRoots=true;
 inline constexpr char extrasFlag[]="#spopenflag";
+inline constexpr bool localizedHistory=false;
+inline constexpr int musicTrackCount=27;
 inline constexpr unsigned storyAudioTracks=5;
 inline constexpr float storyMusicGain=1.f;
 inline constexpr char mixerSignature[]="WHJ4-mixer-2";

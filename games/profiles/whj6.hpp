@@ -9,6 +9,8 @@ namespace whj6::profile {
 inline constexpr unsigned sceneReadAheadBytes=52u*1024*1024;
 inline constexpr std::array<unsigned,2> sceneSize{1920,1080};
 inline constexpr int sceneVideoMaxHeight=2700;
+// The cursor animation's embedded motion name includes a leading space.
+inline constexpr char autoCursorMotion[]=" Auto";
 inline constexpr int settingsPromptShift=-75,settingsTextShift=-58,settingsVoiceWaitY=894;
 inline constexpr whj2::SettingsLayout settingsLayout{{{
  {320,(780+settingsTextShift)*2.f/3,300,0,-6,0},{320,(620+settingsTextShift)*2.f/3,300,0,-6,0},

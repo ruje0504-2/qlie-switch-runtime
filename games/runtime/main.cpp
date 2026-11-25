@@ -909,7 +909,11 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  void setMessageCursor(const char*motion){
   if(messageCursorMotion==motion)return;
   messageCursorMotion=motion;
+#ifdef QLIE_PROFILE_WHJ6
+  messageCursor->setUiMotion("ui_cursor",motion);
+#else
   messageCursor->command("^ui_cursor,motion:"+messageCursorMotion);
+#endif
  }
  void updateMessageCursor(double ms){
   if(menu||hidden||pendingScene||movie->playing()||story.state.awaiting||!images->messageVisible()||
@@ -917,7 +921,11 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    setMessageCursor("None");
    return;
   }
+#ifdef QLIE_PROFILE_WHJ6
+  const char*motion=normalSkip?"Skip":autoPlay.enabled?game_profile::autoCursorMotion:"Click";
+#else
   const char*motion=normalSkip?"Skip":autoPlay.enabled?"Auto":"Click";
+#endif
   if(messageCursorMotion!=motion)setMessageCursor(motion);
   else if(!gameMenu.visible()&&!upperMenu->visible())messageCursor->update(ms);
  }
@@ -2828,20 +2836,7 @@ Frontend f(game,saves);
  f.movie->openBytes(qlie::file(argv[4]),"local-test");
  }
  }
-#if defined(__SWITCH__) && defined(QLIE_PROFILE_WHJ6)
- try{return f.run(smoke);}
- catch(const std::exception& error){
-  // Release builds otherwise exit to hbmenu without the exception message.
-  if(auto*log=std::fopen("sdmc:/switch/whj6/runtime-error.log","w")){
-   std::fprintf(log,"build=%s auto=%d stage=%d page=%s\n%s\n",qlie_build_revision,
-                int(f.autoPlay.enabled),int(f.opening),f.currentPageKey.c_str(),error.what());
-   std::fclose(log);
-  }
-  throw;
- }
-#else
  return f.run(smoke);
-#endif
  }catch(const std::exception&e){QLIE_LOG_LINE(<<"FAIL "<<e.what()<<"\n");
  return 1;
  }}

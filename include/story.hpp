@@ -23,6 +23,8 @@ struct LegacyAvgLayout {
  const char* externalFontSlot;
  unsigned externalCodepoint,externalTileIndex;
  std::array<std::pair<const char*,const char*>,2> routeFlags;
+ const char* makerLogo;
+ std::pair<const char*,const char*> renamedMovie;
  const char* creditsFile;
  unsigned creditsSkipDelay,creditsClickWait;
 };

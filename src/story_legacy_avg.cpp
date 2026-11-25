@@ -260,6 +260,8 @@ bool Story::legacyNative(const Op&o,const std::vector<std::string>& a){
  if(isVideo&&cmd=="\\l"){
   auto path=qlie::canonical(field(1));
   if(path.find('/')==path.npos)path="movie/"+path;
+  const auto& renamed=profile.legacyAvg->renamedMovie;
+  if(path==renamed.first)path=renamed.second;
   state.vars["__avg1_file_"+state.scope]=std::move(path);
   return true;
  }

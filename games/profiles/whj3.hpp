@@ -4,6 +4,8 @@
 #include "profiles/title_layout.hpp"
 
 namespace whj3::profile {
+// The chapter 8 full-size DPNG expands to 118.3 MiB before any texture upload.
+inline constexpr unsigned sceneReadAheadBytes=144u*1024*1024;
 inline const qlie::ArchiveLayout archives{
  qlie::PackVersion::v30,10,"GameData/data","DLL/key.fkey","DLL/icon.key","WHJ3.exe","ボイス/","patch.dat",
  {{"image/","画像/"},{"chara/","立ち絵/"},{"music/","音楽/"},{"se/","効果音/"},

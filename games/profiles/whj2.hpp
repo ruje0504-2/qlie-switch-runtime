@@ -4,6 +4,7 @@
 #include "profiles/title_layout.hpp"
 
 namespace whj2::profile {
+inline constexpr unsigned sceneReadAheadBytes=52u*1024*1024;
 inline const qlie::ArchiveLayout archives{
  qlie::PackVersion::v30,16,"GameData/data","DLL/key.fkey","DLL/icon.key",
  "美少女万華鏡２.exe","voice/","patch.dat"

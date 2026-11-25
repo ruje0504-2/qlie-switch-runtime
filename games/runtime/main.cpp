@@ -382,7 +382,7 @@ struct Frontend {
  audio=std::make_unique<whj2::Audio>();
  images=std::make_unique<whj2::SceneImages>(assets);
  // Keep the opening cutscene and the preceding images resident together.
- readAhead=std::make_unique<whj2::AssetReadAhead>(1,"asset-read-ahead",52u*1024*1024);
+ readAhead=std::make_unique<whj2::AssetReadAhead>(1,"asset-read-ahead",game_profile::sceneReadAheadBytes);
  soundReadAhead=std::make_unique<whj2::AssetReadAhead>(2,"audio-decode",48u*1024*1024,whj2::AssetReadAhead::Priority::Background);
  images->setReadAhead(readAhead.get());audio->setReadAhead(soundReadAhead.get());
  messageText=std::make_unique<whj2::MessageText>(assets,true);

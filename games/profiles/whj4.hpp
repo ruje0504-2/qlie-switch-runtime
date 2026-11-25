@@ -4,6 +4,7 @@
 #include "profiles/title_layout.hpp"
 
 namespace whj4::profile {
+inline constexpr unsigned sceneReadAheadBytes=52u*1024*1024;
 inline const qlie::ArchiveLayout archives{
  qlie::PackVersion::v31,9,"GameData/data","reskey.fkey","","","ボイス/","patch.dat",
  {{"image/","画像/"},{"chara/","立ち絵/"},{"music/","音楽/"},{"se/","効果音/"},

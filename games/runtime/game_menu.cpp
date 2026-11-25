@@ -49,20 +49,23 @@ void GameMenu::loadHistoryTracks(){
  }
  throw std::runtime_error("Missing history zoom metadata");
 }
-void GameMenu::prepareHistory(){
+void GameMenu::prepareHistory(bool jumps){
  loadHistoryTracks();
  for(const char* path:{"script/log/アッパーフレーム.png","script/log/アンダーフレーム.png",
      "script/log/ゲームに戻る_off.png","script/log/button_voice.b#0","script/log/button_voice.b#1",
      "script/log/scroll_bar_log.b#0","script/log/scroll_bar_log.b#1",
      "script/log/scroll_button.b#0","script/log/scroll_button.b#1","script/log/line.b#0"})
   resource(path);
+ if(jumps){
+  resource("script/log/button_jump.b#0");resource("script/log/button_jump.b#1");
+ }
 }
 void GameMenu::preparePanels(){
  // Assemble the opening queues so their original images are decoded before
  // the first input. No canvas is needed for this warm-up.
  for(auto mode:{Save,Load,Settings}){
   open(mode);
-  render(nullptr,nullptr,{});
+  render(nullptr,nullptr,{},{});
  }
  close();
 }
@@ -93,7 +96,7 @@ void GameMenu::applyPanelView(RenderQueue&q)const{
 void GameMenu::open(Panel p){
  loadHistoryTracks();
  close();panel=p;focus=p==Settings?3:0;
- historyOffset=0;historyVoiceRow=-1;historyVoices.fill(false);historyTextOffset.fill(0);historyTextMax.fill(0);
+ historyOffset=0;historyVoiceRow=-1;historyVoices.fill(false);historyJumps.fill(false);historyTextOffset.fill(0);historyTextMax.fill(0);
  if(visible())samplePanelView();
 }
 void GameMenu::close(){
@@ -143,7 +146,11 @@ GameMenu::Action GameMenu::confirm(){
  if(panelClosing||panelTransitioning())return Nothing;
  if(asking)return focus==0?Yes:No;
  if(panel==Save||panel==Load)return focus>=8?DeleteSlot:Slot;
- if(panel==History){historyVoiceRow=focus;return ReplayVoice;}
+ if(panel==History){
+  historyVoiceRow=focus;
+  if(focus<historyRows&&historyVoices[focus])return ReplayVoice;
+  return jumpHistory();
+ }
  if(panel!=Settings)return Close;
  if(focus==0)return Close;
  if(focus==1)return Title;
@@ -154,9 +161,12 @@ GameMenu::Action GameMenu::confirm(){
  if(focus>=13&&focus<=15){const char*key=focus==13?"ClickVoiceStop":focus==14?"AutoPlayVoiceWait":"SkipMode";settings.set(key,1-settings.get(key));settingsDirty=true;return SettingsChanged;}
  return Nothing;
 }
+GameMenu::Action GameMenu::jumpHistory()const{
+ return panel==History&&!asking&&!panelClosing&&focus<historyRows&&historyJumps[focus]?JumpHistory:Nothing;
+}
 int GameMenu::volumeTestAt(float x,float y){const auto&button=resource("script/config/音量テスト_off.png");for(int i=0;i<5;i++)if(std::abs(x-1070)<=button.width*.5f&&std::abs(y-testButtonY[i])<=button.height*.5f)return i;return -1;}
 bool GameMenu::beginDrag(float x,float y){
- if(panelClosing||panelTransitioning())return false;
+ if(asking||panelClosing||panelTransitioning())return false;
  const float rawX=x,rawY=y;
  panelPoint(x,y);
  if(panel==History){
@@ -164,7 +174,7 @@ bool GameMenu::beginDrag(float x,float y){
   if(x>=230&&x<=1150&&y>=64&&y<656){int visual=std::clamp(int((y-64)/149),0,3),row=3-visual;if(row<historyRows){focus=row;historyDragRow=row;historyDragY=y;historyDragOffset=historyTextOffset[row];return true;}}
   return false;
  }
- if(panel!=Settings||asking||volumeTestAt(x,y)>=0)return false;
+ if(panel!=Settings||volumeTestAt(x,y)>=0)return false;
  for(int i=0;i<9;i++){const auto&s=sliders[i];if(std::abs(y-s.y)<=18&&x>=s.x-12&&x<=s.x+s.width+12){draggedSlider=i;focus=i+3;drag(rawX,rawY);return true;}}return false;}
 bool GameMenu::drag(float x,float y){
  if(panelClosing||panelTransitioning())return false;
@@ -178,7 +188,18 @@ GameMenu::Action GameMenu::tap(float x,float y){
  if(asking){if(std::abs(y-325)<=20){if(std::abs(x-550)<=60){focus=0;return Yes;}if(std::abs(x-730)<=60){focus=1;return No;}}return Nothing;}
  if(panel==Settings){int test=volumeTestAt(x,y);if(test>=0){focus=17+test;return confirm();}}
  if(panel==Save||panel==Load){for(int i=0;i<8;i++)if(populatedSlots[i]&&std::abs(x-deleteButtonX[i])<=15&&std::abs(y-(148+(i%4)*135))<=15){focus=8+i;return DeleteSlot;}if(y>=72&&y<=108&&x>=674){requestedPage=std::clamp(int((x-674)/40),0,14);return PageChange;}if(y>=128&&y<=651){int col=x>=645?1:0;int row=int((y-128)/135);if(row<4){focus=col*4+row;return Slot;}}}
- if(panel==History){if(inHistoryScrollbar(x,y)){if(historyMaxOffset>0)historyOffset=historyOffsetAt(y,historyMaxOffset);return Nothing;}const auto&button=resource("script/log/button_voice.b#0");for(int row=0;row<4;row++){if(historyVoices[row]&&std::abs(x-210)<=button.width*.5f&&std::abs(y-(585-row*150))<=button.height*.5f){focus=historyVoiceRow=row;return ReplayVoice;}}}
+ if(panel==History){
+  if(inHistoryScrollbar(x,y)){if(historyMaxOffset>0)historyOffset=historyOffsetAt(y,historyMaxOffset);return Nothing;}
+  const auto&voice=resource("script/log/button_voice.b#0");
+  for(int row=0;row<historyRows;++row){
+   const float distance=std::abs(y-(585-row*150));
+   if(historyJumps[row]){
+    const auto&jump=resource("script/log/button_jump.b#0");
+    if(std::abs(x-51)<=jump.width*.5f&&distance<=jump.height*.5f){focus=row;return JumpHistory;}
+   }
+   if(historyVoices[row]&&std::abs(x-210)<=voice.width*.5f&&distance<=voice.height*.5f){focus=historyVoiceRow=row;return ReplayVoice;}
+  }
+ }
  if(panel==Settings){for(int i=0;i<9;i++){const auto&slider=sliders[i];if(std::abs(y-slider.y)<=18&&x>=slider.x-12&&x<=slider.x+slider.width+12){focus=i+3;setPosition(settings,i,int(std::round((x-slider.x)*20/slider.width)));settingsDirty=true;return SettingsChanged;}}for(int i=0;i<3;i++){if(std::abs(y-(i==0?353:i==1?412:442))<=15&&(std::abs(x-410)<=56||std::abs(x-534)<=56)){focus=13+i;settings.set(i==0?"ClickVoiceStop":i==1?"AutoPlayVoiceWait":"SkipMode",x<472?1:0);settingsDirty=true;return SettingsChanged;}}}
  if(y>=670){if(x>1145)return Close;if(panel==Settings){if(x>1015)return ResetSettings;if(x>885)return Title;if(x>755)return Quit;if(allowSceneReturn&&x>=490)return SceneReturn;}else if(panel==Save||panel==Load){if(x>1015)return Title;if(x>885)return Quit;}}
  return Nothing;
@@ -187,13 +208,17 @@ void GameMenu::drawAutoButton(qlie::Bytes&pixels,bool enabled){RenderQueue q;put
 void GameMenu::drawSkipButton(qlie::Bytes&pixels,bool enabled){RenderQueue q;put(q,std::string("avg/window/スキップ")+(enabled?"_on.png":"_off.png"),1200,700,true);q.draw(pixels,1280,720);}
 void GameMenu::drawAutoButton(RenderTarget&target,bool enabled){RenderQueue q;put(q,std::string("avg/window/オートプレイ")+(enabled?"_on.png":"_off.png"),1170,700,true);q.draw(target,1280,720);}
 void GameMenu::drawSkipButton(RenderTarget&target,bool enabled){RenderQueue q;put(q,std::string("avg/window/スキップ")+(enabled?"_on.png":"_off.png"),1200,700,true);q.draw(target,1280,720);}
-void GameMenu::draw(qlie::Bytes&pixels,const PanelContent&content){render(&pixels,nullptr,content);}
-void GameMenu::draw(RenderTarget&target,const PanelContent&content){render(nullptr,&target,content);}
+void GameMenu::draw(qlie::Bytes&pixels,const PanelContent&content,const PanelContent&prompt){render(&pixels,nullptr,content,prompt);}
+void GameMenu::draw(RenderTarget&target,const PanelContent&content,const PanelContent&prompt){render(nullptr,&target,content,prompt);}
 void GameMenu::drawHistory(RenderQueue&q){
  static const auto tint=[] {Image pixel{1,1,{32,19,0,255}};pixel.version.publish();return pixel;}();
  // script/log/black.b uses a tinted rectangle at alpha 191.
  q.image(tint,imagePlacement(0,0,1280,720,0,0,0,1,1),0,191,0,0xffffff);
- put(q,"script/log/アッパーフレーム.png",0,0);put(q,"script/log/アンダーフレーム.png",0,658);put(q,"script/log/ゲームに戻る_off.png",1208,694,true);for(int row=0;row<4;row++)if(historyVoices[row])put(q,std::string("script/log/button_voice.b#")+(focus==row?"1":"0"),210,585-row*150,true);
+ put(q,"script/log/アッパーフレーム.png",0,0);put(q,"script/log/アンダーフレーム.png",0,658);put(q,"script/log/ゲームに戻る_off.png",1208,694,true);for(int row=0;row<historyRows;++row){
+  const char*texture=(asking?promptFocus:focus)==row?"1":"0";
+  if(historyVoices[row])put(q,std::string("script/log/button_voice.b#")+texture,210,585-row*150,true);
+  if(historyJumps[row])put(q,std::string("script/log/button_jump.b#")+texture,51,585-row*150,true);
+ }
  // BarFrame sits behind the original scroll track artwork at priority -1.
  put(q,"script/log/scroll_bar_log.b#1",HistoryBarX,HistoryBarY-10,false,191);
  put(q,"script/log/scroll_bar_log.b#0",HistoryBarX-8,HistoryBarY-16);
@@ -203,7 +228,7 @@ void GameMenu::drawHistory(RenderQueue&q){
  put(q,std::string("script/log/scroll_button.b#")+(historyDragRow==-2?"1":"0"),thumbX,thumbY);
  for(float y:{63.f,211.f,361.f,512.f,657.f})put(q,"script/log/line.b#0",640,y,true);
 }
-void GameMenu::render(qlie::Bytes*pixels,RenderTarget*target,const PanelContent&content){RenderQueue q;
+void GameMenu::render(qlie::Bytes*pixels,RenderTarget*target,const PanelContent&content,const PanelContent&prompt){RenderQueue q;
  applyPanelView(q);
  auto draw=[&](const RenderQueue&queue){if(target)queue.draw(*target,1280,720);else if(pixels)queue.draw(*pixels,1280,720);};
  auto dim=[&](unsigned numerator,unsigned denominator){if(target)target->dim(numerator,denominator);else for(size_t i=0;i<pixels->size();i+=4)for(unsigned c=0;c<3;c++)(*pixels)[i+c]=uint8_t(unsigned((*pixels)[i+c])*numerator/denominator);};
@@ -223,7 +248,7 @@ void GameMenu::render(qlie::Bytes*pixels,RenderTarget*target,const PanelContent&
  for(int i=0;i<3;i++){const char*yes=i==0?"する":i==1?"待つ":"既読";const char*no=i==0?"しない":i==1?"待たない":"未読";bool value=settings.get(i==0?"ClickVoiceStop":i==1?"AutoPlayVoiceWait":"SkipMode");put(q,std::string("script/config/")+yes+(value?"_on.png":"_off.png"),410,i==0?353:i==1?412:442,true);put(q,std::string("script/config/")+no+(!value?"_on.png":"_off.png"),534,i==0?353:i==1?412:442,true);}
  const char*names[]={"戻る","タイトルへ戻る","ゲームの終了"};const int xs[]={1210,950,820};for(int i=0;i<3;i++)put(q,std::string("script/config/")+names[i]+(focus==i?"_on.png":"_off.png"),xs[i],695,true);
  }
- if(!asking&&content)content(q);
+ if((!asking||prompt)&&content)content(q);
  draw(q);
  if(asking){
   if(target||pixels)dim(3,8);
@@ -231,7 +256,8 @@ void GameMenu::render(qlie::Bytes*pixels,RenderTarget*target,const PanelContent&
   put(dialog,"script/config/確認_フレーム.png",640,300,true);
   put(dialog,std::string("script/config/確認_はい")+(focus==0?"_on.png":"_off.png"),550,325,true);
   put(dialog,std::string("script/config/確認_いいえ")+(focus==1?"_on.png":"_off.png"),730,325,true);
-  if(content)content(dialog);
+  if(prompt)prompt(dialog);
+  else if(content)content(dialog);
   draw(dialog);
  }
 }

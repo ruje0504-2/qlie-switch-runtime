@@ -21,6 +21,7 @@ struct StoryProfile {
  std::string selectionPrelude{};
  bool presentCommandParagraphs=false;
  std::string nameEntryScript{}, alternateHeader{}, endingMovieScript{};
+ unsigned historyJumpLimit=0;
 };
 class Story {
  enum class After {None,Interlude,VisualWait};
@@ -48,6 +49,7 @@ public:
  std::vector<std::string> upcomingAssetCommands(bool opening=false);
  void choose(unsigned);
  bool setPlayerName(std::string);
+ bool historyJumpEnabled()const;
  qlie::Bytes save()const;
  StoryState decodeSave(const qlie::Bytes&);
  void restore(const qlie::Bytes&);

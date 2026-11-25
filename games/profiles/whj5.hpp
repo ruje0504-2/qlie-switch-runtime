@@ -17,8 +17,8 @@ inline const whj2::StoryProfile story{
  {"sentence","format","message","name","face","bg01","bg02",
   "chara01","chara02","chara03","chara04","chara05","chara06","chara07","chara08","chara09","chara10",
   "music01","se01","se02","se03","sebgv","movie",
-  "ef01","ef02","ef03","ef04","effect","camera","textani","logjumppoint"},
- "",{},"avg/preselect.s",true,"scenario/name/name.s","avg2/header.s","scenario/ed_movie.s"
+  "ef01","ef02","ef03","ef04","effect","camera","textani"},
+ "",{},"avg/preselect.s",true,"scenario/name/name.s","avg2/header.s","scenario/ed_movie.s",64
 };
 inline void applySentenceTiming(whj2::Event&){}
 inline constexpr char gameName[] = "美少女万華鏡 -理與迷宮的少女-";

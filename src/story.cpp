@@ -199,7 +199,16 @@ std::vector<std::string> Story::upcomingAssetCommands(bool opening){
  }
  return out;
 }
-void Story::start(){resetState();state.at.file=profile.root;jump("@@top",state.at.file);}
+bool Story::historyJumpEnabled()const{
+ const auto locked=state.vars.find("__log_jump_locked");
+ return profile.historyJumpLimit&&(locked==state.vars.end()||locked->second=="0");
+}
+void Story::start(){
+ resetState();
+ if(profile.historyJumpLimit)state.vars["__log_jump_locked"]="1";
+ state.at.file=profile.root;
+ jump("@@top",state.at.file);
+}
 void Story::startReplay(const std::string&file){resetState();state.replay=true;state.at.file=qlie::canonical(file);jump("@@top",state.at.file);}
 void Story::native(const Op&o){auto a=split(o.text,44);std::string cmd=lower(a[0]);auto arg=[&](size_t i){return i<a.size()?a[i]:std::string();};auto need=[&](bool ok){if(!ok)throw std::runtime_error("Unsupported native command: "+o.text);};
  if(cmd=="\\then")return;
@@ -244,6 +253,7 @@ void Story::native(const Op&o){auto a=split(o.text,44);std::string cmd=lower(a[0
   }
   if(!profile.alternateHeader.empty()&&(target=="@@!avg_create"||target=="@@!avg_free")){
    state.vars.erase("__view_pan");
+   if(profile.historyJumpLimit)state.vars["__log_jump_locked"]=target=="@@!avg_create"&&state.replay?"0":"1";
    state.pending.push_back(event(target=="@@!avg_create"?"create":"free",state.at.file,o.line));
    return;
   }
@@ -270,6 +280,12 @@ void Story::native(const Op&o){auto a=split(o.text,44);std::string cmd=lower(a[0
  throw std::runtime_error("Unsupported native command: "+o.text);
 }
 void Story::caret(const Op&o){auto a=split(o.text,44);std::string cmd=lower(a[0].substr(1));
+ if(cmd=="logjumppoint"&&profile.historyJumpLimit){
+  const auto enabled=a.size()<2?"":value(a[1]);
+  if(enabled!=""&&enabled!="0"&&enabled!="1")throw std::runtime_error("Unsupported log jump flag");
+  state.vars["__log_jump_locked"]=enabled=="0"?"1":"0";
+  return;
+ }
  if(cmd=="select"){state.choices.assign(a.begin()+1,a.end());for(auto& choice:state.choices)choice=substitutePlayerName(std::move(choice));state.awaiting=true;state.pending.push_back(event("choice",o.text,o.line));return;}
  if(cmd=="selectlabel"&&!profile.selectionPrelude.empty()){
   if(state.choice<0||size_t(state.choice)+1>=a.size())throw std::runtime_error("Missing label for selected option");
@@ -325,10 +341,14 @@ void Story::caret(const Op&o){auto a=split(o.text,44);std::string cmd=lower(a[0]
 }
 Event Story::next(){if(!state.pending.empty()){Event e=state.pending.front();state.pending.pop_front();return e;}if(state.awaiting)return event("await-choice","");if(state.finished)return event("finished","");for(unsigned count=0;count<10000;count++){auto&sc=script(state.at.file);auto reached=sc.labelsAt.find(state.at.pc);if(reached!=sc.labelsAt.end())for(const auto&label:reached->second)visited.insert(state.at.file+":"+label);if(state.at.pc>=sc.ops.size()){if(state.calls.empty())throw std::runtime_error("Unexpected script EOF: "+state.at.file);state.at=state.calls.back();state.calls.pop_back();continue;}Op o=sc.ops[state.at.pc++];operations++;try{if(o.text=="!page")return event("page","",o.line);if(o.text=="!create"||o.text=="!create-alternate"){
  state.vars.erase("__view_pan");
+ if(profile.historyJumpLimit)state.vars["__log_jump_locked"]="0";
  if(o.text=="!create-alternate")state.vars["__avg2_active"]="1";
  else state.vars.erase("__avg2_active");
  return event("create",state.at.file,o.line);
-}if(o.text=="!free")return event("free",state.at.file,o.line);if(o.text[0]==92)native(o);else if(o.text[0]==94){caret(o);if(o.after!=After::None)state.pending.push_back(event(o.after==After::Interlude?"interlude":"visual-wait","",o.line));}else return event("text",substitutePlayerName(o.text),o.line);}catch(const std::exception&e){throw std::runtime_error(state.at.file+":"+std::to_string(o.line)+" "+e.what());}if(!state.pending.empty()){Event e=state.pending.front();state.pending.pop_front();return e;}if(state.finished)return event("finish","title",o.line);}throw std::runtime_error("Story instruction budget exhausted at "+state.at.file);}
+}if(o.text=="!free"){
+ if(profile.historyJumpLimit)state.vars["__log_jump_locked"]="1";
+ return event("free",state.at.file,o.line);
+}if(o.text[0]==92)native(o);else if(o.text[0]==94){caret(o);if(o.after!=After::None)state.pending.push_back(event(o.after==After::Interlude?"interlude":"visual-wait","",o.line));}else return event("text",substitutePlayerName(o.text),o.line);}catch(const std::exception&e){throw std::runtime_error(state.at.file+":"+std::to_string(o.line)+" "+e.what());}if(!state.pending.empty()){Event e=state.pending.front();state.pending.pop_front();return e;}if(state.finished)return event("finish","title",o.line);}throw std::runtime_error("Story instruction budget exhausted at "+state.at.file);}
 void Story::choose(unsigned i){if(!state.awaiting||i>=state.choices.size())throw std::runtime_error("Invalid choice");state.choice=int(i);state.awaiting=false;}
 struct Writer {qlie::Bytes b;void n(uint32_t v){for(int i=0;i<4;i++)b.push_back(uint8_t(v>>(8*i)));}void s(const std::string&v){n(uint32_t(v.size()));b.insert(b.end(),v.begin(),v.end());}void f(const Frame&v){s(v.file);n(v.pc);}};
 struct Reader {const qlie::Bytes&b;size_t p=0;uint32_t n(){if(p+4>b.size())throw std::runtime_error("Truncated story save");uint32_t v=0;for(int i=0;i<4;i++)v|=uint32_t(b[p++])<<(8*i);return v;}std::string s(){size_t size=n();if(size>b.size()-p)throw std::runtime_error("Truncated saved string");std::string v(b.begin()+p,b.begin()+p+size);p+=size;return v;}Frame f(){auto s0=s();return {s0,n()};}};

@@ -24,14 +24,14 @@ class GameMenu {
  Image windowPreview;
  void put(RenderQueue&,const std::string&,float,float,bool center=false,unsigned opacity=255);
  using PanelContent=std::function<void(RenderQueue&)>;
- void render(qlie::Bytes*,RenderTarget*,const PanelContent&);
+ void render(qlie::Bytes*,RenderTarget*,const PanelContent&,const PanelContent&);
 public:
  enum Panel {None,Save,Load,History,Settings};
- enum Action {Nothing,Close,Slot,Quit,Title,Yes,No,SettingsChanged,ResetSettings,SceneReturn,ReplayVoice,TestVolume,DeleteSlot,PageChange};
+ enum Action {Nothing,Close,Slot,Quit,Title,Yes,No,SettingsChanged,ResetSettings,SceneReturn,ReplayVoice,TestVolume,DeleteSlot,PageChange,JumpHistory};
  Panel panel=None;int focus=0,page=0,requestedPage=0,historyOffset=0;bool asking=false;
  Action requested=Nothing;
  bool settingsDirty=false,allowSceneReturn=false;
- std::array<bool,4> historyVoices{};
+ std::array<bool,4> historyVoices{},historyJumps{};
  std::array<int,4> historyTextOffset{},historyTextMax{};
  std::array<bool,8> populatedSlots{};
  int historyVoiceRow=-1,historyMaxOffset=0,historyRows=0;
@@ -41,7 +41,7 @@ public:
  void setWindowPreview(Image preview){preview.version.publish();windowPreview=std::move(preview);}
  static constexpr double PanelZoomMs=250;
  AnimationSample panelZoom(bool closing,double elapsed)const;
- void prepareHistory();
+ void prepareHistory(bool jumps=false);
  void preparePanels();
  void open(Panel);
  void close();
@@ -51,15 +51,16 @@ public:
  bool visible()const{return panel!=None||asking;}
  bool panelTransitioning()const{return panel!=None&&panel!=History&&panelElapsed<PanelZoomMs;}
  bool coversScene()const{return panel!=None&&panel!=History&&!panelTransitioning();}
- void ask(Action a){requested=a;promptFocus=focus;asking=true;focus=0;draggedSlider=-1;}
+ void ask(Action a){requested=a;promptFocus=focus;asking=true;focus=0;endDrag();}
  void dismissPrompt(){asking=false;focus=promptFocus;}
  int slot()const{return page*8+focus%8+1;}
  void move(int dx,int dy);
  Action confirm();
+ Action jumpHistory()const;
  Action tap(float,float);
  bool beginDrag(float,float);bool drag(float,float);void endDrag(){draggedSlider=-1;historyDragRow=-1;}
  void drawHistory(RenderQueue&);
- void draw(qlie::Bytes&,const PanelContent& content={});void drawAutoButton(qlie::Bytes&,bool);void drawSkipButton(qlie::Bytes&,bool);
- void draw(RenderTarget&,const PanelContent& content={});void drawAutoButton(RenderTarget&,bool);void drawSkipButton(RenderTarget&,bool);
+ void draw(qlie::Bytes&,const PanelContent& content={},const PanelContent& prompt={});void drawAutoButton(qlie::Bytes&,bool);void drawSkipButton(qlie::Bytes&,bool);
+ void draw(RenderTarget&,const PanelContent& content={},const PanelContent& prompt={});void drawAutoButton(RenderTarget&,bool);void drawSkipButton(RenderTarget&,bool);
 };
 }

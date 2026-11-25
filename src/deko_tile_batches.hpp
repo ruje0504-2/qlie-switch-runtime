@@ -5,13 +5,13 @@
 namespace whj2::gpu {
 // The motion shader implements unmasked normal/subtractive sprites, projected
 // triangles, and the original two transition operations. WHJ6 also uses it for
-// screen, lighten, additive, and hard-light blending.
+// screen, lighten, additive, overlay, and hard-light blending.
 inline bool motionDraw(const DrawData& draw){
  const uint32_t flags=draw.image.meta[2];
  const unsigned op=flags>>20,blend=(flags>>8)&255u;
  bool supportedBlend=blend<2||blend==8;
 #ifdef QLIE_PROFILE_WHJ6
- supportedBlend|=blend==2||blend==5||blend==7||blend==13;
+ supportedBlend|=blend==2||blend==5||blend==7||blend==11||blend==13;
 #endif
  return op==3||op==4||(op==0&&!(flags&262144u)&&supportedBlend);
 }

@@ -74,20 +74,28 @@ static void select_unicode(FT_Face face){
     if(candidate)(void)FT_Set_Charmap(face,candidate);
     else (void)FT_Select_Charmap(face,FT_ENCODING_UNICODE);
 }
-/* A shared font can contain a valid Unicode cmap with only part of the
-   repertoire.  Probe the remaining subtables before declaring a glyph
-   missing; this is needed for HOS Japanese/Chinese fallback faces and keeps
-   history/name panels visible when the preferred cmap is sparse. */
+/* A HOS font may split its Unicode repertoire across several subtables.
+   Keep its preferred table selected for the next lookup. Legacy tables
+   assign different characters to the same numerical values. */
 static FT_UInt glyph_index(FT_Face face,uint32_t codepoint){
-    FT_UInt index=FT_Get_Char_Index(face,codepoint);if(index)return index;
     FT_CharMap saved=face->charmap;
+    FT_UInt index=saved&&saved->encoding==FT_ENCODING_UNICODE?FT_Get_Char_Index(face,codepoint):0;
+    if(index)return index;
     for(int i=0;i<face->num_charmaps;i++){
-        FT_CharMap map=face->charmaps[i];if(map==saved)continue;
-        if(FT_Set_Charmap(face,map))continue;
-        index=FT_Get_Char_Index(face,codepoint);if(index)return index;
+        FT_CharMap map=face->charmaps[i];
+        if(map==saved||map->encoding!=FT_ENCODING_UNICODE||FT_Set_Charmap(face,map))continue;
+        index=FT_Get_Char_Index(face,codepoint);
+        if(index)break;
     }
-    if(saved)(void)FT_Set_Charmap(face,saved);
-    return 0;
+    if(saved&&face->charmap!=saved)(void)FT_Set_Charmap(face,saved);
+    return index;
+}
+static FT_Face glyph_face(const KFont *font,uint32_t codepoint,FT_UInt *index){
+    for(unsigned i=0;i<font->count;i++){
+        *index=glyph_index(font->faces[i],codepoint);
+        if(*index)return font->faces[i];
+    }
+    return NULL;
 }
 void kfont_close(KFont *f){
     if(!f)return;
@@ -178,8 +186,11 @@ static int font_load_glyph(KFont *f,uint32_t cp,unsigned width,unsigned height,
         font_cache_touch(f,cached);f->cache_hits++;
         *bitmap_out=&cached->bitmap;*left_out=cached->left;*top_out=cached->top;return 0;
     }
-    FT_Face face=NULL;FT_UInt index=0;
-    for(unsigned i=0;i<f->count;i++)if((index=glyph_index(f->faces[i],cp))){face=f->faces[i];break;}
+    FT_UInt index=0;
+    FT_Face face=glyph_face(f,cp,&index);
+    // QLIE's replacement table uses a heavy heart. Some story fonts
+    // only provide the black heart in the playing-card suit block.
+    if(!face&&cp==0x2764)face=glyph_face(f,0x2665,&index);
     unsigned factor=f->supersample?f->supersample:1;
     FT_Int32 flags=f->supersample?(FT_LOAD_TARGET_MONO|FT_LOAD_MONOCHROME):FT_LOAD_TARGET_NORMAL;
     if(!face||FT_Set_Pixel_Sizes(face,width*factor,height*factor)||FT_Load_Glyph(face,index,flags))return -1;

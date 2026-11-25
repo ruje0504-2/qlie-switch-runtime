@@ -23,7 +23,7 @@ void SentenceWait::resetProperties(){
  duration=skipDuration=0;
  automatic=false;
 }
-void SentenceWait::fromFade(double ms){if(automatic){mode="click";duration=std::max(0.,ms);skipDuration=duration;}}
+void SentenceWait::fromFade(double ms){if(automatic){mode="click";duration=std::max(0.,ms);skipDuration=0;}}
 void SentenceWait::cancel(){stage=Stage::Idle;remaining=skipRemaining=0;message=continuation=voiceBound=false;}
 void SentenceWait::page(bool hasText,bool voicePlaying){cancel();
  skipRemaining=std::max(0.,skipDuration);skipDuration=0;message=hasText&&(mode=="message"||mode=="click"||mode=="wait");interruptible=mode=="click"||mode=="clickonly"||mode=="voice";

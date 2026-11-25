@@ -179,7 +179,7 @@ std::vector<std::string> SceneTransition::ruleAssets(const std::string&line)cons
  }
  return paths;
 }
-bool SceneTransition::commandWithCapture(const std::string&line,const std::function<qlie::Bytes()>&capture,SentenceWait*wait){
+bool SceneTransition::commandWithCapture(const std::string&line,const std::function<qlie::Bytes()>&capture,SentenceWait*wait,bool animate){
  if(line.rfind("^sentence",0)!=0)return false;
  if(line.find(',')==line.npos)return true;
  const auto fieldsList=sentenceFields(line);
@@ -187,7 +187,7 @@ bool SceneTransition::commandWithCapture(const std::string&line,const std::funct
  // demand before mutating the old transition, then capture the original once.
  unsigned uses=0;bool captured=caught;
  auto timedMode=[](const std::string&name){return name=="overlap"||name=="rule"||name=="mosaic"||name=="anime";};
- for(const auto&fields:fieldsList){
+ if(animate)for(const auto&fields:fieldsList){
   if(fields.empty())continue;
   if(fields[0]=="clear"&&fields.size()>1&&fields[1]=="def")captured=false;
   if(fields[0]=="fade"){
@@ -208,6 +208,7 @@ bool SceneTransition::commandWithCapture(const std::string&line,const std::funct
  for(auto&fields:fieldsList){
   if(wait&&wait->property(fields)){if(fields[0]=="wait")explicitWait=true;continue;}
   if(fields[0]=="fade"){hasFade=true;
+   if(!animate){reset();continue;}
    auto name=fields.size()>1?fields[1]:"cut";
    waitFadeTime=fadeTime(fields);
    if(name=="cut"){reset();continue;}

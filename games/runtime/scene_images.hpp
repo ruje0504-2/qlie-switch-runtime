@@ -19,7 +19,7 @@ struct SpeakerStyle {int x=200,y=570;unsigned size=26,color=0xffffff;};
 class SceneImages {
  struct Tween {float from=0,to=0,power=100;double elapsed=0,duration=0;unsigned mode=1;};
  struct FilteredSlot {std::shared_ptr<const Image> source,result;std::string name;};
- struct Layer {mutable std::array<FilteredSlot,4> filtered;std::map<unsigned,std::shared_ptr<const Image>> uiSlots;std::map<std::string,Tween> tweens;std::map<std::string,std::string> params;std::string prefix,path;std::shared_ptr<const Image> pixels,scriptReplacement;std::shared_ptr<Composite> composite;double milliseconds=0,audioMilliseconds=-1;bool audioStopPending=false;};
+ struct Layer {mutable std::array<FilteredSlot,4> filtered;std::map<unsigned,std::shared_ptr<const Image>> uiSlots;std::map<std::string,Tween> tweens;std::map<std::string,std::string> params;std::string prefix,path;std::shared_ptr<const Image> pixels,scriptReplacement;std::shared_ptr<Composite> composite;std::array<float,16> external{};uint16_t externalMask=0;double milliseconds=0,audioMilliseconds=-1;bool audioStopPending=false;};
  unsigned windowAlpha=255;
  uint32_t particleState=particleIdentityInitialState();
  mutable uint32_t waveformCursor=0;
@@ -76,6 +76,8 @@ public:
  void uiSlot(const std::string&layer,unsigned slot,const std::string&asset);
  void uiSlot(const std::string&layer,unsigned slot,const Image&);
  void prepareUiBitmap(const std::string&asset);
+ void warmUiBitmaps(const std::string&key,std::vector<std::string> paths);
+ void takeUiBitmaps(const std::string&key);
  void setUiMotion(const std::string&layer,const char*motion);
  void removeUiLayer(const std::string&layer,bool releaseAsset=false);
  void resetUiAnimations();
@@ -86,7 +88,7 @@ public:
  qlie::Bytes save()const;void restore(const qlie::Bytes&);
  std::unique_ptr<SceneImages> makeRestoreTarget()const;
  std::vector<SceneSoundEvent> takeSoundEvents();
- void update(double milliseconds);bool command(const std::string&);void clear();void beginPage();
+ void update(double milliseconds);bool command(const std::string&);void clear(bool keepBitmaps=false);void beginPage();
  std::optional<std::string> selectFace(const std::string&speaker,const std::string&voice,bool deferCold=false);
  void draw(qlie::Bytes&,bool liveVideo=false,const Affine2D* view=nullptr)const;void drawThumbnail(qlie::Bytes&,float maxPriority)const;void drawScene(qlie::Bytes&,bool liveVideo=false)const;void drawFaces(qlie::Bytes&)const;void drawMessages(qlie::Bytes&)const;
  void setWindowAlpha(unsigned alpha){windowAlpha=alpha>255?255:alpha;}

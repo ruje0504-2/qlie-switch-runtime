@@ -25,6 +25,7 @@ struct DecodedPcm {
 };
 struct WarmAsset {
  std::shared_ptr<const Image> bitmap;
+ std::map<std::string,std::shared_ptr<const Image>> uiBitmaps;
  std::shared_ptr<Composite> composite;
  std::shared_ptr<PreparedEmbeddedOpening> embeddedOpening;
  uint32_t identities=0;

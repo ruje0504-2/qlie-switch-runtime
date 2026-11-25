@@ -308,6 +308,18 @@ struct Frontend {
  replayScreen=std::make_unique<whj2::ReplayScreen>(assets,progress);
  cgScreen=std::make_unique<whj2::CgScreen>(assets,progress,font,game_profile::extendedCgRoots);
  cgScreen->setReadAhead(readAhead.get());
+#ifdef WHJ2_WITH_GPU
+ if(gpu){
+  cgScreen->setNativeVideoSurfaces(gpu->supportsVideoSurfaces());
+  if(gpu->nativePresentation())cgScreen->setViewCapture([this]{
+   qlie::Bytes frame(1280*720*4);
+   gpu->begin(0);
+   cgScreen->draw(*gpu);
+   gpu->end(frame);
+   return frame;
+  });
+ }
+#endif
  if(std::filesystem::exists(saveDir+"/system.progress"))progress.restore(qlie::file(saveDir+"/system.progress"));
  if(std::filesystem::exists(saveDir+"/settings.cfg"))settings.restore(qlie::file(saveDir+"/settings.cfg"));
  applySettings(false);
@@ -385,6 +397,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
     auto path=movie->assetPath(line.substr(comma+1));
     if(assets.exists(path))add(path,Kind::Movie);
    }else if(cmd=="^sentence"){
+    if(normalSkip)continue;
     try{for(const auto&path:transition->ruleAssets(line))add(path,Kind::Rule);}
     catch(const std::exception&){/* The live command reports invalid rules. */}
    }else if(!cmd.empty()&&audioTrack(cmd.substr(1))>=0){
@@ -581,7 +594,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }
  void recordCurrentRead(){if(!menu&&!hidden&&!gameMenu.visible()&&!movie->playing()&&images->messageVisible()&&!currentPageKey.empty()&&messageText->finished()&&progress.markRead(currentPageKey))persistProgress();}
  void toggleAuto(){if(menuFadeLocksInput())return;if(menu||pendingScene||movie->playing()||gameMenu.visible()||upperMenu->visible()||story.state.awaiting)return;autoPlay.enabled=!autoPlay.enabled;normalSkip=false;hidden=false;uiSound("Sys_OnClick");}
- void toggleSkip(){if(menuFadeLocksInput())return;if(normalSkip){normalSkip=false;return;}if(menu||pendingScene||movie->playing()||gameMenu.visible()||upperMenu->visible()||story.state.awaiting)return;autoPlay.enabled=false;skipReadOnly=settings.get("SkipMode")==1;normalSkip=!skipReadOnly||progress.wasRead(currentPageKey);if(normalSkip){autoPlay.enabled=false;hidden=false;}}
+ bool waitingOnFade()const{return pendingScene&&pendingScene->value.rfind("^sentence,",0)==0;}
+ void toggleSkip(){if(menuFadeLocksInput())return;if(normalSkip){normalSkip=false;return;}if(menu||(pendingScene&&!waitingOnFade())||movie->playing()||gameMenu.visible()||upperMenu->visible()||story.state.awaiting)return;autoPlay.enabled=false;skipReadOnly=settings.get("SkipMode")==1;normalSkip=!skipReadOnly||progress.wasRead(currentPageKey);if(normalSkip){autoPlay.enabled=false;hidden=false;}}
 
  bool deferSceneUntil(whj2::Event&event,std::vector<std::string> waiting){
   if(std::all_of(waiting.begin(),waiting.end(),[this](const auto&key){return readAhead->ready(key);}))return false;
@@ -609,8 +623,11 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   pendingScene.reset();
  }
  bool resumeSceneCommand(){
-  if(!pendingScene||gameMenu.visible()||upperMenu->visible()||!std::all_of(pendingSceneAssets.begin(),pendingSceneAssets.end(),
-                                 [this](const auto&path){return readAhead->ready(path);}))return false;
+  if(!pendingScene||gameMenu.visible()||upperMenu->visible())return false;
+  if(normalSkip&&waitingOnFade()){
+   for(const auto&key:pendingSceneAssets)readAhead->discard(key);
+  }else if(!std::all_of(pendingSceneAssets.begin(),pendingSceneAssets.end(),
+                       [this](const auto&path){return readAhead->ready(path);}))return false;
   QLIE_LOGF("LOAD scene_ready %s:%u wait_ms=%.3f\n",pendingScene->file.c_str(),pendingScene->line,
                std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-pendingSceneSince).count());
   next(true);return true;
@@ -688,12 +705,14 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  return;
  }if(e.type=="command"&&e.value.rfind("^sentence",0)==0){
   game_profile::applySentenceTiming(e);
-  std::vector<std::string> rules;
-  for(const auto&path:transition->ruleAssets(e.value)){
-   transition->warmRule(path,true);
-   rules.push_back(whj2::SceneTransition::ruleKey(path));
+  if(!normalSkip){
+   std::vector<std::string> rules;
+   for(const auto&path:transition->ruleAssets(e.value)){
+    transition->warmRule(path,true);
+    rules.push_back(whj2::SceneTransition::ruleKey(path));
+   }
+   if(deferSceneUntil(e,std::move(rules)))return;
   }
-  if(deferSceneUntil(e,std::move(rules)))return;
   transition->commandWithCapture(e.value,[this,&timing]{
    const auto start=qlie::diagnostics?LoadClock::now():LoadClock::time_point{};
    qlie::Bytes scene(1280*720*4);
@@ -712,7 +731,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    images->drawScene(scene,true);transition->blend(scene);
    if(qlie::diagnostics) timing.capture+=std::chrono::duration<double,std::milli>(LoadClock::now()-start).count();
    return scene;
-  },&sentenceWait);continue;
+  },&sentenceWait,!normalSkip);continue;
  }if(e.type=="wait"||e.type=="click-wait"){sentenceWait.native(e.type=="click-wait",e.value.empty()?0:std::stod(e.value));transition->present();warmNextScene();return;
  }if(e.type=="command"&&e.value.rfind("^savefilter",0)==0){auto fields=whj2::split(e.value,',');if(fields.size()!=2||fields[1]!="0")throw std::runtime_error("Unsupported save thumbnail filter");continue;
  }if(e.type=="audio-volume"){
@@ -998,6 +1017,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   refreshMessage();
   autoPlay=saved.autoPlay;
   replaceHistory(std::move(saved.history));
+  if(menu)title->leave();
   menu=false;hidden=false;normalSkip=false;
   setMessageCursor("None");
   currentPageWasRead=progress.wasRead(currentPageKey);
@@ -1010,7 +1030,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   status=ui.text("静止画・音声位置を含む状態を読み込みました。");
   return true;
  }
- void finishTitleStart(){titleStarting=false;audio->stopAll();transition->reset();replaceHistory();autoPlay.enabled=false;story.start();progress.apply(story);menu=false;name="";focus=0;QLIE_LOG_LINE(<<"TITLE START complete elapsed_ms="<<titleStartElapsed<<"\n");next();}
+ void finishTitleStart(){titleStarting=false;audio->stopAll();transition->reset();title->leave();replaceHistory();autoPlay.enabled=false;story.start();progress.apply(story);menu=false;name="";focus=0;QLIE_LOG_LINE(<<"TITLE START complete elapsed_ms="<<titleStartElapsed<<"\n");next();}
  void beginTitleStart(){
   qlie::Bytes captured(1280*720*4,0);for(size_t i=3;i<captured.size();i+=4)captured[i]=255;
   title->draw(captured);transition->reset();transition->command(game_profile::titleStartFade,captured);transition->present();
@@ -1239,7 +1259,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
     static constexpr whj2::MessageStyle style{920,104,26,26,0xffffff};
     historyText->start(entry.text);
     historyText->reveal();
-    if(needsRow){const auto lines=historyText->lineCount(style);cached->maxOffset=int(lines>4?lines-4:0);}
+    if(needsRow)cached->maxOffset=int(historyText->lastPageOffset(style));
     cached->body=historyText->render(font,style,size_t(firstLine));
     cached->body.version.publish();
     cached->firstLine=firstLine;
@@ -1377,6 +1397,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   return {};
  }
  void beginMenuFade(MenuFadeKind kind,qlie::Bytes before){
+  if(kind==MenuFadeKind::Title&&readAhead)
+   preparedTitleAlternate=title->prepareOpening(readAhead.get(),progress.extras());
   menuFade=MenuFade{kind,{1280,720,std::move(before)}};
   menuFade->previous.version.publish();
  }
@@ -1492,9 +1514,22 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:openPanel(UI::Save);break;
  case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:openPanel(UI::Load);break;
  case SDL_CONTROLLER_BUTTON_X:openPanel(UI::Settings);break;
- case SDL_CONTROLLER_BUTTON_DPAD_UP:if(!menu)openPanel(UI::History);else focus=(focus+2)%3;break;
- case SDL_CONTROLLER_BUTTON_DPAD_DOWN:{int count=menu?3:int(story.state.choices.size());if(count){focus=(focus+1)%count;if(story.state.awaiting)if(choiceScreen->select(focus))uiSound("Sys_OnMouse");}break;}
- case SDL_CONTROLLER_BUTTON_DPAD_LEFT:case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:if(story.state.awaiting&&!story.state.choices.empty()){int count=int(story.state.choices.size());focus=(focus+count+(button==SDL_CONTROLLER_BUTTON_DPAD_LEFT?-1:1))%count;if(choiceScreen->select(focus))uiSound("Sys_OnMouse");}break;
+ case SDL_CONTROLLER_BUTTON_DPAD_UP:
+ case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
+ case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
+ case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:{
+  if(!story.state.awaiting){
+   if(button==SDL_CONTROLLER_BUTTON_DPAD_UP)openPanel(UI::History);
+   break;
+  }
+  const int count=int(story.state.choices.size());
+  if(count&&!choiceScreen->exiting()){
+   const int step=button==SDL_CONTROLLER_BUTTON_DPAD_UP||button==SDL_CONTROLLER_BUTTON_DPAD_LEFT?-1:1;
+   focus=(choiceScreen->selection()+count+step)%count;
+   if(choiceScreen->select(focus))uiSound("Sys_OnMouse");
+  }
+  break;
+ }
  default:break;
  }}
  int run(unsigned smoke){
@@ -1580,7 +1615,7 @@ controllerKey(e.cbutton.button);
 }}if(!done)pollLoad();
  const bool resumedScene=!done&&!menuFadeLocksInput()&&resumeSceneCommand();
  if(!menuFadeLocksInput())recordCurrentRead();
- if(normalSkip&&!menuFadeLocksInput()&&!resumedScene&&!pendingScene&&!menu&&!gameMenu.visible()&&!upperMenu->visible()&&!movie->playing()&&!story.state.awaiting){hidden=false;if(messageText->reveal())refreshMessage();auto action=sentenceWait.skip();if(action==whj2::SentenceWait::Next)next();else if(action==whj2::SentenceWait::Resume)next(true);}
+ if(normalSkip&&!menuFadeLocksInput()&&!resumedScene&&!pendingScene&&!menu&&!gameMenu.visible()&&!upperMenu->visible()&&!movie->playing()&&!story.state.awaiting){hidden=false;if(messageText->reveal())refreshMessage();auto action=sentenceWait.skip();if(action!=whj2::SentenceWait::None){transition->reset();next(action==whj2::SentenceWait::Resume);}}
  if(!menuFadeLocksInput())updateMessageCursor(double(now-lastUpdate));
  lastUpdate=now;
  const auto beforeDraw=qlie::diagnostics?SDL_GetTicks64():0;
@@ -1619,10 +1654,6 @@ controllerKey(e.cbutton.button);
  if(frames>0&&!pendingScene){
  ++readSkipFrame;
  if(readSkipFrame==1){if(currentPageKey.empty()||currentPageWasRead)throw std::runtime_error("Read skip needs fresh progress");settings.set("SkipMode",1);toggleSkip();if(normalSkip)throw std::runtime_error("Unread page allowed read-only skip");messageText->reveal();hidden=true;recordCurrentRead();if(progress.wasRead(currentPageKey))throw std::runtime_error("Hidden text marked read");hidden=false;recordCurrentRead();auto key=currentPageKey;save(1);whj2::Progress restored;restored.restore(qlie::file(saveDir+"/system.progress"));if(!restored.wasRead(key))throw std::runtime_error("Read page not persisted");for(unsigned version=1;version<=2;version++){whj2::StateWriter old;old.str("WHJ2-progress-"+std::to_string(version));old.n(0);old.n(0);if(version==2)old.n(0);restored.restore(old.bytes);if(restored.wasRead(key))throw std::runtime_error("Legacy progress invented read history");}skipStart=advances;SDL_Event left{};left.type=SDL_CONTROLLERAXISMOTION;left.caxis.axis=SDL_CONTROLLER_AXIS_TRIGGERRIGHT;left.caxis.value=32767;SDL_PushEvent(&left);}
- if(readSkipFrame==3){
-  if(!normalSkip||advances!=skipStart)throw std::runtime_error("Fast-forward bypassed the opening transition wait");
-  sentenceWait.elapseSkip(10000); // Advance the test clock before checking the input mappings.
- }
  if(readSkipFrame==4){if(normalSkip||advances<=skipStart)throw std::runtime_error("Fresh-read ZR did not start and stop at unread page");if(!sentenceWait.waitingForMessage())throw std::runtime_error("Second story page inherited the opening fade wait");load(1);if(!currentPageWasRead)throw std::runtime_error("Read page lost on load");toggleSkip();if(!normalSkip)throw std::runtime_error("Read page refused skip");sentenceWait.elapseSkip(10000);}
  if(readSkipFrame==10){if(normalSkip||advances<=skipStart||currentPageWasRead)throw std::runtime_error("Read skip did not stop at unseen page");messageText->reveal();recordCurrentRead();pointer(1200,700);if(!normalSkip)throw std::runtime_error("Fresh-read touch skip did not enable without load");sentenceWait.elapseSkip(10000);skipStart=advances;}
  if(readSkipFrame==12){if(normalSkip||advances<=skipStart)throw std::runtime_error("Fresh-read touch skip did not stop at unread page");skipStart=advances;rightTrigger=false;SDL_Event e{};e.type=SDL_CONTROLLERAXISMOTION;e.caxis.axis=SDL_CONTROLLER_AXIS_TRIGGERRIGHT;e.caxis.value=32767;SDL_PushEvent(&e);}

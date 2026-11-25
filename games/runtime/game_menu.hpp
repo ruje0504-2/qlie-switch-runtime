@@ -13,7 +13,6 @@ class GameMenu {
  int draggedSlider=-1;
  int historyDragRow=-1,historyDragOffset=0;float historyDragY=0;
  std::array<AnimationLayer,2> historyTracks{};
- std::array<double,2> historyTrackRate{1,1};
  AnimationSample panelView;
  double panelElapsed=0;
  bool panelClosing=false;

@@ -110,7 +110,9 @@ struct Scene {
  double priorWaitMs=0,cpuBuildMs=0;
  uint32_t baseCopy=UINT32_MAX;
  unsigned cachedReferences=0,occludedReferences=0,foldedSolids=0;bool reusedDisplay=false,nativeDisplayCurrent=false;
- Image transitionLut;double lutAmount=-1;
+ Image transitionLut,solidTransitionLut;
+ double lutAmount=-1,solidLutAmount=-1;
+ uint32_t solidLutColor=0;
  uint64_t frames=0,batch=0;unsigned draws=0,dispatches=0,textureChecks=0;size_t uploadBytes=0;bool recording=false,inBatch=false;
 
  virtual void initialize()=0;

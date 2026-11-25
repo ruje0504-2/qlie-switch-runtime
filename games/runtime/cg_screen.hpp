@@ -7,6 +7,7 @@ namespace whj2 {
 class CgScreen {
  const Progress&progress;CgCatalog catalog;SceneImages menuScene,viewScene;qlie::Assets&assets;KFont*font;
  SceneTransition viewFade;
+ std::function<qlie::Bytes()> captureView;
  AssetReadAhead*readAhead=nullptr;
  std::string pendingView;
  std::unique_ptr<MessageText> countText;
@@ -16,6 +17,8 @@ class CgScreen {
  void prepareLayout();void setup();void highlight();void requestView(unsigned);void cancelViewRequest();void closeView();void loadView();void positionView();bool exists(int)const;
 public:
  void setReadAhead(AssetReadAhead*loader){readAhead=loader;viewScene.setReadAhead(loader);}
+ void setNativeVideoSurfaces(bool enabled){viewScene.setNativeVideoSurfaces(enabled);}
+ void setViewCapture(std::function<qlie::Bytes()> capture){captureView=std::move(capture);}
  enum Action {None=0,Back=1,Replay=2,Music=3};
  CgScreen(qlie::Assets&a,const Progress&p,KFont*f,bool extendedRoots=false)
   :progress(p),catalog(a,extendedRoots),menuScene(a),viewScene(a),assets(a),font(f),viewFade(a){}

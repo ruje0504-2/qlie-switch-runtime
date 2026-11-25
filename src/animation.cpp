@@ -24,17 +24,21 @@ struct AnimReader {const qlie::Bytes&b;
  while(n0<16&&b0[n0])n0++;
  return std::string(b0.begin(),b0.begin()+n0);
  }};
-// PE ec1cc wraps only when the child animation has a positive loop end.
+// WHJ4 PE 0x594f3e/0x594f4d reads the loop start before its end in abdata14.
+// PE 0x5837b4 wraps from the start, leaving the intro before it intact.
 double nestedAnimationTime(const Animation&a,double milliseconds){
- auto time=int64_t(milliseconds);int64_t end=a.bounds[2],start=a.bounds[3];
- if(end>0){auto span=end-start;if(span<1)span=end;
-  time=time>start?(time-start)%span+start:time%span;
- }
- return double(time);
+ const auto time=int64_t(milliseconds);
+ const int64_t start=a.bounds[a.loopStartFirst?2:3];
+ const int64_t end=a.bounds[a.loopStartFirst?3:2];
+ if(end<=0||(a.loopStartFirst&&time<start))return double(time);
+ const auto span=end>start?end-start:end;
+ if(a.loopStartFirst||time>start)return double((time-start)%span+start);
+ return double(time%span);
 }
 Animation animation(const std::string&type,const qlie::Bytes&b){AnimReader r{b};
  Animation a;
  const bool wide=type=="abdata14";
+ a.loopStartFirst=wide;
  a.name=r.str(wide);
  uint32_t version=0;
  if(type=="abdata13"||wide)version=r.n();

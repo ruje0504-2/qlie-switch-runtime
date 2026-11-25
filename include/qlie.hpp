@@ -29,6 +29,7 @@ class Pack {
 public:
  std::vector<Entry> entries;
  Pack(const std::string&,const Bytes&,const Bytes&,PackVersion expected=PackVersion::v30);
+ uint32_t checksum(const Bytes&) const;
  Bytes read(const Entry&);
 };
 struct ResourceLocation {std::string name,path;uint64_t offset=0,size=0;bool loose=false;};

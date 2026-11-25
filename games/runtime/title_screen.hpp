@@ -11,6 +11,7 @@ class TitleScreen {
  TitleLayout layout;
  std::mt19937 random;
  void setBackdrop(bool alternate);
+ void setFrame(bool alternate,bool visible);
  const char*entryMotion(int);
  void enable();void highlight();
 public:
@@ -18,6 +19,7 @@ public:
  explicit TitleScreen(qlie::Assets&,TitleLayout={});
  bool rollAlternate();
  bool prepareOpening(AssetReadAhead*loader,bool unlocked=false);
+ void leave(){scene.clear(true);}
  void warmBackdrop(bool alternate);
  void returnToExtras(bool alternate);
  void reset(bool alternate=false,bool unlocked=false);

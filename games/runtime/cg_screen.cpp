@@ -44,7 +44,7 @@ void CgScreen::requestView(unsigned selection){
  cancelViewRequest();
  requestedVariant=selection;
  const auto&file=catalog.items()[group].files[selection];
- if(readAhead&&viewScene.warmFile(file,true,false)){
+ if(readAhead&&viewScene.warmFile(file,true,true)){
   pendingView=qlie::canonical(file);
   return;
  }
@@ -55,6 +55,7 @@ void CgScreen::loadView(){
  const auto&file=files[requestedVariant];
  if(viewReady){
   viewFade.commandWithCapture("^sentence,fade:overlap:250",[this]{
+   if(captureView)return captureView();
    qlie::Bytes previous(1280*720*4);
    draw(previous);
    return previous;

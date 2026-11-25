@@ -111,6 +111,12 @@ uint fadeByte(uint base,uint pair){
 }
 uvec4 fadePixel(Draw p,uvec4 old,uvec4 d,uint alpha){
  if((p.meta.z&131072u)==0u){
+  if((p.meta.z&262144u)!=0u){
+   // Each table word stores all four channels for one outgoing byte value.
+   uvec4 values=uvec4(loadTexel(p.colors.w+old.r),loadTexel(p.colors.w+old.g),
+                      loadTexel(p.colors.w+old.b),loadTexel(p.colors.w+old.a));
+   return (values>>uvec4(0,8,16,24))&255u;
+  }
   uvec4 pair=old*256u+d;
   return uvec4(fadeByte(p.colors.w,pair.r),fadeByte(p.colors.w,pair.g),fadeByte(p.colors.w,pair.b),fadeByte(p.colors.w,pair.a));
  }

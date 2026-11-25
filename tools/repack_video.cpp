@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "image.hpp"
-#include "profiles/whj2.hpp"
+#include "profile.hpp"
 #include <algorithm>
 #include <array>
 #include <filesystem>
@@ -48,12 +48,19 @@ uint64_t readLE(const Bytes&bytes,size_t offset,unsigned size){
  return value;
 }
 
-std::optional<Bytes> replaceVideo(const Bytes&input,const fs::path&encoded,const std::string&name){
+std::optional<Bytes> replaceVideo(const Bytes&input,const fs::path&encoded,const std::string&name,bool extract){
  if(starts(input,"OggS")){
   const auto end=input.begin()+std::min<size_t>(input.size(),65536);
   const std::array<uint8_t,7> identification{0x80,'t','h','e','o','r','a'};
   if(std::search(input.begin(),end,identification.begin(),identification.end())==end)return {};
   const auto digest=sha256(input);
+  if(extract){
+   const auto output=encoded/(digest+".ogv");
+   if(fs::exists(output))require(sha256(qlie::file(output.string()))==digest,"Extracted video differs");
+   else qlie::write_file(output.string(),input);
+   std::cout<<"SOURCE\t"<<digest<<"\t"<<input.size()<<"\t"<<name<<"\n";
+   return {};
+  }
   const auto output=encoded/(digest+".mkv");
   if(!fs::is_regular_file(output))throw std::runtime_error("Missing H.264 encoding for original video: "+name+" ("+digest+")");
   auto video=qlie::file(output.string());
@@ -66,7 +73,7 @@ std::optional<Bytes> replaceVideo(const Bytes&input,const fs::path&encoded,const
  size_t cursor=0;
  for(const auto&member:whj2::abmp(input)){
   if(member.type.rfind("abimg",0)!=0)continue;
-  auto replacement=replaceVideo(member.data,encoded,name+"#"+member.name);
+  auto replacement=replaceVideo(member.data,encoded,name+"#"+member.name,extract);
   if(!replacement)continue;
   require(replacement->size()<=UINT32_MAX&&member.dataOffset>=cursor+4,"ABMP member size or order");
   output.insert(output.end(),input.begin()+cursor,input.begin()+member.dataOffset);
@@ -107,15 +114,15 @@ void verifyCopy(std::ifstream&before,std::ifstream&after,const qlie::Entry&old,c
 }
 
 void repack(const fs::path&source,const fs::path&destination,const fs::path&encoded,
-            const std::pair<Bytes,Bytes>&keys){
- qlie::Pack archive(source.string(),keys.first,keys.second);
+            const std::pair<Bytes,Bytes>&keys,qlie::PackVersion version,bool extract){
+ qlie::Pack archive(source.string(),keys.first,keys.second,version);
  std::map<size_t,Bytes> replacements;
  for(size_t index=0;index<archive.entries.size();++index){
   const auto&entry=archive.entries[index];
   const auto name=qlie::canonical(entry.name);
   const auto extension=fs::path(name).extension();
   if(extension!=".b"&&extension!=".ogv")continue;
-  auto replacement=replaceVideo(archive.read(entry),encoded,source.filename().string()+":"+name);
+  auto replacement=replaceVideo(archive.read(entry),encoded,source.filename().string()+":"+name,extract);
   if(replacement)replacements.emplace(index,std::move(*replacement));
  }
  if(replacements.empty())return;
@@ -133,7 +140,8 @@ void repack(const fs::path&source,const fs::path&destination,const fs::path&enco
  std::vector<size_t> fields,order(archive.entries.size());
  size_t pos=0;
  for(const auto&entry:archive.entries){
-  const auto len=readLE(trailer,pos,2);
+  const auto units=readLE(trailer,pos,2);
+  const auto len=units*(version==qlie::PackVersion::v31?2:1);
   require(entry.rawname.size()==len,"QLIE index layout differs");
   fields.push_back(pos+2+len);
   pos+=2+len+28;
@@ -164,7 +172,7 @@ void repack(const fs::path&source,const fs::path&destination,const fs::path&enco
     writeLE(trailer,field+12,payload.size(),4);
     writeLE(trailer,field+16,0,4); // The replacement is stored as-is.
     writeLE(trailer,field+20,0,4);
-    writeLE(trailer,field+24,qlie::hash(payload),4);
+    writeLE(trailer,field+24,archive.checksum(payload),4);
    }else copy(original,output,e.offset,e.size,buffer);
    cursor=e.offset+e.size;
   }
@@ -175,7 +183,7 @@ void repack(const fs::path&source,const fs::path&destination,const fs::path&enco
   output.close();
   require(bool(output),"Cannot close staged pack");
 
-  qlie::Pack verified(temporary.string(),keys.first,keys.second);
+  qlie::Pack verified(temporary.string(),keys.first,keys.second,version);
   require(verified.entries.size()==archive.entries.size(),"Repacked entry count changed");
   std::ifstream fresh(temporary,std::ios::binary);
   std::vector<char> readback(buffer.size());
@@ -194,16 +202,22 @@ void repack(const fs::path&source,const fs::path&destination,const fs::path&enco
 }
 
 int main(int argc,char**argv){
- if(argc!=4){std::cerr<<"usage: repack-video GAME_ROOT ENCODED_DIRECTORY OUTPUT_GAMEDATA\n";return 2;}
+ const bool extract=argc==4&&std::string_view(argv[1])=="--extract";
+ if(argc!=4){
+  std::cerr<<"usage: repack-video GAME_ROOT ENCODED_DIRECTORY OUTPUT_GAMEDATA\n"
+           <<"       repack-video --extract GAME_ROOT OUTPUT_OGG_DIRECTORY\n";
+  return 2;
+ }
  try{
-  const fs::path game=argv[1],encoded=argv[2],output=argv[3];
+  const fs::path game=argv[extract?2:1],encoded=argv[extract?3:2],output=argv[3];
   fs::create_directories(output);
   require(!fs::equivalent(game/"GameData",output),"Use a separate output directory");
-  const auto keys=qlie::game_keys(game.string(),whj2::profile::archives);
+  const auto& layout=game_profile::archives;
+  const auto keys=qlie::game_keys(game.string(),layout);
   for(int slot=0;slot<16;++slot){
    const auto name="data"+std::to_string(slot)+".pack";
    const auto source=game/"GameData"/name;
-   if(fs::is_regular_file(source))repack(source,output/name,encoded,keys);
+   if(fs::is_regular_file(source))repack(source,output/name,encoded,keys,layout.version,extract);
   }
   return 0;
  }catch(const std::exception&e){std::cerr<<"FAIL "<<e.what()<<"\n";return 1;}

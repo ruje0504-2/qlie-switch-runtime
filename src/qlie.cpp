@@ -174,6 +174,9 @@ Pack::Pack(const std::string& path,const Bytes& a,const Bytes& b,PackVersion exp
   }
  }
 }
+uint32_t Pack::checksum(const Bytes& bytes) const{
+ return version==PackVersion::v31?hash31(bytes):hash(bytes);
+}
 Bytes Pack::read(const Entry&e){
  if(key_ready&&e.name.find("pack_keyfile")!=std::string::npos)return key_entry;
  Bytes b(e.size);
@@ -183,7 +186,7 @@ Bytes Pack::read(const Entry&e){
   fp.seekg(e.offset);
   if(!fp.read(reinterpret_cast<char*>(b.data()),b.size()))throw std::runtime_error("Entry read failed: "+e.name);
  }
- if((version==PackVersion::v31?hash31(b):hash(b))!=e.hash)throw std::runtime_error("Checksum mismatch: "+e.name);
+ if(checksum(b)!=e.hash)throw std::runtime_error("Checksum mismatch: "+e.name);
  if(e.encrypted){
   if(version==PackVersion::v31)decrypt31(b,key,e.rawname,e.encrypted,k1);
   else{

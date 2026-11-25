@@ -8,6 +8,7 @@ namespace whj2 {
 namespace gpu { struct Scene; }
 class GpuRaster:public RenderTarget {
  std::unique_ptr<gpu::Scene> impl;
+ void drawImage(const Image&,const Affine2D&,float,uint32_t,uint32_t,unsigned,unsigned);
 protected:
  explicit GpuRaster(std::unique_ptr<gpu::Scene>);
 public:

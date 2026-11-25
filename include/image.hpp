@@ -18,12 +18,18 @@ public:
  void publish(){static std::atomic<uint64_t>next{1};serial=next.fetch_add(1,std::memory_order_relaxed);}
 };
 struct VideoSurfaceImage;
+struct ImagePatches;
 struct Image {
  unsigned width=0,height=0;
  qlie::Bytes pixels; // BGRA8 straight alpha
  PixelVersion version{};
  std::shared_ptr<const VideoSurfaceImage> videoSurface{};
+ std::shared_ptr<const ImagePatches> patches{};
 };
+// Optional nonoverlapping regions for pixel-aligned GPU draws. Their versions
+// are independent, and the stamp prevents editable image copies using stale regions.
+struct ImagePatch {unsigned x=0,y=0;Image image;};
+struct ImagePatches {uint64_t sourceVersion=0;std::vector<ImagePatch> regions;};
 struct Member {std::string type,name;qlie::Bytes data;size_t dataOffset=0,storedSize=0;};
 std::vector<Member> abmp(const qlie::Bytes&);
 Image image(const qlie::Bytes&);

@@ -24,4 +24,4 @@
 | `NVTEGRA active` | 解码器已产出真实硬件帧。 |
 | `DEKO3D VIDEO mapped` | 运行时已将 NV12 表面映射为 deko3d 图像。 |
 
-开发版 NRO `bc2e4ec` 已通过 Switch 实机使用验收。各项 Mac 数值和历史 Switch 采样仍按原测试范围列示。直装包的离线检查覆盖 CNMT 引用、程序分段、控制信息和 RomFS，HOME 启动与系统存档读写仍按直装版本记录。
+WHJ2 开发版 NRO `bc2e4ec` 已通过实机使用验收，维护者也已完成 WHJ4 的实机使用测试。Mac 数值和历史 Switch 采样保留其测量平台及适用范围。WHJ4 日文本体 1.0.1 与汉化更新 1.0.2 的离线检查覆盖 CNMT、程序、控制信息以及合并后的 RomFS。

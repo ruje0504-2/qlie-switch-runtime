@@ -258,6 +258,10 @@ void Scene::dispatch(const Image&i,Push&p,float alpha,uint32_t add,uint32_t mul,
   if(!recording)throw std::runtime_error("GPU frame not begun");if(!i.width||!i.height||alpha<=0)return;if(blend>8)throw std::runtime_error("GPU unsupported blend");
   if(p.rect[2]<=0||p.rect[3]<=0||p.rect[0]>=int(Width)||p.rect[1]>=int(Height))return;
   p.meta[0]=i.width;p.meta[1]=i.height;p.meta[2]|=(blend<<8)|filter;p.meta[3]=unsigned(std::clamp(alpha,0.f,255.f));p.colors[0]=add;p.colors[1]=mul;DrawSources sources;
+  // Full-screen translucent one-texel rectangles always clamp to that texel.
+  // Use the regular integer sampler without inverting a matrix at every pixel.
+  if(p.meta[3]<255&&coversCanvasWithSolid(p)&&std::abs(p.p[1][0])<4194304&&std::abs(p.p[1][1])<4194304)
+   p.meta[2]|=524288u;
   bool mayOcclude=blend<2&&p.meta[3]==255;
   p.colors[2]=texture(i,sources.primary,mayOcclude?&sources.opaque:nullptr);
   if(i.width==1&&i.height==1)std::memcpy(&sources.singlePixel,i.pixels.data(),4);
@@ -393,7 +397,7 @@ bool GpuRaster::beginVideoSurface(const KVideoSurface&surface){return impl->begi
 void GpuRaster::beginBatch(){++impl->batch;impl->inBatch=true;}
 void GpuRaster::endBatch(){impl->inBatch=false;}
 void GpuRaster::maskedImage(const Image&source,const Image&mask,const AnimationSample::Mask&settings,const Affine2D&m,float alpha,uint32_t add,uint32_t mul,unsigned blend,unsigned filter){
- auto&s=*impl;size_t before=s.current->commands.size();image(source,m,alpha,add,mul,blend,filter);if(s.current->commands.size()==before)return;
+ auto&s=*impl;size_t before=s.current->commands.size();drawImage(source,m,alpha,add,mul,blend,filter);if(s.current->commands.size()==before)return;
  auto&draw=s.current->commands.back();
  float width=settings.width?settings.width:source.width,height=settings.height?settings.height:source.height;
  float maskWidth=settings.maskWidth?settings.maskWidth:mask.width,maskHeight=settings.maskHeight?settings.maskHeight:mask.height;
@@ -423,16 +427,69 @@ void GpuRaster::transition(const Image&previous,const Image*rule,double amount,u
  p.meta[2]=3u<<20;
  if(rule){p.meta[0]=rule->width;p.meta[1]=rule->height;p.meta[2]|=131072;p.meta[3]=uint8_t(255*(1-amount));p.colors[1]=mode;p.colors[3]=s.texture(*rule,sources.secondary);}
  else{
-  // CPU's double expression is quantized once for the 256x256 possible byte
-  // pairs. Four entries share each GPU word in the texture arena.
-  if(s.lutAmount!=amount){s.transitionLut={256,64,qlie::Bytes(256*256)};for(unsigned old=0;old<256;old++)for(unsigned current=0;current<256;current++)s.transitionLut.pixels[old*256+current]=uint8_t(old*(1-amount)+current*amount);s.transitionLut.version.publish();s.lutAmount=amount;}
-  p.colors[3]=s.texture(s.transitionLut,sources.secondary);
+  // A clear canvas has only one possible destination value for each channel.
+  // Keep CPU's double expression and byte truncation in both lookup tables.
+  const auto mix=[&](unsigned old,unsigned next){return uint8_t(old*(1-amount)+next*amount);};
+  if(s.current->cleared&&s.current->commands.empty()){
+   const auto color=s.current->color;
+   auto&lut=s.solidTransitionLut;
+   if(s.solidLutAmount!=amount||s.solidLutColor!=color){
+    lut.width=256;lut.height=1;lut.pixels.resize(256*4);
+    for(unsigned old=0;old<256;++old)for(unsigned channel=0;channel<4;++channel)
+     lut.pixels[old*4+channel]=mix(old,(color>>(channel*8))&255u);
+    lut.version.publish();
+    s.solidLutAmount=amount;
+    s.solidLutColor=color;
+   }
+   p.meta[2]|=262144u;
+   p.colors[3]=s.texture(lut,sources.secondary);
+  }else{
+   auto&lut=s.transitionLut;
+   if(s.lutAmount!=amount){
+    lut.width=256;lut.height=64;lut.pixels.resize(256*256);
+    for(unsigned old=0;old<256;++old)for(unsigned next=0;next<256;++next)
+     lut.pixels[old*256+next]=mix(old,next);
+    lut.version.publish();
+    s.lutAmount=amount;
+   }
+   p.colors[3]=s.texture(lut,sources.secondary);
+  }
  }
  s.append(p,sources);
 }
-void GpuRaster::image(const Image&i,const Affine2D&m,float alpha,uint32_t add,uint32_t mul,unsigned blend,unsigned filter){float det=m.a*m.d-m.b*m.c;if(std::abs(det)<1e-12f)return;Push p;p.p[0][0]=m.a;p.p[0][1]=m.b;p.p[0][2]=m.c;p.p[0][3]=m.d;p.p[1][0]=m.x;p.p[1][1]=m.y;p.p[1][2]=det;
- // Unscaled integer placements sample exactly at texel centers for both filters.
- if(m.a==1&&m.d==1&&m.b==0&&m.c==0&&std::abs(m.x)<4194304&&std::abs(m.y)<4194304&&std::trunc(m.x)==m.x&&std::trunc(m.y)==m.y)p.meta[2]|=524288u;
+void GpuRaster::image(const Image&i,const Affine2D&m,float alpha,uint32_t add,uint32_t mul,unsigned blend,unsigned filter){
+ if(i.patches&&i.patches->sourceVersion==i.version.get()&&m.a==1&&m.d==1&&m.b==0&&m.c==0&&
+    std::abs(m.x)<4194304&&std::abs(m.y)<4194304&&std::trunc(m.x)==m.x&&std::trunc(m.y)==m.y){
+  for(const auto&patch:i.patches->regions){
+   if(patch.image.pixels.empty())continue;
+   auto placement=m;placement.x+=patch.x;placement.y+=patch.y;
+   drawImage(patch.image,placement,alpha,add,mul,blend,filter);
+  }
+  return;
+ }
+ drawImage(i,m,alpha,add,mul,blend,filter);
+}
+void GpuRaster::drawImage(const Image&i,const Affine2D&m,float alpha,uint32_t add,uint32_t mul,unsigned blend,unsigned filter){
+ const bool unit=m.a==1&&m.d==1&&m.b==0&&m.c==0;
+ float det=m.a*m.d-m.b*m.c;if(std::abs(det)<1e-12f)return;Push p;p.p[0][0]=m.a;p.p[0][1]=m.b;p.p[0][2]=m.c;p.p[0][3]=m.d;p.p[1][0]=m.x;p.p[1][1]=m.y;p.p[1][2]=det;
+ if(unit){
+  // Integer placements need no interpolation with either filter.
+  if(std::abs(m.x)<4194304&&std::abs(m.y)<4194304&&std::trunc(m.x)==m.x&&std::trunc(m.y)==m.y)p.meta[2]|=524288u;
+  // A nearest-sampled unit translation selects the same texel for a range
+  // of subpixel positions. Canonicalize only away from float rounding ties
+  // so tile damage tracks texel changes, including at moving clip edges.
+  else if(filter!=2&&std::abs(m.x)<=4096&&std::abs(m.y)<=4096){
+   const double x=double(m.x)-0.5,y=double(m.y)-0.5;
+   const auto left=int(std::ceil(x)),top=int(std::ceil(y));
+   constexpr double margin=1./1024;
+   if(std::abs(x-std::round(x))>margin&&std::abs(y-std::round(y))>margin){
+    p.p[1][0]=float(left);p.p[1][1]=float(top);p.meta[2]|=524288u;
+    p.rect[0]=left;p.rect[1]=top;p.rect[2]=left+int(i.width);p.rect[3]=top+int(i.height);
+    impl->dispatch(i,p,alpha,add,mul,blend,filter);
+    return;
+   }
+  }
+ }
  float xmin=m.x,xmax=m.x,ymin=m.y,ymax=m.y;for(unsigned n=0;n<4;n++){float u=n&1?i.width:0,v=n&2?i.height:0;float x=m.a*u+m.b*v+m.x,y=m.c*u+m.d*v+m.y;xmin=std::min(xmin,x);xmax=std::max(xmax,x);ymin=std::min(ymin,y);ymax=std::max(ymax,y);}p.rect[0]=int(std::floor(xmin));p.rect[1]=int(std::floor(ymin));p.rect[2]=int(std::ceil(xmax));p.rect[3]=int(std::ceil(ymax));impl->dispatch(i,p,alpha,add,mul,blend,filter);}
 void GpuRaster::triangle(const Image&i,const std::array<TextureVertex,3>&vertices,const Affine2D&post,float alpha,uint32_t add,uint32_t mul,unsigned blend,unsigned filter){auto v=vertices;for(auto&p:v){if(p.depth<10)return;float ratio=1000/p.depth;float x=640+(p.x-640)*ratio,y=360+(p.y-360)*ratio;p.x=post.a*x+post.b*y+post.x;p.y=post.c*x+post.d*y+post.y;}auto edge=[](const TextureVertex&a,const TextureVertex&b,float x,float y){return (b.x-a.x)*(y-a.y)-(b.y-a.y)*(x-a.x);};float area=edge(v[0],v[1],v[2].x,v[2].y);if(std::abs(area)<1e-6f)return;if(area<0){std::swap(v[1],v[2]);area=-area;}Push p;for(unsigned n=0;n<3;n++){p.p[n][0]=v[n].x;p.p[n][1]=v[n].y;p.p[n][2]=v[n].u;p.p[n][3]=v[n].v;p.p[3][n]=v[n].depth;}p.p[3][3]=area;p.meta[2]=65536;p.rect[0]=int(std::floor(std::min({v[0].x,v[1].x,v[2].x})));p.rect[1]=int(std::floor(std::min({v[0].y,v[1].y,v[2].y})));p.rect[2]=int(std::ceil(std::max({v[0].x,v[1].x,v[2].x})));p.rect[3]=int(std::ceil(std::max({v[0].y,v[1].y,v[2].y})));impl->dispatch(i,p,alpha,add,mul,blend,filter);}
 }

@@ -159,18 +159,18 @@ const Motion* findMotion(const Animation&definition,const std::string&name){
  return nullptr;
 }
 }
-struct EmbeddedVideo {
+struct EmbeddedDecoder {
  std::shared_ptr<const qlie::Bytes> bytes;
  std::string source;
  KVideo*video=nullptr;
- std::shared_ptr<Image> frame;
+ std::shared_ptr<Image> frame,spare;
  std::shared_ptr<const Image> heldFrame;
  uint64_t heldTick=0;
  uint64_t ticks=0;
- bool ended=false,audible=false,softwareOnly=false;
- explicit EmbeddedVideo(std::shared_ptr<const qlie::Bytes> b,std::string name={})
-  :bytes(std::move(b)),source(std::move(name)){reset();}
- ~EmbeddedVideo(){if(video)kvideo_close(video);}
+ bool ended=false,audible=false,softwareOnly=false,settled=false;
+ explicit EmbeddedDecoder(std::shared_ptr<const qlie::Bytes> b,std::string name={})
+  :bytes(std::move(b)),source(std::move(name)){}
+ ~EmbeddedDecoder(){if(video)kvideo_close(video);}
  void reset(){
   if(video)kvideo_close(video);
   video=softwareOnly?kvideo_open_mode(bytes->data(),bytes->size(),KVIDEO_SOFTWARE):kvideo_open(bytes->data(),bytes->size());
@@ -178,23 +178,32 @@ struct EmbeddedVideo {
   const unsigned width=kvideo_source_width(video),height=kvideo_source_height(video);
   frame=std::make_shared<Image>(Image{width,height,qlie::Bytes(size_t(width)*height*4)});
   frame->version.publish();
+  spare.reset();
   ticks=0;ended=false;audible=false;
  }
- std::shared_ptr<const Image> at(double ms,bool live=false,bool nativeVideo=false){
-  const uint64_t target=uint64_t(std::max(0.,ms)*60/1000);
+ std::shared_ptr<const Image> at(double ms,bool live,bool nativeVideo,bool loop){
+  if(!video)reset();
+  const double duration=loop?kvideo_duration_ms(video):0;
+  const double time=std::max(0.,ms);
+  const uint64_t target=uint64_t((duration>0?std::fmod(time,duration):time)*60/1000);
   if(heldFrame&&target<heldTick)heldFrame.reset();
   bool rewound=false;
   if(target+1<ticks){
    if(kvideo_rewind(video)<0)reset();
    else{ticks=0;ended=false;audible=false;rewound=true;}
   }
-  if(ended||ticks>target)return heldFrame?heldFrame:frame;
+  settled=ended||ticks>target;
+  if(settled)return heldFrame?heldFrame:frame;
   if(nativeVideo&&!softwareOnly)kvideo_enable_surface(video);
   // A long stall can move the script clock ahead by seconds. Work through
   // that backlog in small batches on the interactive presentation path.
   const uint64_t due=live?std::min(target,ticks+5):target;
   const bool borrowed=frame.use_count()>1;
-  auto output=borrowed?std::make_shared<Image>(Image{frame->width,frame->height,qlie::Bytes(frame->pixels.size())}):frame;
+  auto output=frame;
+  if(borrowed){
+   output=spare&&spare.use_count()==1?std::move(spare):
+    std::make_shared<Image>(Image{frame->width,frame->height,qlie::Bytes(frame->pixels.size())});
+  }
   KImage dst{0,0,output->width,output->height,size_t(output->width)*4,output->pixels.data()};
   uint8_t*pcm=nullptr;size_t count=0;
   auto before=kvideo_written_frames(video);
@@ -210,9 +219,9 @@ struct EmbeddedVideo {
     if(before&&ticks){heldFrame=frame;heldTick=ticks-1;}
     softwareOnly=true;
     reset();
-    return at(ms,live,nativeVideo);
+    return at(ms,live,nativeVideo,loop);
    }
-   if(rewound){reset();return at(ms,live,nativeVideo);}
+   if(rewound){reset();return at(ms,live,nativeVideo,loop);}
    throw std::runtime_error("Embedded video "+source+": "+kvideo_error(video));
   }
   if(kvideo_written_frames(video)!=before){
@@ -229,16 +238,59 @@ struct EmbeddedVideo {
     retained->readFrame=kvideo_read_frame;
     output->videoSurface=std::move(retained);
    }else output->videoSurface.reset();
+   if(borrowed)spare=std::move(frame);
    frame=std::move(output);
-  }
-  else if(rewound){
+  }else if(rewound){
    std::fill(output->pixels.begin(),output->pixels.end(),0);
    output->videoSurface.reset();
-   output->version.publish();frame=std::move(output);
-  }
-  ticks=due+1;ended=code==1;
+   output->version.publish();
+   if(borrowed)spare=std::move(frame);
+   frame=std::move(output);
+  }else if(borrowed)spare=std::move(output);
+  // A reusable CPU buffer must not keep an extra NVDEC surface pinned.
+  if(spare&&spare.use_count()==1)spare->videoSurface.reset();
+  ticks=due+1;ended=code==1;settled=ended||due==target;
   if(heldFrame&&(due>=heldTick||ended))heldFrame.reset();
   return heldFrame?heldFrame:frame;
+ }
+};
+struct EmbeddedVideo {
+ std::shared_ptr<EmbeddedDecoder> decoder;
+ std::shared_ptr<const Image> shown;
+ std::optional<uint64_t> shownTick;
+ std::optional<uint64_t> pendingTick;
+ std::string key;
+ bool audible=false,settled=false;
+ explicit EmbeddedVideo(std::shared_ptr<const qlie::Bytes> bytes,std::string source)
+  :decoder(std::make_shared<EmbeddedDecoder>(std::move(bytes),std::move(source))){}
+ void install(std::shared_ptr<const Image> frame,uint64_t tick){
+  shown=std::move(frame);shownTick=tick;audible=decoder->audible;settled=decoder->settled;
+ }
+ void cancel(AssetReadAhead*worker){
+  if(pendingTick&&worker)worker->discard(key);
+  pendingTick.reset();
+ }
+ std::shared_ptr<const Image> at(double ms,bool live,bool nativeVideo,bool loop,AssetReadAhead*worker=nullptr,bool async=true){
+  const auto tick=uint64_t(std::max(0.,ms)*60/1000);
+  if(pendingTick){
+   auto ready=live&&async?worker->takeReady(key):worker->take(key);
+   if(!ready)return shown;
+   install(std::move(ready->bitmap),*pendingTick);
+   pendingTick.reset();
+  }
+  if(settled&&shownTick==tick)return shown;
+  if(!live||!worker||!async){
+   install(decoder->at(ms,live,nativeVideo,loop),tick);
+   return shown;
+  }
+  if(key.empty())key="@embedded-frame/"+std::to_string(reinterpret_cast<uintptr_t>(this));
+  worker->request(key,[decoder=decoder,ms,nativeVideo,loop]{
+   WarmAsset ready;
+   ready.bitmap=decoder->at(ms,true,nativeVideo,loop);
+   return ready;
+  },true);
+  pendingTick=tick;
+  return shown;
  }
 };
 struct PreparedEmbeddedOpening {
@@ -247,13 +299,13 @@ struct PreparedEmbeddedOpening {
  PreparedEmbeddedOpening(const std::vector<Source>&sources,bool nativeVideo){
   for(const auto&source:sources){
    auto clip=std::make_unique<EmbeddedVideo>(source.bytes,source.name);
-   clip->at(0,false,nativeVideo);
+   clip->at(0,false,nativeVideo,false);
    clips.emplace(source.layer,std::move(clip));
   }
  }
  size_t bytesHeld()const{
   size_t size=0;
-  for(const auto&clip:clips)size+=clip.second->frame->pixels.size();
+  for(const auto&clip:clips)size+=clip.second->shown->pixels.size();
   return size;
  }
 };
@@ -356,7 +408,10 @@ struct Composite {
   size_t count=clips.size();
   // Each clip owns its compressed input, independent of the cached composite.
   // The renderer holds its own reference to any frame still submitted to the GPU.
-  if(worker)for(auto&entry:clips)worker->retire(std::move(entry.second));
+  if(worker)for(auto&entry:clips){
+   entry.second->cancel(worker);
+   worker->retire(std::move(entry.second));
+  }
   clips.clear();
   for(auto&member:members)if(member.nested)count+=member.nested->closeVideoClips(worker);
   return count;
@@ -375,7 +430,7 @@ struct Composite {
   size_t size=eyecatchFallback.size();
   for(const auto&e:members){if(e.image)size+=e.image->pixels.size();if(e.nested)size+=e.nested->bytesHeld();if(e.video)size+=e.video->size();if(e.jpegAnimation)size+=e.jpegAnimation->data.size();}
   for(const auto&sound:sounds)size+=sound.size();
-  for(const auto&clip:clips)size+=clip.second->frame->pixels.size();
+  for(const auto&clip:clips)if(clip.second->shown)size+=clip.second->shown->pixels.size();
   return size;
  }
  std::vector<PreparedEmbeddedOpening::Source> openingVideoSources()const{
@@ -401,24 +456,31 @@ struct Composite {
  void restoreIdentity(StateReader&r){identity=uint32_t(r.n());auto count=r.n();if(count!=motionIdentities.size())throw std::runtime_error("Composite identity motion count");for(auto&v:motionIdentities)v=uint32_t(r.n());for(auto&e:members)if(e.nested)e.nested->restoreIdentity(r);}
  void warn(const std::string&s)const{if(qlie::diagnostics&&warnings.insert(s).second)QLIE_LOG_LINE(<<"PENDING-ANIMATION "<<path<<" "<<s<<"\n");
  }
- EmbeddedVideo&videoClip(size_t index,const Element&element)const{
+ EmbeddedVideo&videoClip(size_t index,const Element&element,AssetReadAhead*worker)const{
   auto&clip=clips[index];
-  if(!clip||clip->bytes!=element.video)clip=std::make_unique<EmbeddedVideo>(element.video,standaloneVideo?path:path+"#"+element.name);
+  if(clip&&clip->decoder->bytes!=element.video){
+   clip->cancel(worker);
+   if(worker)worker->retire(std::move(clip));
+   else clip.reset();
+  }
+  if(!clip)clip=std::make_unique<EmbeddedVideo>(element.video,standaloneVideo?path:path+"#"+element.name);
   return *clip;
  }
- std::pair<unsigned,unsigned> dimensions()const{
+ std::pair<unsigned,unsigned> dimensions(AssetReadAhead*worker=nullptr,double ms=0,bool live=false,bool nativeVideo=false,bool async=true)const{
   if(standaloneVideo){
-   const auto&clip=videoClip(0,members.front());
-   return {clip.frame->width,clip.frame->height};
+   auto&clip=videoClip(0,members.front(),worker);
+   const auto frame=clip.at(ms,live,nativeVideo,true,worker,async);
+   return frame?std::make_pair(frame->width,frame->height):std::make_pair(0u,0u);
   }
   return {unsigned(definition.bounds[0]),unsigned(definition.bounds[1])};
  }
- void enqueue(RenderQueue&queue,double ms,const std::string&motionName,const Affine2D&parent,float depth,float opacity,uint32_t parentAdd,uint32_t parentMul,unsigned parentBlend=0,const Image*replacement=nullptr,const Image*messageSurface=nullptr,unsigned windowAlpha=255,const std::map<unsigned,const Image*>*uiSlots=nullptr,const AnimationContext*external=nullptr,const Matrix3D*parent3D=nullptr,unsigned filterOverride=0,bool liveVideo=false)const{
+ void enqueue(RenderQueue&queue,double ms,const std::string&motionName,const Affine2D&parent,float depth,float opacity,uint32_t parentAdd,uint32_t parentMul,unsigned parentBlend=0,const Image*replacement=nullptr,const Image*messageSurface=nullptr,unsigned windowAlpha=255,const std::map<unsigned,const Image*>*uiSlots=nullptr,const AnimationContext*external=nullptr,const Matrix3D*parent3D=nullptr,unsigned filterOverride=0,bool liveVideo=false,AssetReadAhead*worker=nullptr,bool asyncVideo=true)const{
   if(standaloneVideo){
    if(opacity<=0)return;
-   auto&clip=videoClip(0,members.front());
-   const double duration=kvideo_duration_ms(clip.video);
-   const auto&frame=queue.retainImage(clip.at(duration>0?std::fmod(std::max(0.,ms),duration):ms,liveVideo,queue.supportsVideoSurfaces()));
+   auto&clip=videoClip(0,members.front(),worker);
+   auto image=clip.at(ms,liveVideo,queue.supportsVideoSurfaces(),true,worker,asyncVideo);
+   if(!image)return;
+   const auto&frame=queue.retainImage(std::move(image));
    if(clip.audible)warn("video nonzero audio requires mixer binding");
    if(parent3D){
     AnimationSample sample;sample.alpha=opacity;sample.addColor=parentAdd;sample.mulColor=parentMul;sample.flags=parentBlend;sample.textureFilter=filterOverride;
@@ -493,7 +555,7 @@ struct Composite {
     Matrix3D child;child.m[0][0]=child.m[1][1]=child.m[2][2]=point.scale;
     child.m[0][3]=point.x-e.nested->definition.bounds[0]*.5f;child.m[1][3]=point.y-e.nested->definition.bounds[1]*.5f;child.m[2][3]=point.z;
     child=combine(base,child);
-    e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,point.milliseconds),e.nested->definition.motions.at(point.motion).name,{},depth+k.priority,k.alpha*point.alpha/255,k.addColor,k.mulColor,k.flags&0x7f,nullptr,nullptr,255,nullptr,nullptr,&child,filterOverride,liveVideo);
+    e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,point.milliseconds),e.nested->definition.motions.at(point.motion).name,{},depth+k.priority,k.alpha*point.alpha/255,k.addColor,k.mulColor,k.flags&0x7f,nullptr,nullptr,255,nullptr,nullptr,&child,filterOverride,liveVideo,worker,false);
    }
    continue;
   }
@@ -547,16 +609,18 @@ struct Composite {
  AnimationContext nestedContext;nestedContext.randomCursor=context.randomCursor;
  if(parent3D||k.rotationX||k.rotationY||k.z){
   auto matrix=combine(parent3D?*parent3D:from2D(parent),placement3D(k,unsigned(e.nested->definition.bounds[0]),unsigned(e.nested->definition.bounds[1])));
-  e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,k.childTime),e.nested->definition.motions[k.childMotion].name,{},depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,nullptr,nullptr,255,nullptr,&nestedContext,&matrix,filterOverride,liveVideo);continue;
+  e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,k.childTime),e.nested->definition.motions[k.childMotion].name,{},depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,nullptr,nullptr,255,nullptr,&nestedContext,&matrix,filterOverride,liveVideo,worker,asyncVideo);continue;
  }
  auto local=imagePlacement(k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,unsigned(e.nested->definition.bounds[0]),unsigned(e.nested->definition.bounds[1]));
- e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,k.childTime),e.nested->definition.motions[k.childMotion].name,affine(parent,local),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,nullptr,nullptr,255,nullptr,&nestedContext,nullptr,filterOverride,liveVideo);
+ e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,k.childTime),e.nested->definition.motions[k.childMotion].name,affine(parent,local),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,nullptr,nullptr,255,nullptr,&nestedContext,nullptr,filterOverride,liveVideo,worker,asyncVideo);
  continue;
  }
    else if(!slot&&e.video){
     if(k.alpha<=0)continue;
-    auto&clip=videoClip(index,e);
-    source=&queue.retainImage(clip.at(k.mediaTime,liveVideo,queue.supportsVideoSurfaces()));
+    auto&clip=videoClip(index,e,worker);
+    auto image=clip.at(k.mediaTime,liveVideo,queue.supportsVideoSurfaces(),false,worker,asyncVideo);
+    if(!image)continue;
+    source=&queue.retainImage(std::move(image));
     if(clip.audible)warn("video nonzero audio requires mixer binding");
    }else if(!slot&&e.jpegAnimation){
     if(k.alpha<=0)continue;
@@ -772,6 +836,23 @@ void SceneImages::loadReplacement(Layer&layer,const std::string&path){
  layer.scriptReplacement=at->second;
 }
 void SceneImages::prepareUiBitmap(const std::string&path){if(!cache.count(path))cache.emplace(path,loadBitmap(path));}
+void SceneImages::warmUiBitmaps(const std::string&key,std::vector<std::string> paths){
+ if(!readAhead)return;
+ paths.erase(std::remove_if(paths.begin(),paths.end(),[&](const auto&path){return cache.count(path)>0;}),paths.end());
+ if(paths.empty())return;
+ readAhead->request(key,[&assetSource=assets,paths=std::move(paths)]{
+  WarmAsset result;
+  for(const auto&path:paths){
+   auto bitmap=sceneBitmap(image(assetSource.read(path)));
+   result.bytes+=bitmap->pixels.size();
+   result.uiBitmaps.emplace(path,std::move(bitmap));
+  }
+  return result;
+ });
+}
+void SceneImages::takeUiBitmaps(const std::string&key){
+ if(readAhead)if(auto batch=readAhead->take(key))cache.merge(batch->uiBitmaps);
+}
 void SceneImages::uiSlot(const std::string&name,unsigned slot,const std::string&path){if(name.rfind("ui_",0)!=0)throw std::runtime_error("UI slot owner");prepareUiBitmap(path);layers.at(name).uiSlots[slot]=cache.at(path);}
 void SceneImages::uiSlot(const std::string&name,unsigned slot,const Image&value){if(name.rfind("ui_",0)!=0)throw std::runtime_error("UI slot owner");layers.at(name).uiSlots[slot]=sceneBitmap(value);}
 void SceneImages::setUiMotion(const std::string&name,const char*motion){
@@ -812,7 +893,14 @@ bool SceneImages::uiHit(const std::string&name,float x,float y)const{
  }
  return false;
 }
-void SceneImages::uiExternal(const std::string&name,unsigned index,float v){if(name.rfind("ui_",0)!=0||index>=16||!std::isfinite(v))throw std::runtime_error("UI external variable");layers.at(name).params["@exv"+std::to_string(index)]=std::to_string(v);}
+void SceneImages::uiExternal(const std::string&name,unsigned index,float v){
+ if(name.rfind("ui_",0)!=0||index>=16||!std::isfinite(v))throw std::runtime_error("UI external variable");
+ auto&layer=layers.at(name);
+ auto&parameter=layer.params["@exv"+std::to_string(index)];
+ parameter=std::to_string(v);
+ layer.external[index]=numeric(parameter);
+ layer.externalMask|=uint16_t(1u<<index);
+}
 void SceneImages::clearComposites(){
  if(readAhead)for(auto&entry:composites)if(entry.second->hasVideo){
   readAhead->discard(qlie::canonical(entry.first));
@@ -820,11 +908,11 @@ void SceneImages::clearComposites(){
  }
  composites.clear();
 }
-void SceneImages::clear(){
+void SceneImages::clear(bool keepBitmaps){
  const auto start=qlie::diagnostics?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
  const auto layerCount=layers.size(),bitmaps=cache.size(),animations=composites.size();
  layers.clear();
- cache.clear();
+ if(!keepBitmaps)cache.clear();
  clearComposites();
  if constexpr (qlie::diagnostics){
   const auto ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
@@ -1166,7 +1254,14 @@ std::optional<std::string> SceneImages::selectFace(const std::string&speaker,con
  command("^face,file:"+resolved.substr(5));
  return {};
 }
-std::pair<unsigned,unsigned> SceneImages::dimensions(const std::string&name)const{const auto&layer=layers.at(name);if(layer.composite)return {unsigned(layer.composite->definition.bounds[0]),unsigned(layer.composite->definition.bounds[1])};if(layer.pixels)return {layer.pixels->width,layer.pixels->height};throw std::runtime_error("Image dimensions unavailable: "+name);}
+std::pair<unsigned,unsigned> SceneImages::dimensions(const std::string&name)const{const auto&layer=layers.at(name);if(layer.composite){
+ if(layer.composite->standaloneVideo){
+  const auto&clip=layer.composite->videoClip(0,layer.composite->members.front(),readAhead);
+  if(clip.shown)return {clip.shown->width,clip.shown->height};
+  return layer.composite->dimensions(readAhead,layer.milliseconds,false,prefetchNativeVideo);
+ }
+ return layer.composite->dimensions();
+}if(layer.pixels)return {layer.pixels->width,layer.pixels->height};throw std::runtime_error("Image dimensions unavailable: "+name);}
 void SceneImages::draw(qlie::Bytes&out,bool liveVideo,const Affine2D*view)const{render(out,0,nullptr,999,liveVideo,view);}
 void SceneImages::drawThumbnail(qlie::Bytes&out,float maxPriority)const{render(out,4,nullptr,maxPriority);}
 void SceneImages::drawScene(qlie::Bytes&out,bool liveVideo)const{render(out,1,nullptr,999,liveVideo);}
@@ -1264,7 +1359,11 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
   align=x+":"+y;
  }
  float ax=align.rfind("center",0)==0?0.5f:align.rfind("right",0)==0?1.f:0.f,ay=align.find(":bottom")!=align.npos?1.f:align.find(":center")!=align.npos?0.5f:0.f;
- const auto [w,h]=l->composite?l->composite->dimensions():std::make_pair(l->pixels->width,l->pixels->height);
+ // Shared composite instances can be sampled at different times in one frame.
+ // Keep those ordered on the caller, and queue ordinary single-owner playback.
+ const bool asyncVideo=l->composite&&l->composite.use_count()<=2;
+ const auto [w,h]=l->composite?l->composite->dimensions(readAhead,l->milliseconds,liveVideo,queue.supportsVideoSurfaces(),asyncVideo):std::make_pair(l->pixels->width,l->pixels->height);
+ if(l->composite&&l->composite->standaloneVideo&&(!w||!h))continue;
  const auto blend=l->params.find("blend");
  const unsigned blendMode=blend==l->params.end()?0:imageBlend(blend->second);
  auto placement=imagePlacement(get(l,"x",640),get(l,"y",360),get(l,"scalex",100)/100,get(l,"scaley",100)/100,get(l,"rotz",0),ax,ay,w,h);
@@ -1305,8 +1404,8 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
   if(source)uiSlots[i]=filtered(i,source);
   else if(i<l->composite->members.size()){auto&e=l->composite->members[i];if(e.nested||e.mesh||e.video)l->composite->warn("image-filter-nonbitmap-slot="+std::to_string(i));}
  }}else if(l->pixels)plain=filtered(0,l->pixels);
- AnimationContext external;external.randomCursor=&waveformCursor;for(unsigned i=0;i<16;i++){auto v=l->params.find("@exv"+std::to_string(i));if(v!=l->params.end()){external.external[i]=numeric(v->second);external.externalMask|=uint16_t(1u<<i);}}
- if(l->composite){auto m=l->params.find("motion");l->composite->enqueue(queue,l->milliseconds,m==l->params.end()?"":m->second,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),blendMode,l->params.count("@portrait")?l->pixels.get():nullptr,layers.count("message")&&l==(&layers.at("message"))?l->pixels.get():nullptr,windowAlpha,uiSlots.empty()?nullptr:&uiSlots,&external,spatial?&matrix:nullptr,unsigned(get(l,"texfilter",0)),liveVideo);}
+ AnimationContext external;external.randomCursor=&waveformCursor;external.external=l->external;external.externalMask=l->externalMask;
+ if(l->composite){auto m=l->params.find("motion");l->composite->enqueue(queue,l->milliseconds,m==l->params.end()?"":m->second,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),blendMode,l->params.count("@portrait")?l->pixels.get():nullptr,layers.count("message")&&l==(&layers.at("message"))?l->pixels.get():nullptr,windowAlpha,uiSlots.empty()?nullptr:&uiSlots,&external,spatial?&matrix:nullptr,unsigned(get(l,"texfilter",0)),liveVideo,readAhead,asyncVideo);}
  else if(spatial){transform.alpha=get(l,"alpha",255);transform.addColor=uint32_t(get(l,"addcolor",0));transform.mulColor=uint32_t(get(l,"mulcolor",0xffffff));transform.flags=blendMode;transform.textureFilter=unsigned(get(l,"texfilter",0));quad(queue,*plain,matrix,transform,get(l,"pri",0));}
  else queue.image(*plain,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),blendMode,unsigned(get(l,"texfilter",0)));
  if(queue.imageCount()>beforeImages){if(qlie::canonical(l->path).rfind("image/ev/",0)==0)shownFiles.insert(qlie::canonical(l->path));auto replacement=l->params.find("@replacement");if(replacement!=l->params.end()&&qlie::canonical(replacement->second).rfind("image/ev/",0)==0)shownFiles.insert(qlie::canonical(replacement->second));}
@@ -1367,7 +1466,14 @@ void SceneImages::restore(const qlie::Bytes&b){StateReader r{b};
  if(n>256)throw std::runtime_error("Image property count");
  while(n--){auto k=r.str();
  l.params[k]=r.str();
- }if(sceneCompositePath(l.path)){
+ }
+ for(unsigned i=0;i<l.external.size();++i){
+  const auto param=l.params.find("@exv"+std::to_string(i));
+  if(param==l.params.end())continue;
+  l.external[i]=numeric(param->second);
+  l.externalMask|=uint16_t(1u<<i);
+ }
+ if(sceneCompositePath(l.path)){
  l.composite=sceneComposite(l.path);
  }else if(!l.path.empty()){auto it=cache.find(l.path);
  if(it==cache.end())it=cache.emplace(l.path,loadBitmap(l.path)).first;

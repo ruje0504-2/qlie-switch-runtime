@@ -5,7 +5,13 @@
 namespace whj2 {
 struct AnimationLayer {std::string name;unsigned version;uint8_t flags,mode;std::vector<qlie::Bytes> keys;};
 struct Motion {std::string name;std::vector<AnimationLayer> layers;};
-struct Animation {std::string name,comment;std::array<int32_t,4> bounds;uint32_t flags=0;std::vector<Motion> motions;};
+struct Animation {
+ std::string name,comment;
+ std::array<int32_t,4> bounds;
+ uint32_t flags=0;
+ std::vector<Motion> motions;
+ bool loopStartFirst=false;
+};
 struct AnimationContext {unsigned imageWidth=UINT32_MAX,imageHeight=UINT32_MAX,targetWidth=UINT32_MAX,targetHeight=UINT32_MAX;uint32_t randomSeed=0;std::array<float,16> external{};uint16_t externalMask=0;uint32_t* randomCursor=nullptr;};
 struct Affine2D {float a=1,b=0,c=0,d=1,x=0,y=0;};
 struct AnimationSample {

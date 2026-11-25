@@ -2,7 +2,7 @@
 
 [![GPL-2.0-or-later](https://img.shields.io/badge/license-GPL--2.0--or--later-blue)](LICENSE)
 
-面向 Nintendo Switch/Horizon 和 macOS 的 QLIE 运行时。WHJ2 日文版的 NRO 已有 Switch 实机验证。WHJ4 日文版已有 Mac 验证和 Switch 构建，实机表现待验证。
+面向 Nintendo Switch/Horizon 和 macOS 的 QLIE 运行时。WHJ2 和 WHJ4 均已完成 Switch 实机使用测试。WHJ4 涵盖日文本体和可选汉化更新的本地打包。
 
 [优化手册](docs/optimization/README.md)记录 deko3d 渲染、影片硬解、资源预读、音频和界面的实现及测量范围。
 
@@ -40,7 +40,7 @@ QLIE_GAME=whj4 ./build-switch.sh
 各目标在自己的 `saves/` 下写入存档。两平台均支持 `--engine-only`。
 
 WHJ4 运行目录需准备日文原版的九个封包和从原版 EXE 导出的 RESKEY。
-剧情中的独立 OGV 走通用影片解码器，原版 Theora 使用软件解码。原生 ABMP 中的 IMOAVI 逐帧读取 JPEG。
+剧情中的独立 OGV 与 ABMP 内的影片共用解码器。原版 Theora 使用软件解码。自用直装包可沿用 WHJ2 的 H.264/Matroska 参数，将影片通过 `tools/repack_video.cpp` 回填到 FilePackVer3.1，由 NVDEC 解码并把 NV12 帧交给 deko3d。ABMP 中的 IMOAVI 仍按原 JPEG 序列读取。
 
 ```sh
 python3 tools/extract_reskey.py /absolute/path/to/original.exe /absolute/path/to/whj4-game/reskey.fkey
@@ -62,7 +62,7 @@ QLIE_GAME=whj2 python3 tools/package_nsp.py \
 
 WHJ2 直装配置为 Title ID `01007F8E5C120000`、版本 `1.0.1`。包内游戏数据通过 RomFS 读取，直装启动要求成功挂载系统 SaveData。
 
-WHJ4 可用同一命令，构建和打包两步均选 `QLIE_GAME=whj4`。本地 Title ID 为 `01007F8E5C140000`。
+WHJ4 的构建和打包均选 `QLIE_GAME=whj4`。日文本体为 `01007F8E5C140000`，版本 `1.0.1`。汉化更新 `1.0.2` 使用更新 ID `01007F8E5C140800`，以该日文本体制成差分包。先安装日文本体，再安装汉化更新。HOME 中文名称为「美少女万華鏡 -罪与罚的少女-」。日文与汉化的部分脚本分段不同，跨语言读档尚未验证。
 
 ## 许可
 

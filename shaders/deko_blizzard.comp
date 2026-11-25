@@ -12,36 +12,18 @@ layout(binding=3,std430) readonly buffer Tiles { uint tiles[]; };
 layout(std140,binding=0) uniform Parameters { vec4 p0;vec4 p1;vec4 p2;vec4 p3;ivec4 rect;uvec4 meta;uvec4 colors; } frame;
 #include "raster_pixels.glsl"
 
-shared vec2 backdropCoords[2][16];
-shared uvec2 coordLayers;
-
+// Each invocation samples its own coordinates. The shared-coordinate version
+// hit a GPU queue error on Switch when restoring a four-layer blizzard.
 void main(){
  uint header=gl_WorkGroupID.x*4u;
  uint packedOrigin=tiles[header],first=tiles[header+1u],count=tiles[header+2u],control=tiles[header+3u];
  ivec2 origin=ivec2(packedOrigin&65535u,packedOrigin>>16);
- uvec2 lane=gl_LocalInvocationID.xy;
- ivec2 q=origin+ivec2(lane);
+ ivec2 q=origin+ivec2(gl_LocalInvocationID.xy);
  uint index=uint(q.y)*frame.meta.x+uint(q.x);
  uint prefixIndex=frame.meta.x*frame.meta.y+index;
  uvec4 color=unpack((control&0x80000000u)!=0u?destination[prefixIndex]:
                     frame.meta.w!=0u?frame.colors.x:destination[index]);
  uint saveAfter=control&0x7fffffffu;
-
- // Compute the first two scaled backdrops once per row and column.
- if(lane.y==0u){
-  uvec2 layers=uvec2(count);
-  uint slot=0u;
-  for(uint item=0u;item<count&&slot<2u;++item){
-   Draw p=draws[tiles[first+item]];
-   if((p.meta.z&524288u)!=0u||p.p0.y!=0.0||p.p0.z!=0.0)continue;
-   if(any(greaterThan(p.rect.xy,origin))||any(lessThan(p.rect.zw,origin+16)))continue;
-   precise vec2 d=vec2(origin+ivec2(int(lane.x)))+0.5-p.p1.xy;
-   backdropCoords[slot][lane.x]=vec2(divide(p.p0.w*d.x,p.p1.z),divide(p.p0.x*d.y,p.p1.z));
-   layers[slot++]=item;
-  }
-  if(lane.x==0u)coordLayers=layers;
- }
- barrier();
 
  uint tile=uint(origin.y>>4)*(frame.meta.x>>4u)+uint(origin.x>>4);
  for(uint item=0u;item<count;++item){
@@ -66,13 +48,8 @@ void main(){
     uvec4 s=uvec4(0u);
     if((p.meta.z&524288u)!=0u)s=pixel(p,q-ivec2(p.p1.xy));
     else{
-     precise vec2 uv;
-     if(item==coordLayers.x)uv=vec2(backdropCoords[0][lane.x].x,backdropCoords[0][lane.y].y);
-     else if(item==coordLayers.y)uv=vec2(backdropCoords[1][lane.x].x,backdropCoords[1][lane.y].y);
-     else{
-      precise vec2 d=vec2(q)+0.5-p.p1.xy;
-      uv=vec2(divide(p.p0.w*d.x-p.p0.y*d.y,p.p1.z),divide(-p.p0.z*d.x+p.p0.x*d.y,p.p1.z));
-     }
+     precise vec2 d=vec2(q)+0.5-p.p1.xy;
+     precise vec2 uv=vec2(divide(p.p0.w*d.x-p.p0.y*d.y,p.p1.z),divide(-p.p0.z*d.x+p.p0.x*d.y,p.p1.z));
      if(all(greaterThanEqual(uv,vec2(0)))&&all(lessThan(uv,vec2(p.meta.xy))))s=samplePixel(p,uv);
     }
     uint a=s.a*p.meta.w/255u;

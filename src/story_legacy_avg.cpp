@@ -90,7 +90,12 @@ bool Story::legacyCaret(const Op&o,const std::vector<std::string>& a){
   if(kind=="cut")emit("^sentence,fade:cut");
   else if(kind=="blind")emit("^sentence,fade:rule:"+duration+":"+optional(2,"blind")+":"+mode);
   else if(kind=="overlap")emit("^sentence,fade:overlap:"+duration);
-  else if(kind=="ex1")emit("^sentence,fade:anime:"+duration+":"+field(2));
+  else if(kind=="ex1"){
+   auto sentence="^sentence,fade:anime:"+duration+":"+field(2);
+   // AVG starts the animated fade at the message wait, then runs a clickable wait.
+   if(optional(5,"1")=="1")sentence+=",wait:click:"+duration+":0";
+   emit(std::move(sentence));
+  }
   else return false;
   if(state.vars.erase("__avg1_fadeout"))emit("^ui_avg1_fade,file:none");
   return true;

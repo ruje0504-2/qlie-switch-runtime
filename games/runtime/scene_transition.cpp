@@ -120,7 +120,9 @@ void SceneTransition::loadAnimation(const std::string&path){
   auto metadata=std::find_if(members.begin(),members.end(),[](const Member&m){return m.type.rfind("abdata",0)==0;});
   if(metadata==members.end())throw std::runtime_error("Missing transition animation metadata "+path);
   auto definition=whj2::animation(metadata->type,metadata->data);
-  if(definition.bounds[0]!=int(Width)||definition.bounds[1]!=int(Height)||definition.motions.empty())
+  // Original AVG effects may inherit the display canvas from the capture.
+  const bool capturesCanvas=game_profile::story.legacyAvg&&definition.bounds[0]==0&&definition.bounds[1]==0;
+  if((!capturesCanvas&&(definition.bounds[0]!=int(Width)||definition.bounds[1]!=int(Height)))||definition.motions.empty())
    throw std::runtime_error("Transition animation dimensions "+path);
   captureAnimationTarget=false;
   std::istringstream comment(definition.comment);

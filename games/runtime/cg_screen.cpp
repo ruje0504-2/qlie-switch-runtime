@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "cg_screen.hpp"
 #include "asset_read_ahead.hpp"
+#include "profile.hpp"
 #include <algorithm>
 namespace whj2 {
 void CgScreen::prepareLayout(){
@@ -8,7 +9,7 @@ void CgScreen::prepareLayout(){
  add("ui_cg_bg","背景.png",0,0,100);add("ui_cg_upper","アッパーフレーム.png",0,0,100);add("ui_cg_lower","アンダーフレーム.png",0,656,100);
  for(unsigned i=0;i<24;i++)add("ui_cg_item"+std::to_string(i),"Button_Thum.b",85+int(i%6)*190,135+int(i/6)*130,110);
  for(int i=0;i<pageCount();i++){auto id="ui_cg_page"+std::to_string(i);add(id,"Button_Page.b",1148+int(i)*40,90,110);auto name="script/albummode/ページ_0"+std::to_string(i+1);menuScene.uiSlot(id,0,name+"_off.png");menuScene.uiSlot(id,1,name+"_on.png");}
- const char*names[]={"CG観賞","回想観賞","音楽鑑賞","戻る"};for(int i=0;i<4;i++){auto id="ui_cg_nav"+std::to_string(i);add(id,"Button_l.b",820+i*130,695,110);menuScene.uiSlot(id,0,"script/albummode/"+std::string(names[i])+"_off.png");menuScene.uiSlot(id,1,"script/albummode/"+std::string(names[i])+"_on.png");}
+ const char*names[]={"CG観賞","回想観賞","音楽鑑賞","戻る"};for(int i=game_profile::story.legacyAvg?1:0;i<4;i++){auto id="ui_cg_nav"+std::to_string(i);add(id,"Button_l.b",820+i*130,695,110);menuScene.uiSlot(id,0,"script/albummode/"+std::string(names[i])+"_off.png");menuScene.uiSlot(id,1,"script/albummode/"+std::string(names[i])+"_on.png");}
  menuScene.prepareUiBitmap("script/albummode/サムネイル_no_image.png");
  const char*buttons[]={"ViewPrev_n.png","ViewZoom_n.png","ViewQuit_n.png","ViewNext_n.png"};
  for(int i=0;i<4;i++){
@@ -37,7 +38,7 @@ int CgScreen::navigationStart()const{return 24+pageCount();}
 bool CgScreen::exists(int item)const{return item>=0&&item<24&&page*24+unsigned(item)<catalog.items().size();}
 void CgScreen::highlight(){for(unsigned i=0;i<24;i++){auto index=page*24+i;if(index>=catalog.items().size())continue;auto mode=!catalog.unlocked(index,progress)?"*OnLock":selected==int(i)?"*OnMouse":"*OffMouse";menuScene.setUiMotion("ui_cg_item"+std::to_string(i),mode);}
  for(int i=0;i<pageCount();i++)menuScene.setUiMotion("ui_cg_page"+std::to_string(i),page==unsigned(i)?"*OnCheck":selected==24+i?"*OnMouse":"*OffMouse");
- for(int i=0;i<4;i++)menuScene.setUiMotion("ui_cg_nav"+std::to_string(i),i==0?"*OnLock":selected==navigationStart()+i?"*OnMouse":"*OffMouse");}
+ for(int i=game_profile::story.legacyAvg?1:0;i<4;i++)menuScene.setUiMotion("ui_cg_nav"+std::to_string(i),i==0?"*OnLock":selected==navigationStart()+i?"*OnMouse":"*OffMouse");}
 void CgScreen::cancelViewRequest(){
  if(readAhead&&!pendingView.empty())readAhead->discard(pendingView);
  pendingView.clear();

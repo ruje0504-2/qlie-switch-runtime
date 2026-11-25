@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "music_screen.hpp"
+#include "profile.hpp"
+#include "render_queue.hpp"
 #include "story.hpp"
 #include <sstream>
 #include <algorithm>
@@ -16,18 +18,22 @@ void MusicScreen::prepare(){
  for(unsigned i=0;i<tracks.size();i++){
   const auto id="ui_track"+std::to_string(i);
   const int track=int(i)%perPage();
-  add(id,"SoundButton.b",(paged()?230:wide?205:270)+track/rows*(paged()?405:wide?285:380),
+  if(game_profile::story.legacyAvg){
+   constexpr int y[]={170,234,296,362,426,490,554,618};
+   add(id,"SoundButton.b",400+track/rows*480,y[track%rows],110);
+  }else add(id,"SoundButton.b",(paged()?230:wide?205:270)+track/rows*(paged()?405:wide?285:380),
    (paged()?150:wide?170:200)+track%rows*(paged()||wide?65:80),110);
   char number[8];std::snprintf(number,sizeof(number),"%02u.",i+1);
   text(id,3,std::string(number)+tracks[i].title,wide?270:350,50,18);
  }
  const char*controls[]={"Prev","Play","Next","Loop"};for(unsigned i=0;i<4;i++)add("ui_music_control"+std::to_string(i),std::string("ControlButton_")+controls[i]+".b",990+int(i)*50,paged()?615:100,150);
- const char*navNames[]={"CG観賞","回想観賞","音楽鑑賞"};for(int i=0;i<3;i++){auto id="ui_music_nav"+std::to_string(i);add(id,"Button_l.b",820+i*130,695,150);scene.uiSlot(id,0,"script/soundmode/"+std::string(navNames[i])+"_off.png");scene.uiSlot(id,1,"script/soundmode/"+std::string(navNames[i])+"_on.png");}
- scene.command("^ui_music_nav2,motion:*OnLock");
+ const char*navNames[]={"CG観賞","回想観賞","音楽鑑賞"};
+ for(int i=0;i<(game_profile::story.legacyAvg?2:3);i++){auto id="ui_music_nav"+std::to_string(i);add(id,"Button_l.b",820+i*130,695,150);scene.uiSlot(id,0,"script/soundmode/"+std::string(navNames[i])+"_off.png");scene.uiSlot(id,1,"script/soundmode/"+std::string(navNames[i])+"_on.png");}
+ if(!game_profile::story.legacyAvg)scene.command("^ui_music_nav2,motion:*OnLock");
  add("ui_music_back","Button_l.b",1211,695,150);scene.uiSlot("ui_music_back",0,"script/soundmode/戻る_off.png");scene.uiSlot("ui_music_back",1,"script/soundmode/戻る_on.png");
  add("ui_music_seek","SeekBar_Bar.b",210,seekY(),110);add("ui_music_seekknob","SeekBar_Prog.b",210,seekY(),120);
  add("ui_music_volume","VolumeBar_Bar.b",700,seekY(),110);add("ui_music_volknob","VolumeBar_Prog.b",700,seekY(),120);
- add("ui_music_caption","ViewText.b",400,seekY()+6,150);
+ if(!game_profile::story.legacyAvg)add("ui_music_caption","ViewText.b",400,seekY()+6,150);
  if(paged())for(int i=0;i<pageCount();++i){
   const auto id="ui_music_page"+std::to_string(i);
   const auto file="script/soundmode/ページ_0"+std::to_string(i+1);
@@ -157,10 +163,32 @@ void MusicScreen::refresh(){
   clearSeek();
   p=audio.position(0);
  }
- auto current=p.frame*1000/44100,total=p.length*1000/44100;char time[64];std::snprintf(time,sizeof(time)," %02llu:%02llu (%02llu:%02llu)",(unsigned long long)(current/60000),(unsigned long long)(current/1000%60),(unsigned long long)(total/60000),(unsigned long long)(total/1000%60));auto next=playing<0?std::string("no select"):tracks[playing].title+time;if(next!=caption){caption=next;text("ui_music_caption",0,"[pc,"+caption+"]",500,40,14);}
+ auto current=p.frame*1000/44100,total=p.length*1000/44100;char time[64];std::snprintf(time,sizeof(time)," %02llu:%02llu (%02llu:%02llu)",(unsigned long long)(current/60000),(unsigned long long)(current/1000%60),(unsigned long long)(total/60000),(unsigned long long)(total/1000%60));
+ if(game_profile::story.legacyAvg){
+  if(caption!=time){caption=time;labelText.start("[spd,0]"+caption);legacyCaption=labelText.render(font,{200,50,14,14});}
+ }else{
+  auto next=playing<0?std::string("no select"):tracks[playing].title+time;
+  if(next!=caption){caption=next;text("ui_music_caption",0,"[pc,"+caption+"]",500,40,14);}
+ }
  const float seek=p.length?100.f*p.frame/p.length:0;
  if(seek!=shownSeek){scene.command("^ui_music_seekknob,scalex:"+std::to_string(seek));shownSeek=seek;}
  if(volumeValue!=shownVolume){scene.command("^ui_music_volknob,scalex:"+std::to_string(volumeValue));shownVolume=volumeValue;}
+}
+void MusicScreen::draw(qlie::Bytes&out,const Affine2D*view)const{
+ scene.draw(out,false,view);
+ if(legacyCaption){
+  RenderQueue queue(false,false,view);
+  queue.image(*legacyCaption,{1,0,0,1,300,78},0,255,0,0xffffff);
+  queue.draw(out,1280,720);
+ }
+}
+void MusicScreen::draw(RenderTarget&out,const Affine2D*view)const{
+ scene.draw(out,false,view);
+ if(legacyCaption){
+  RenderQueue queue(out.supportsMasks(),out.supportsVideoSurfaces(),view);
+  queue.image(*legacyCaption,{1,0,0,1,300,78},0,255,0,0xffffff);
+  queue.draw(out,1280,720);
+ }
 }
 void MusicScreen::update(double ms){if(!opened)return;scene.update(ms);if(playing>=0&&audible&&!audio.playing(0)){if(loop){audio.seek(0,0);audio.volume(0,255.f/256);}else play(playing+1);}refresh();}
 }

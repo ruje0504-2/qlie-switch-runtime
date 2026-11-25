@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "replay_screen.hpp"
+#include "profile.hpp"
 #include <algorithm>
 namespace whj2 {
 void ReplayScreen::prepareLayout(){
@@ -7,7 +8,7 @@ void ReplayScreen::prepareLayout(){
  add("ui_replay_bg","背景.png",0,0,100);add("ui_replay_upper","アッパーフレーム.png",0,0,100);add("ui_replay_lower","アンダーフレーム.png",0,656,100);
  for(unsigned i=0;i<15;i++)add("ui_replay_item"+std::to_string(i),"Button_Thum.b",60+int(i%5)*240,140+int(i/5)*170,110);
  for(int i=0;i<pageCount();i++){auto id="ui_replay_page"+std::to_string(i);add(id,"Button_Page.b",1170+int(i)*40,90,110);auto name="script/memorymode/ページ_0"+std::to_string(i+1);scene.uiSlot(id,0,name+"_off.png");scene.uiSlot(id,1,name+"_on.png");}
- const char*names[]={"CG観賞","回想観賞","音楽鑑賞","戻る"};for(int i=0;i<4;i++){auto id="ui_replay_nav"+std::to_string(i);add(id,"Button_l.b",820+i*130,695,110);scene.uiSlot(id,0,"script/memorymode/"+std::string(names[i])+"_off.png");scene.uiSlot(id,1,"script/memorymode/"+std::string(names[i])+"_on.png");}
+ const char*names[]={"CG観賞","回想観賞","音楽鑑賞","戻る"};for(int i=0;i<4;i++){if(game_profile::story.legacyAvg&&i==1)continue;auto id="ui_replay_nav"+std::to_string(i);add(id,"Button_l.b",820+i*130,695,110);scene.uiSlot(id,0,"script/memorymode/"+std::string(names[i])+"_off.png");scene.uiSlot(id,1,"script/memorymode/"+std::string(names[i])+"_on.png");}
  scene.prepareUiBitmap("script/memorymode/サムネイル_no_image.png");
  prepared=true;
 }
@@ -30,7 +31,11 @@ void ReplayScreen::setup(){elapsed=0;scene.resetUiAnimations();for(unsigned i=0;
  highlight();}
 void ReplayScreen::highlight(){for(unsigned i=0;i<15;i++){auto index=page*15+i;if(index>=catalog.items().size())continue;auto motion=!catalog.unlocked(index,progress)?"*OnLock":selected==int(i)?"*OnMouse":"*OffMouse";scene.setUiMotion("ui_replay_item"+std::to_string(i),motion);}
  for(int i=0;i<pageCount();i++)scene.setUiMotion("ui_replay_page"+std::to_string(i),page==unsigned(i)?"*OnCheck":selected==15+int(i)?"*OnMouse":"*OffMouse");
- for(int i=0;i<4;i++)scene.setUiMotion("ui_replay_nav"+std::to_string(i),i==1?"*OnLock":selected==navigationStart()+i?"*OnMouse":"*OffMouse");}
+ for(int i=0;i<4;i++){
+  if(game_profile::story.legacyAvg&&i==1)continue;
+  scene.setUiMotion("ui_replay_nav"+std::to_string(i),i==1?"*OnLock":selected==navigationStart()+i?"*OnMouse":"*OffMouse");
+ }
+}
 void ReplayScreen::close(){opened=false;}
 void ReplayScreen::update(double ms){if(!opened)return;elapsed+=std::max(0.,ms);scene.update(ms);}
 void ReplayScreen::move(int x,int y){if(!opened||elapsed<250)return;

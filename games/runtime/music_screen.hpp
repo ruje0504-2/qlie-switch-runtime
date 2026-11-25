@@ -15,6 +15,7 @@ class MusicScreen {
  std::optional<float> seekFraction;
  int64_t seekOffsetMs=0;
  std::map<std::string,std::string> motions;
+ std::optional<Image> legacyCaption;
  enum Control { Previous,Play,Next,Loop,Return,Seek,Volume,Album,Memory,Page };
  int trackCount()const{return int(tracks.size());}
  bool paged()const{return trackCount()==37;}
@@ -35,8 +36,8 @@ public:
  void prepare();
  bool takeSettingsChanged(){bool value=dirty;dirty=false;return value;}
  void open();void close();bool visible()const{return opened;}
- void update(double);void draw(qlie::Bytes&out,const Affine2D*view=nullptr)const{scene.draw(out,false,view);}
- void draw(RenderTarget&out,const Affine2D*view=nullptr)const{scene.draw(out,false,view);}
+ void update(double);void draw(qlie::Bytes&out,const Affine2D*view=nullptr)const;
+ void draw(RenderTarget&out,const Affine2D*view=nullptr)const;
  void move(int,int);Destination confirm();Destination back();Destination tap(float,float);bool drag(float,float);
  int selection()const{return selected;}int playingTrack()const{return playing;}
 };

@@ -13,6 +13,7 @@ inline const qlie::ArchiveLayout archives{
   {"script/memorymode/","script/replaymode/"},
   {"script/memorymode/サムネイル_no_image.png","script/replaymode/サムネイル_no_memory.png"},
   {"script/memorymode/fade.png","script/replaymode/fadeimage.png"},
+  {"script/albummode/viewquit_n.png","script/albummode/viewback_n.png"},
   {"script/caution/caution.b","script/makerlogo/caution.b"},
   {"script/makerlogo/omegastar.ogv","movie/ロゴ.ogv"},
   {"system/font/外字.of","system/font/外字登録.of"},

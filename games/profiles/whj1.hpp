@@ -65,7 +65,7 @@ inline constexpr char sdRenderer[]="sdmc:/switch/whj1/renderer.cfg";
 inline constexpr char titleMusic[]="music/nbgm04.ogg";
 inline constexpr char cgMusic[]="music/nbgm01.ogg";
 inline constexpr char replayMusic[]="music/nbgm01.ogg";
-inline constexpr char titleStartFade[]="^sentence,fade:anime:500:script/title/test_01b.b";
+inline constexpr char titleStartFade[]="^sentence,fade:anime:1000:script/title/test_01b.b";
 inline constexpr double cautionFade=0,cautionExitWait=0;
 inline constexpr char secondMakerLogo[]="";
 inline constexpr double titleStartWait=1500,titleMusicFade=500,cautionWait=5250;
@@ -77,7 +77,7 @@ inline constexpr whj2::TitleLayout title{
  nullptr,"_off.png","_on.png","script/title/bm1_title_button.b",
  {"script/title/bm1_title_button.b","script/title/bm1_title_button.b"},
  {"start","load","album","option","quit"},
- {"cg_mode","memory_mode","sound_mode","back"},{},{},0,0,false,0,0,0,true,true,true
+ {"cg_mode","memory_mode","sound_mode","back"},{},{},0,0,false,0,0,0,true,true,true,500,500
 };
 inline constexpr whj2::SettingsLayout settingsLayout{{{
  {355,198,245,-6,-10,5},{355,314,245,-6,-10,5},

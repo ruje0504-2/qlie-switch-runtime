@@ -506,6 +506,19 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   if(!cautionLeaving)return 255;
   return unsigned(255*(1-std::clamp(openingElapsed/game_profile::cautionFade,0.,1.)));
  }
+ unsigned titleStartOpacity()const{
+  if constexpr(game_profile::title.startBlackFadeMs>0){
+   if(transition->isActive()){
+    const double fade=(titleStartElapsed-game_profile::title.startBlackFadeAtMs)/game_profile::title.startBlackFadeMs;
+    return unsigned(255*(1-std::clamp(fade,0.,1.)));
+   }
+  }
+  return 255;
+ }
+ void dimPixels(unsigned opacity){
+  for(size_t i=0;i<pixels.size();i+=4)
+   for(unsigned ch=0;ch<3;++ch)pixels[i+ch]=uint8_t(pixels[i+ch]*opacity/255);
+ }
  const char* makerLogoFile()const{
   const auto* legacy=game_profile::story.legacyAvg;
   return legacy?legacy->makerLogo:"script/makerlogo/omegastar.ogv";
@@ -1929,7 +1942,10 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  else{
   gpu->begin(menu?0xff000000u:0xff141923u);
   if(menu){
-   if(titleStarting&&!game_profile::title.exitUsesMotions)transition->blend(*frameTarget);
+   if(titleStarting&&!game_profile::title.exitUsesMotions){
+    transition->blend(*frameTarget);
+    if(const auto opacity=titleStartOpacity();opacity<255)frameTarget->dim(opacity,255);
+   }
    else title->draw(*frameTarget);
   }
   else{
@@ -1974,11 +1990,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }
  if(opening==1){
   std::fill(pixels.begin(),pixels.end(),0);fieldRequested=images->draw(pixels,liveVideo);
-  if(cautionLeaving){
-   const auto opacity=cautionOpacity();
-   for(size_t i=0;i<pixels.size();i+=4)
-    for(unsigned ch=0;ch<3;++ch)pixels[i+ch]=uint8_t(pixels[i+ch]*opacity/255);
-  }
+  if(cautionLeaving)dimPixels(cautionOpacity());
   return;
  }if(movie->hasFrame()){pixels=movie->image().pixels;
  drawUpperMenu(pixels);
@@ -1995,7 +2007,10 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   transition->captureTarget(pixels);fieldRequested=transition->blend(pixels)||fieldRequested;
  }
  if(menu){
-  if(titleStarting&&!game_profile::title.exitUsesMotions)fieldRequested=transition->blend(pixels);
+  if(titleStarting&&!game_profile::title.exitUsesMotions){
+   fieldRequested=transition->blend(pixels);
+   if(const auto opacity=titleStartOpacity();opacity<255)dimPixels(opacity);
+  }
   else{
 #ifdef WHJ2_WITH_GPU
    if(gpu){gpu->begin(pixels);title->draw(*gpu);gpu->end(pixels);}

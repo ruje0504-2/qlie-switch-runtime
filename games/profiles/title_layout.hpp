@@ -39,5 +39,6 @@ struct TitleLayout {
  double fadeInMs=0,buttonStaggerMs=0,backdropExitDelayMs=0;
  bool frameBackdrop=false,albumAlwaysAvailable=false;
  bool holdIntroLastFrame=false;
+ double startBlackFadeAtMs=0,startBlackFadeMs=0;
 };
 }

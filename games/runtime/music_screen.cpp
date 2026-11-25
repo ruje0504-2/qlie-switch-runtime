@@ -27,10 +27,12 @@ void MusicScreen::prepare(){
   text(id,3,std::string(number)+tracks[i].title,wide?270:350,50,18);
  }
  const char*controls[]={"Prev","Play","Next","Loop"};for(unsigned i=0;i<4;i++)add("ui_music_control"+std::to_string(i),std::string("ControlButton_")+controls[i]+".b",990+int(i)*50,paged()?615:100,150);
- const char*navNames[]={"CG観賞","回想観賞","音楽鑑賞"};
- for(int i=0;i<(game_profile::story.legacyAvg?2:3);i++){auto id="ui_music_nav"+std::to_string(i);add(id,"Button_l.b",820+i*130,695,150);scene.uiSlot(id,0,"script/soundmode/"+std::string(navNames[i])+"_off.png");scene.uiSlot(id,1,"script/soundmode/"+std::string(navNames[i])+"_on.png");}
- if(!game_profile::story.legacyAvg)scene.command("^ui_music_nav2,motion:*OnLock");
- add("ui_music_back","Button_l.b",1211,695,150);scene.uiSlot("ui_music_back",0,"script/soundmode/戻る_off.png");scene.uiSlot("ui_music_back",1,"script/soundmode/戻る_on.png");
+ if(!game_profile::story.legacyAvg){
+  const char*navNames[]={"CG観賞","回想観賞","音楽鑑賞"};
+  for(int i=0;i<3;i++){auto id="ui_music_nav"+std::to_string(i);add(id,"Button_l.b",820+i*130,695,150);scene.uiSlot(id,0,"script/soundmode/"+std::string(navNames[i])+"_off.png");scene.uiSlot(id,1,"script/soundmode/"+std::string(navNames[i])+"_on.png");}
+  scene.command("^ui_music_nav2,motion:*OnLock");
+ }
+ add("ui_music_back","Button_l.b",1211,game_profile::story.legacyAvg?694:695,150);scene.uiSlot("ui_music_back",0,"script/soundmode/戻る_off.png");scene.uiSlot("ui_music_back",1,"script/soundmode/戻る_on.png");
  add("ui_music_seek","SeekBar_Bar.b",210,seekY(),110);add("ui_music_seekknob","SeekBar_Prog.b",210,seekY(),120);
  add("ui_music_volume","VolumeBar_Bar.b",700,seekY(),110);add("ui_music_volknob","VolumeBar_Prog.b",700,seekY(),120);
  if(!game_profile::story.legacyAvg)add("ui_music_caption","ViewText.b",400,seekY()+6,150);
@@ -70,7 +72,8 @@ void MusicScreen::setMotion(const std::string&id,const char*motion){
  scene.setUiMotion(id,motion);previous=motion;
 }
 void MusicScreen::highlight(){
- for(int i=0;i<2;i++)setMotion("ui_music_nav"+std::to_string(i),selected==control(Album)+i?"*OnMouse":"*OffMouse");
+ if(!game_profile::story.legacyAvg)
+  for(int i=0;i<2;i++)setMotion("ui_music_nav"+std::to_string(i),selected==control(Album)+i?"*OnMouse":"*OffMouse");
  setMotion("ui_music_seek",selected==control(Seek)?"*OnMouse":"*OffMouse");
  setMotion("ui_music_volume",selected==control(Volume)?"*OnMouse":"*OffMouse");
  setMotion("ui_music_back",selected==control(Return)?"*OnMouse":"*OffMouse");
@@ -129,12 +132,13 @@ void MusicScreen::move(int x,int y){
   const int local=selected-pageFirst,column=local/rows,row=local%rows;
   if(y<0&&row==0)selected=paged()?control(Page)+page:control(Previous)+column;
   else if(y>0&&(row==rows-1||selected==pageLast))
-   selected=paged()?control(Previous)+column:control(column==0?Album:column==1?Memory:Return);
+   selected=paged()?control(Previous)+column:control(
+    game_profile::story.legacyAvg?Return:column==0?Album:column==1?Memory:Return);
   else if(y)selected+=y;
   else if(x)selected=std::min(pageLast,pageFirst+((column+x+columns)%columns)*rows+row);
  }else if(selected==control(Return)||selected==control(Album)||selected==control(Memory)){
   if(y)selected=y<0?std::min(pageLast,pageFirst+rows-1):pageFirst;
-  else if(x){
+  else if(x&&!game_profile::story.legacyAvg){
    const int current=selected==control(Album)?0:selected==control(Memory)?1:2;
    constexpr Control tabs[]={Album,Memory,Return};
    selected=control(tabs[(current+x+3)%3]);
@@ -149,7 +153,8 @@ MusicScreen::Destination MusicScreen::tap(float x,float y){
  if(paged())for(int i=0;i<pageCount();++i)if(scene.uiHit("ui_music_page"+std::to_string(i),x,y)){selected=control(Page)+i;return confirm();}
  for(int i=page*perPage();i<=lastTrackOnPage();++i)if(scene.uiHit("ui_track"+std::to_string(i),x,y)){selected=i;return confirm();}
  for(int i=0;i<4;i++)if(scene.uiHit("ui_music_control"+std::to_string(i),x,y)){selected=control(Previous)+i;return confirm();}
- for(int i=0;i<2;i++)if(scene.uiHit("ui_music_nav"+std::to_string(i),x,y)){selected=control(Album)+i;return confirm();}
+ if(!game_profile::story.legacyAvg)
+  for(int i=0;i<2;i++)if(scene.uiHit("ui_music_nav"+std::to_string(i),x,y)){selected=control(Album)+i;return confirm();}
  if(scene.uiHit("ui_music_back",x,y)){selected=control(Return);return confirm();}
  drag(x,y);return NoDestination;
 }

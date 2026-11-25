@@ -1538,7 +1538,9 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
   std::string path=(face?"face/":"chara/")+base->second;if(!assets.exists(path)&&assets.exists(path+".b"))path+=".b";
   if(!assets.exists(path))throw std::runtime_error("Missing character base "+path);
   auto loaded=sceneComposite(path);
-  const bool preserve=loaded==l.composite&&l.params.count("motionkeep")&&l.params.at("motionkeep")=="true";
+  // Multipart file changes replace slot zero without restarting the base motion.
+  const bool keepMotion=l.params.count("motionkeep")&&l.params.at("motionkeep")=="true";
+  const bool preserve=loaded==l.composite&&(keepMotion||(multipart&&!baseChanged));
   l.composite=std::move(loaded);l.path=path;
   if(!preserve){l.milliseconds=0;l.audioMilliseconds=-1;}
   return true;

@@ -147,10 +147,11 @@ Bytes decompress(const Bytes&bytes){
      output.push_back(current);
     }
     else {stack.push_back(right[current]);stack.push_back(left[current]);}
-    if(++steps>256)throw std::runtime_error("Cyclic BPE");
+    if(++steps>expected*2+256)throw std::runtime_error("Cyclic BPE");
    }
   }
  }
+ if(output.size()!=expected)throw std::runtime_error("BPE size mismatch");
  return output;
 }
 std::string cp932(const Bytes&b){std::string out;for(size_t p=0;p<b.size();p++){unsigned a=b[p],cp=cp932_single[a];if(!cp&&a){if(p+1==b.size())throw std::runtime_error("Truncated CP932");unsigned c=b[++p];if(a<0x81||a>0xfe||c<0x40||c>0xfe||c==0x7f)throw std::runtime_error("Invalid CP932");cp=cp932_double[(a-0x81)*190+c-0x40-(c>0x7f)];if(!cp)throw std::runtime_error("Unknown CP932 pair");}if(cp<128)out+=char(cp);else if(cp<2048){out+=char(0xc0|(cp>>6));out+=char(0x80|(cp&63));}else{out+=char(0xe0|(cp>>12));out+=char(0x80|((cp>>6)&63));out+=char(0x80|(cp&63));}}return out;}

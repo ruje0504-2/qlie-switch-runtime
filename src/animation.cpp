@@ -151,10 +151,10 @@ int keyI16(const qlie::Bytes&k,size_t p){
 // PE offsets efcb0/efcd2 select the position/scale mode at 0x30.
 // f0860/f0882 use 0x33 for color/alpha. a1bb0/a1c38 use the
 // exponent 1 + 1.4 * power; these are not fixed quartic easing curves.
-float sampleValue(float a,float b,unsigned mode,float power,double t,std::vector<std::string>&warnings){
+float sampleValue(float a,float b,unsigned mode,float power,double t,std::vector<std::string>&warnings,uint32_t&randomCursor){
  if(a==b||t<=0)return a;
  if(t>=1)return b;
- double q=0;
+ double q=0,offset=0;
  switch(mode){case 0:return a;
  case 1:q=t;
  break;
@@ -162,6 +162,16 @@ float sampleValue(float a,float b,unsigned mode,float power,double t,std::vector
  break;
  case 4:q=std::pow(t,1+1.4*power);
  break;
+ case 6:{
+  // WHJ5 0x5aa9ea adds a decaying random offset to the ease-out value.
+  static const auto randomTable=particleRandomTable();
+  randomCursor=(randomCursor+1)&1023;
+  const float spread=float(static_cast<long double>(randomTable[randomCursor]%0xffffffu)
+                           *float(40*power)/16777215.L);
+  offset=(spread-20*power)*float(1-t);
+  q=1-std::pow(1-t,1+1.4*power);
+  break;
+ }
  case 8:{
   const double exponent=1+1.4*power;
   q=t<.5?.5*std::pow(t*2,exponent):1-.5*std::pow((1-t)*2,exponent);
@@ -170,7 +180,7 @@ float sampleValue(float a,float b,unsigned mode,float power,double t,std::vector
  default:warnings.push_back("easing="+std::to_string(mode));
  return a;
  }
- return float(a+(b-a)*q);
+ return float(a+(b-a)*q+offset);
 }
 }
 // PE e6e38/e6f74: control event8 starts a sound, event11 stops a channel.
@@ -218,7 +228,9 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
   if((v>=32700&&v<32716)||(v>=32720&&v<32736))out.unsupported.push_back("numeric-context="+std::to_string(v));
   return float(v);
  };
- auto val=[&](size_t offset,unsigned mode,float power){return sampleValue(number(a,offset),number(b,offset),mode,power,t,out.unsupported);
+ uint32_t localRandomCursor=context.randomSeed&1023;
+ auto&randomCursor=context.randomCursor?*context.randomCursor:localRandomCursor;
+ auto val=[&](size_t offset,unsigned mode,float power){return sampleValue(number(a,offset),number(b,offset),mode,power,t,out.unsupported,randomCursor);
  };
  out.x=val(0x18,keyCode(a,0x30),keyCode(a,0x31)/100.f);
  out.y=val(0x1a,keyCode(a,0x30),keyCode(a,0x31)/100.f);
@@ -233,7 +245,7 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
  out.rotationX=val(0x48,keyCode(a,0x30),keyCode(a,0x31)/100.f);
  out.rotationY=val(0x4a,keyCode(a,0x30),keyCode(a,0x31)/100.f);
  if(a.size()>=0x98&&b.size()>=0x98)out.scaleZ=val(0x96,keyCode(a,0x30),keyCode(a,0x31)/100.f);
- out.z=sampleValue(float(int32_t(keyU32(a,0x4d))),float(int32_t(keyU32(b,0x4d))),keyCode(a,0x30),keyCode(a,0x31)/100.f,t,out.unsupported);
+ out.z=sampleValue(float(int32_t(keyU32(a,0x4d))),float(int32_t(keyU32(b,0x4d))),keyCode(a,0x30),keyCode(a,0x31)/100.f,t,out.unsupported,randomCursor);
 
  out.alpha=val(0x35,keyCode(a,0x33),keyCode(a,0x3b)/100.f);
  if(out.kind==10){
@@ -253,7 +265,7 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
    }
    return float(value);
   };
-  out.childTime=int32_t(sampleValue(timeValue(a,0x10),timeValue(b,0x10),keyCode(a,0x3c),keyCode(a,0x3d)/100.f,t,out.unsupported));
+  out.childTime=int32_t(sampleValue(timeValue(a,0x10),timeValue(b,0x10),keyCode(a,0x3c),keyCode(a,0x3d)/100.f,t,out.unsupported,randomCursor));
   out.childMotion=keyCode(a,7);
  }
  if((out.kind==20||out.kind==21)&&a.size()<152)out.unsupported.push_back("particle-layout="+std::to_string(layer.version));
@@ -264,14 +276,14 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
   out.particles.divisions=particleValue(0xc);out.particles.scaleOffset=particleValue(0x46);
   for(unsigned axis=0;axis<3;axis++)out.particles.phase[axis]=particleValue(0x40+axis*2);
   out.particles.extent={out.scaleX,out.scaleY,val(0x96,keyCode(a,0x30),keyCode(a,0x31)/100.f)};
-  auto childTime=[&](size_t offset){return int32_t(sampleValue(float(int32_t(keyU32(a,offset))),float(int32_t(keyU32(b,offset))),keyCode(a,0x3c),keyCode(a,0x3d)/100.f,t,out.unsupported));};
+  auto childTime=[&](size_t offset){return int32_t(sampleValue(float(int32_t(keyU32(a,offset))),float(int32_t(keyU32(b,offset))),keyCode(a,0x3c),keyCode(a,0x3d)/100.f,t,out.unsupported,randomCursor));};
   out.particles.timeBegin=childTime(0x10);out.particles.timeEnd=childTime(0x14);
  }
  out.anchorX=number(a,0x85);
  out.anchorY=number(a,0x87);
  auto color=[&](size_t p){uint32_t z=0;
  auto ca=keyU32(a,p),cb=keyU32(b,p);
- for(int n=0;n<3;n++){auto v=sampleValue(float((ca>>(8*n))&255),float((cb>>(8*n))&255),keyCode(a,0x33),keyCode(a,0x3b)/100.f,t,out.unsupported);
+ for(int n=0;n<3;n++){auto v=sampleValue(float((ca>>(8*n))&255),float((cb>>(8*n))&255),keyCode(a,0x33),keyCode(a,0x3b)/100.f,t,out.unsupported,randomCursor);
  z|=uint32_t(std::clamp(std::lround(v),0l,255l))<<(8*n);
  }return z;
  };

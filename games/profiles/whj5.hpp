@@ -43,6 +43,7 @@ inline constexpr whj2::TitleLayout title{
  19000,500,19000,0,1,false,"*OnLockEnable","*OnLockOffMouse",
  &titleButtons,"_off.png","_on.png","script/title/button_quit.b"
 };
+inline constexpr double cautionFade = 450, cautionExitWait = 500;
 inline constexpr char secondMakerLogo[] = "script/makerlogo/seikeiproduction.ogv";
 inline constexpr bool extendedCgRoots=true;
 inline constexpr char extrasFlag[]="#spopenflag";

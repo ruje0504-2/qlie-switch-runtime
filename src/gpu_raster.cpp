@@ -298,8 +298,9 @@ void Scene::dispatch(const Image&i,Push&p,float alpha,uint32_t add,uint32_t mul,
   bool* monochrome=nullptr;
   uint32_t* screenCoverage=nullptr;
 #ifdef QLIE_PROFILE_WHJ6
-  needOpacity|=blend==2&&filter==0&&p.meta[3]==255&&i.videoSurface;
-  if(blend==13&&!i.videoSurface&&i.width>=512&&i.height>=300)
+  const bool fog=blend==2&&i.width==1920&&i.height==1080&&!i.videoSurface;
+  needOpacity|=fog||(blend==2&&filter==0&&p.meta[3]==255&&i.videoSurface);
+  if(fog||(blend==13&&!i.videoSurface&&i.width>=512&&i.height>=300))
    monochrome=&sources.monochrome;
   // An aligned, untinted and fully opaque Screen movie can skip black tiles.
   if(i.videoSurface&&blend==2&&(p.meta[2]&524288u)&&p.meta[3]==255&&add==0&&mul==0xffffff&&

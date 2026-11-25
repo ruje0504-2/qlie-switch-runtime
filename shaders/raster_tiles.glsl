@@ -94,7 +94,7 @@ void main(){
   if(coordMode!=0u&&gl_LocalInvocationID.y==0u)prepareTileCoord(base,tileOrigin,coordMode);
  }
 #ifdef DEKO_WHJ6_MOTION
- // The moving panorama and the video snow layer both cover the canvas.
+ // The moving background and its video overlay both span the tile.
  uint secondCoordMode=0u;
  if(count>1u){
   Draw second=draws[tiles[first+1u]];

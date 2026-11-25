@@ -100,6 +100,10 @@ uvec4 composite(uint mode,uvec4 s,uvec4 d){
  }
 #endif
 #ifdef DEKO_WHJ6_MOTION
+ if(mode==5u){
+  uvec4 w=(s*(a+(a>>7u)))>>8u;
+  return max(w,d);
+ }
  if(mode==7u){
   uvec4 w=(s*(a+(a>>7u)))>>8u;
   return min(uvec4(255u),w+d);

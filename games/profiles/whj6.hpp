@@ -12,6 +12,8 @@ inline constexpr int sceneVideoMaxHeight=2700;
 inline constexpr int automaticSavePage=15,automaticSaveCount=8;
 inline constexpr char captionFontFile[]="system/font/tahoma.ttf";
 inline constexpr unsigned captionFontSlot=5;
+inline constexpr char chapterCard[]="image/eyecatch/eyecatch02.b";
+inline constexpr double chapterCardVideoStart=500;
 struct SettingsActor{const char* name;const char* portrait;const char* sample;const char* firstPage;};
 inline constexpr SettingsActor settingsCast[]={
  {"姫","01_雪女","him0001","scenario/本編/y01-01.s:6313"},

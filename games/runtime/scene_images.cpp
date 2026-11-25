@@ -445,6 +445,12 @@ struct PreparedEmbeddedOpening {
 namespace {
 constexpr auto eyecatchPath="image/cut/eyecatch01.b";
 constexpr auto eyecatchFilmPath="image/cut/eyecatch01.b#film#film";
+bool hasEyecatchFallback(std::string_view path){
+#ifdef QLIE_PROFILE_WHJ6
+ if(path==game_profile::chapterCard)return true;
+#endif
+ return path==eyecatchPath;
+}
 }
 struct EyecatchFilm {
  std::mutex mutex;
@@ -519,7 +525,7 @@ struct Composite {
     }
     // The story cards supply a portrait for slot zero. Keep the embedded
     // bitmap compressed until a caller draws the card without a replacement.
-    else if(path==eyecatchPath&&members.empty())eyecatchFallback=std::move(m.data);
+    else if(hasEyecatchFallback(path)&&members.empty())eyecatchFallback=std::move(m.data);
     else if(film&&path==eyecatchFilmPath&&m.name=="film")e.image=film->decode(std::move(m.data));
     else e.image=decodeSceneBitmap(m.data,name=="script/title/frame.b"||name=="script/title/back01.b#Logo2");
    }
@@ -615,7 +621,12 @@ struct Composite {
   const auto&motion=definition.motions.front();
   AnimationContext context;
   context.external=externalDefaults;context.externalMask=externalDefaultMask;
-  const auto keys=sampleMotion(motion,0,1280,720,false,context);
+  double openingTime=0;
+#ifdef QLIE_PROFILE_WHJ6
+  // The card starts blank. Warm the decoder for the first visible snow layer.
+  if(path==game_profile::chapterCard)openingTime=game_profile::chapterCardVideoStart;
+#endif
+  const auto keys=sampleMotion(motion,openingTime,1280,720,false,context);
   for(size_t layer=0;layer<keys.size();++layer){
    const auto&key=keys[layer];
    if(!motion.layers[layer].flags||(key.kind!=3&&key.kind!=4)||key.alpha<=0||key.resource>=members.size())continue;
@@ -2200,7 +2211,7 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
   if(spatial)matrix=combine(matrix,from2D(stretch));
  }
  std::map<unsigned,const Image*> uiSlots;for(auto&slot:l->uiSlots)uiSlots[slot.first]=slot.second.get();if(l->scriptReplacement)uiSlots[0]=l->scriptReplacement.get();
- if(l->path==eyecatchPath&&l->composite&&!uiSlots.count(0))
+ if(l->composite&&hasEyecatchFallback(l->path)&&!uiSlots.count(0))
   l->composite->loadEyecatchFallback();
  auto filtered=[&](unsigned slot,const std::shared_ptr<const Image>&source,const std::string&filter)->const Image*{
   auto&cached=l->filtered[slot];if(filter.empty()){cached={};return source.get();}

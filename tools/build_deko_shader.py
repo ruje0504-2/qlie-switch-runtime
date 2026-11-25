@@ -18,7 +18,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--uam", required=True)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--whj6", action="store_true", help="include the WHJ6 title blends in the motion kernel")
+    parser.add_argument("--whj6", action="store_true", help="include the WHJ6 title and chapter card blends in the motion kernel")
     variant = parser.add_mutually_exclusive_group()
     variant.add_argument("--motion", action="store_true", help="build the unmasked motion kernel")
     variant.add_argument("--restore", action="store_true", help="build the sparse display tile copy kernel")

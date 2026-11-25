@@ -23,6 +23,7 @@ using namespace gpu;
 #ifdef QLIE_PROFILE_WHJ6
 #include "deko_snow.inc"
 #include "deko_fog.inc"
+#include "deko_hardlight.inc"
 #endif
 
 constexpr unsigned ImageCount = 3;
@@ -53,7 +54,7 @@ class DekoScene final : public Scene {
  dk::UniqueCmdBuf cmd;
  dk::Shader shader,motionShader,restoreShader,baseShader,videoShader,fieldShader;
 #ifdef QLIE_PROFILE_WHJ6
- dk::Shader snowShader,fogShader;
+ dk::Shader snowShader,fogShader,hardLightShader;
 #endif
  std::map<uint32_t,VideoMapping> videoMaps;
  std::map<uint64_t,VideoTexture> videoTextures;
@@ -67,7 +68,7 @@ class DekoScene final : public Scene {
  size_t sampleDirect=0;
  unsigned sampleCopied=0,sampleVideoTextures=0;
  double sampleAcquireMs=0;
- size_t sampleTiles=0,sampleMotionTiles=0,sampleBaseTiles=0,sampleSnowTiles=0,sampleFogTiles=0;
+ size_t sampleTiles=0,sampleMotionTiles=0,sampleBaseTiles=0,sampleSnowTiles=0,sampleFogTiles=0,sampleHardLightTiles=0;
  std::array<dk::Image,ImageCount> images;
  dk::UniqueSwapchain swapchain;
  std::array<SwapDamage::Mask,ImageCount> damage;
@@ -101,7 +102,7 @@ class DekoScene final : public Scene {
   queue=dk::QueueMaker{device}.setFlags(DkQueueFlags_Graphics|DkQueueFlags_Compute)
          .setPerWarpScratchMemorySize(std::max<unsigned>({rasterScratchPerWarp,motionScratchPerWarp,restoreScratchPerWarp,baseScratchPerWarp,videoScratchPerWarp,fieldScratchPerWarp,
 #ifdef QLIE_PROFILE_WHJ6
-          snowScratchPerWarp,fogScratchPerWarp,
+          snowScratchPerWarp,fogScratchPerWarp,hardlightScratchPerWarp,
 #endif
           DK_PER_WARP_SCRATCH_MEM_ALIGNMENT})).create();
   if(!queue)throw std::runtime_error("deko3d queue creation");
@@ -118,7 +119,9 @@ class DekoScene final : public Scene {
 #ifdef QLIE_PROFILE_WHJ6
   static_assert(sizeof(snowDksh)%DK_SHADER_CODE_ALIGNMENT==0);
   constexpr size_t fogOffset=snowOffset+sizeof(snowDksh);
-  constexpr size_t shaderBytes=fogOffset+sizeof(fogDksh);
+  static_assert(sizeof(fogDksh)%DK_SHADER_CODE_ALIGNMENT==0);
+  constexpr size_t hardLightOffset=fogOffset+sizeof(fogDksh);
+  constexpr size_t shaderBytes=hardLightOffset+sizeof(hardlightDksh);
 #else
   constexpr size_t shaderBytes=snowOffset;
 #endif
@@ -136,6 +139,9 @@ class DekoScene final : public Scene {
   std::memcpy(static_cast<uint8_t*>(code.getCpuAddr())+fogOffset,fogDksh,sizeof(fogDksh));
   dk::ShaderMaker{code,fogOffset}.initialize(fogShader);
   if(!fogShader.isValid()||fogShader.getStage()!=DkStage_Compute)throw std::runtime_error("deko3d fog shader");
+  std::memcpy(static_cast<uint8_t*>(code.getCpuAddr())+hardLightOffset,hardlightDksh,sizeof(hardlightDksh));
+  dk::ShaderMaker{code,hardLightOffset}.initialize(hardLightShader);
+  if(!hardLightShader.isValid()||hardLightShader.getStage()!=DkStage_Compute)throw std::runtime_error("deko3d hard-light shader");
 #endif
   dk::ShaderMaker{code,fieldOffset}.initialize(fieldShader);
   if(!fieldShader.isValid()||fieldShader.getStage()!=DkStage_Compute)throw std::runtime_error("deko3d field presentation shader");
@@ -205,11 +211,11 @@ class DekoScene final : public Scene {
   inFlight=false;
   if constexpr (qlie::diagnostics) priorWaitMs+=milliseconds(Clock::now()-start);
   if(qlie::diagnostics&&sampleFrame){
-   traceFrame("DEKO3D PRESENT frame=%llu direct_tiles=%zu copy_tiles=%u kernel=%s motion_tiles=%zu raster_gpu_ms=%.3f copy_gpu_ms=%.3f gpu_load_pct=%.1f base_tiles=%zu nv12_frames=%u nv12_gpu_ms=%.3f acquire_ms=%.3f snow_tiles=%zu fog_tiles=%zu\n",
+   traceFrame("DEKO3D PRESENT frame=%llu direct_tiles=%zu copy_tiles=%u kernel=%s motion_tiles=%zu raster_gpu_ms=%.3f copy_gpu_ms=%.3f gpu_load_pct=%.1f base_tiles=%zu nv12_frames=%u nv12_gpu_ms=%.3f acquire_ms=%.3f snow_tiles=%zu fog_tiles=%zu hardlight_tiles=%zu\n",
                 (unsigned long long)sampleFrame,sampleDirect,sampleCopied,
                 !sampleTiles?"idle":!sampleMotionTiles?"general":sampleMotionTiles==sampleTiles?"motion":"mixed",sampleMotionTiles,
                 sampleTiles?stageMs(0):0.0,sampleCopied?stageMs(2):0.0,gpuLoadPercent(),sampleBaseTiles,
-                sampleVideoTextures,sampleVideoTextures?stageMs(4):0.0,sampleAcquireMs,sampleSnowTiles,sampleFogTiles);
+                sampleVideoTextures,sampleVideoTextures?stageMs(4):0.0,sampleAcquireMs,sampleSnowTiles,sampleFogTiles,sampleHardLightTiles);
    sampleFrame=0;
   }
  }
@@ -387,8 +393,9 @@ class DekoScene final : public Scene {
 #ifdef QLIE_PROFILE_WHJ6
    sampleSnowTiles=batches.count[DekoTileBatches::Snow];
    sampleFogTiles=batches.count[DekoTileBatches::Fog];
+   sampleHardLightTiles=batches.count[DekoTileBatches::HardLight];
 #endif
-   sampleMotionTiles=batches.count[DekoTileBatches::Motion]+sampleBaseTiles+sampleSnowTiles+sampleFogTiles;
+   sampleMotionTiles=batches.count[DekoTileBatches::Motion]+sampleBaseTiles+sampleSnowTiles+sampleFogTiles+sampleHardLightTiles;
    timestamp(0,DkCounter_TimestampPipelineTop);
   }
   auto rasterBatch=[&](const dk::Shader& program,unsigned count,uint32_t start){
@@ -409,6 +416,7 @@ class DekoScene final : public Scene {
 #ifdef QLIE_PROFILE_WHJ6
   runBatch(snowShader,DekoTileBatches::Snow);
   runBatch(fogShader,DekoTileBatches::Fog);
+  runBatch(hardLightShader,DekoTileBatches::HardLight);
 #endif
   cmd.barrier(DkBarrier_Primitives,0);
   if(qlie::diagnostics&&sampleFrame)timestamp(1,DkCounter_Timestamp);
@@ -515,7 +523,7 @@ class DekoScene final : public Scene {
   if(qlie::diagnostics&&(frames==0||(frames+1)%FrameTraceInterval==0)){
    sampleFrame=frames+1;sampleDirect=direct?workTiles.size():0;
    sampleAcquireMs=milliseconds(Clock::now()-acquireStart);
-   sampleTiles=0;sampleMotionTiles=0;sampleBaseTiles=0;sampleSnowTiles=0;sampleFogTiles=0;sampleCopied=0;sampleVideoTextures=0;
+   sampleTiles=0;sampleMotionTiles=0;sampleBaseTiles=0;sampleSnowTiles=0;sampleFogTiles=0;sampleHardLightTiles=0;sampleCopied=0;sampleVideoTextures=0;
    std::memset(reports.getCpuAddr(),0,6*sizeof(CounterReport));
   }
   recordCanvas(direct?slot:-1,interlaced);

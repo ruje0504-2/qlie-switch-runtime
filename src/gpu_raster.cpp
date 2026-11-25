@@ -299,7 +299,8 @@ void Scene::dispatch(const Image&i,Push&p,float alpha,uint32_t add,uint32_t mul,
 #ifdef QLIE_PROFILE_WHJ6
   const bool fog=blend==2&&i.width==1920&&i.height==1080&&!i.videoSurface;
   needOpacity|=fog||(blend==2&&filter==0&&p.meta[3]==255&&i.videoSurface);
-  if(fog)monochrome=&sources.monochrome;
+  if(fog||(blend==13&&!i.videoSurface&&i.width>=512&&i.height>=300))
+   monochrome=&sources.monochrome;
   if(filter==2&&i.alphaTiles&&i.alphaTiles->sourceVersion&&i.alphaTiles->sourceVersion==i.version.get()&&
      p.p[0][1]==0.f&&p.p[0][2]==0.f&&p.p[0][0]>=.125f&&p.p[0][3]>=.125f&&
      std::abs(p.p[1][0])<=65536.f&&std::abs(p.p[1][1])<=65536.f)

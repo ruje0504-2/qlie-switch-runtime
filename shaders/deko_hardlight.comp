@@ -1,0 +1,71 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+#version 430
+layout(local_size_x=16,local_size_y=16) in;
+layout(binding=0,std430) readonly buffer Source { uint source[]; };
+layout(binding=1,std430) buffer Destination { uint destination[]; };
+layout(r32ui,binding=0) uniform writeonly uimage2D presentImage;
+#define DEKO_RASTER
+#define DEKO_MOTION_KERNEL
+#define DEKO_WHJ6_MOTION
+#include "raster_types.glsl"
+layout(binding=2,std430) readonly buffer Commands { Draw draws[]; };
+layout(binding=3,std430) readonly buffer Tiles { uint tiles[]; };
+layout(std140,binding=0) uniform Parameters { vec4 p0;vec4 p1;vec4 p2;vec4 p3;ivec4 rect;uvec4 meta;uvec4 colors; } frame;
+#include "raster_pixels.glsl"
+
+shared vec2 coordinates[16];
+
+uvec2 grayAlpha(uint value){return uvec2(value&255u,value>>24u);}
+
+uvec2 sampleGrayAlpha(Draw p,vec2 uv){
+ if((p.meta.z&255u)!=2u){
+  ivec2 texel=ivec2(floor(uv));
+  return grayAlpha(source[p.colors.z+uint(texel.y)*p.meta.x+uint(texel.x)]);
+ }
+ precise vec2 f=uv-0.5;
+ ivec2 i=ivec2(floor(f)),last=ivec2(p.meta.xy)-1;
+ ivec2 lo=clamp(i,ivec2(0),last),hi=clamp(i+1,ivec2(0),last);
+ f-=vec2(i);
+ uint row=p.colors.z+uint(lo.y)*p.meta.x;
+ precise vec2 top=vec2(grayAlpha(source[row+uint(lo.x)]));
+ if(f.x!=0.0)top=top*(1.0-f.x)+vec2(grayAlpha(source[row+uint(hi.x)]))*f.x;
+ if(f.y==0.0)return uvec2(floor(top+0.5));
+ row=p.colors.z+uint(hi.y)*p.meta.x;
+ precise vec2 bottom=vec2(grayAlpha(source[row+uint(lo.x)]));
+ if(f.x!=0.0)bottom=bottom*(1.0-f.x)+vec2(grayAlpha(source[row+uint(hi.x)]))*f.x;
+ precise vec2 value=top*(1.0-f.y)+bottom*f.y;
+ return uvec2(floor(value+0.5));
+}
+
+void main(){
+ uint header=gl_WorkGroupID.x*4u,packedOrigin=tiles[header];
+ uint first=tiles[header+1u],control=tiles[header+3u];
+ bool cached=(control&0x80000000u)!=0u;
+ ivec2 origin=ivec2(packedOrigin&65535u,packedOrigin>>16);
+ uint x=gl_LocalInvocationID.x,y=gl_LocalInvocationID.y;
+ ivec2 q=origin+ivec2(int(x),int(y));
+ uint index=uint(q.y)*frame.meta.x+uint(q.x),prefix=index+frame.meta.x*frame.meta.y;
+ Draw overlay=draws[tiles[first+(cached?0u:1u)]];
+ if(y==0u){
+  precise vec2 d=vec2(origin+ivec2(int(x)))+0.5-overlay.p1.xy;
+  coordinates[x]=vec2(divide(overlay.p0.w*d.x,overlay.p1.z),divide(overlay.p0.x*d.y,overlay.p1.z));
+ }
+ uint packedBase;
+ if(cached)packedBase=destination[prefix];
+ else{
+  Draw base=draws[tiles[first]];
+  ivec2 texel=q-ivec2(base.p1.xy);
+  packedBase=source[base.colors.z+uint(texel.y)*base.meta.x+uint(texel.x)];
+  if(control==1u)destination[prefix]=packedBase;
+ }
+ barrier();
+ vec2 uv=vec2(coordinates[x].x,coordinates[y].y);
+ uint result=packedBase;
+ if(all(greaterThanEqual(uv,vec2(0)))&&all(lessThan(uv,vec2(overlay.meta.xy)))){
+  uvec2 ga=sampleGrayAlpha(overlay,uv);
+  uint alpha=ga.y*overlay.meta.w/255u;
+  if(alpha!=0u)result=pack(composite(13u,uvec4(ga.x,ga.x,ga.x,alpha),unpack(packedBase)));
+ }
+ destination[index]=result;
+ if(frame.meta.z!=0u)imageStore(presentImage,q,uvec4(result,0,0,0));
+}

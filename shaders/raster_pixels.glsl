@@ -109,7 +109,7 @@ uvec4 composite(uint mode,uvec4 s,uvec4 d){
   return min(uvec4(255u),w+d);
  }
 #endif
-#ifndef DEKO_MOTION_KERNEL
+#if !defined(DEKO_MOTION_KERNEL) || defined(DEKO_WHJ6_MOTION)
  if(mode==11u||mode==13u){
   // Overlay branches on the backdrop, hard light on the source.
   uvec4 invert=uvec4(greaterThanEqual(mode==11u?d:s,uvec4(128u)))*255u;

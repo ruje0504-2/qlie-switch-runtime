@@ -57,6 +57,7 @@ if [ "$qlie_game" = whj6 ]; then
   deko_motion_profile=--whj6
   python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --snow --output build-switch/deko_snow.inc
   python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --fog --output build-switch/deko_fog.inc
+  python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --hardlight --output build-switch/deko_hardlight.inc
 fi
 python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --motion $deko_motion_profile --output build-switch/deko_motion.inc
 python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --restore --output build-switch/deko_restore.inc

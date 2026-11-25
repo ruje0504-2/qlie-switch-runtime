@@ -18,7 +18,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--uam", required=True)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--whj6", action="store_true", help="include the WHJ6 title and chapter card blends in the motion kernel")
+    parser.add_argument("--whj6", action="store_true", help="include the WHJ6 effect blends in the motion kernel")
     variant = parser.add_mutually_exclusive_group()
     variant.add_argument("--motion", action="store_true", help="build the unmasked motion kernel")
     variant.add_argument("--restore", action="store_true", help="build the sparse display tile copy kernel")
@@ -26,11 +26,12 @@ def main():
     variant.add_argument("--video", action="store_true", help="build the native NV12 movie conversion kernel")
     variant.add_argument("--snow", action="store_true", help="build the WHJ6 snow compositor")
     variant.add_argument("--fog", action="store_true", help="build the WHJ6 fog compositor")
+    variant.add_argument("--hardlight", action="store_true", help="build the WHJ6 grayscale hard-light compositor")
     variant.add_argument("--field", action="store_true", help="build the field presentation copy kernel")
     args = parser.parse_args()
     if args.whj6 and not args.motion:
         parser.error("--whj6 requires --motion")
-    symbol = next((name for name in ("restore", "base", "video", "motion", "field", "snow", "fog") if getattr(args, name)), "raster")
+    symbol = next((name for name in ("restore", "base", "video", "motion", "field", "snow", "fog", "hardlight") if getattr(args, name)), "raster")
     source_name = "deko_raster.comp" if symbol == "motion" else f"deko_{symbol}.comp"
     source = Path(__file__).resolve().parents[1] / "shaders" / source_name
     args.output.parent.mkdir(parents=True, exist_ok=True)

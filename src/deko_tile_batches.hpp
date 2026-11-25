@@ -5,13 +5,13 @@
 namespace whj2::gpu {
 // The motion shader implements unmasked normal/subtractive sprites, projected
 // triangles, and the original two transition operations. WHJ6 also uses it for
-// screen, lighten, and additive blending in its title and chapter cards.
+// screen, lighten, additive, and hard-light blending.
 inline bool motionDraw(const DrawData& draw){
  const uint32_t flags=draw.image.meta[2];
  const unsigned op=flags>>20,blend=(flags>>8)&255u;
  bool supportedBlend=blend<2||blend==8;
 #ifdef QLIE_PROFILE_WHJ6
- supportedBlend|=blend==2||blend==5||blend==7;
+ supportedBlend|=blend==2||blend==5||blend==7||blend==13;
 #endif
  return op==3||op==4||(op==0&&!(flags&262144u)&&supportedBlend);
 }
@@ -61,7 +61,7 @@ class DekoTileBatches {
 public:
  enum Kind : uint8_t { Motion,Base,General,
 #ifdef QLIE_PROFILE_WHJ6
-  Snow,Fog,
+  Snow,Fog,HardLight,
 #endif
   KindCount };
  static constexpr uint32_t AlignmentWords=64;
@@ -75,6 +75,7 @@ private:
  std::vector<Whj6SnowDraw> snowDraws;
  std::vector<AxisBounds> fogDraws;
  std::vector<uint8_t> fogOverlays;
+ std::vector<AxisBounds> hardLightDraws,alignedBases;
  bool snowTile(const uint32_t* ids,unsigned layers,uint32_t control,unsigned x,unsigned y)const{
   if(control||layers>3)return false;
   const auto& base=snowDraws[ids[0]];
@@ -88,17 +89,24 @@ private:
   return control==0x80000000u&&fogDraws[ids[0]].covers(x,y,Tile,Tile)&&
          std::all_of(ids+1,ids+layers,[this](uint32_t id){return fogOverlays[id]!=0;});
  }
+ bool hardLightTile(const uint32_t* ids,unsigned layers,uint32_t control,unsigned x,unsigned y)const{
+  if(layers==1&&control==0x80000000u)return hardLightDraws[ids[0]].covers(x,y,Tile,Tile);
+  return layers==2&&control<=1&&alignedBases[ids[0]].covers(x,y,Tile,Tile)&&
+         hardLightDraws[ids[1]].covers(x,y,Tile,Tile);
+ }
 #endif
 public:
  void write(const Scene& scene,uint32_t* words){
   const auto& frame=*scene.current;
   const auto& tiles=scene.workTiles;
   drawKinds.resize(frame.commands.size());
-  bool hasBase=false,hasGeneral=false,hasSnow=false,hasFog=false;
+  bool hasBase=false,hasGeneral=false,hasSnow=false,hasFog=false,hasHardLight=false;
 #ifdef QLIE_PROFILE_WHJ6
   snowDraws.resize(frame.commands.size());
   fogDraws.resize(frame.commands.size());
   fogOverlays.resize(frame.commands.size());
+  hardLightDraws.resize(frame.commands.size());
+  alignedBases.resize(frame.commands.size());
 #endif
   for(size_t i=0;i<frame.commands.size();++i){
    const auto& draw=frame.commands[i];
@@ -111,11 +119,17 @@ public:
    fogDraws[i]=fog?axisBounds(draw.image):AxisBounds{};
    hasFog|=fog;
    fogOverlays[i]=axisBitmap(draw.image)&&((draw.image.meta[2]>>8)&255u)<2;
+   const auto& p=draw.image;
+   const bool hardLight=frame.sources[i].monochrome&&axisBitmap(p)&&((p.meta[2]>>8)&255u)==13&&
+                        p.colors[0]==0&&p.colors[1]==0xffffff;
+   hardLightDraws[i]=hardLight?axisBounds(p):AxisBounds{};
+   hasHardLight|=hardLight;
+   alignedBases[i]=drawKinds[i]==Base&&(p.meta[2]&524288u)?axisBounds(p):AxisBounds{};
 #endif
   }
   offsetWords.fill(0);
   count.fill(0);
-  if(!hasBase&&!hasGeneral&&!hasSnow&&!hasFog){
+  if(!hasBase&&!hasGeneral&&!hasSnow&&!hasFog&&!hasHardLight){
    count[Motion]=unsigned(tiles.size());scene.writeTileList(words);
    return;
   }
@@ -127,6 +141,7 @@ public:
 #ifdef QLIE_PROFILE_WHJ6
    if(hasFog&&h[2]&&fogTile(scene.workIndices.data()+h[1],h[2],h[3],x,y))kind=Fog;
    else if(hasSnow&&h[2]>=2&&snowTile(scene.workIndices.data()+h[1],h[2],h[3],x,y))kind=Snow;
+   else if(hasHardLight&&h[2]&&hardLightTile(scene.workIndices.data()+h[1],h[2],h[3],x,y))kind=HardLight;
    else
 #endif
    if(h[2]==1&&drawKinds[*first]==Base&&frame.covered[tile]&&frame.tiles[tile].size()==1)kind=Base;

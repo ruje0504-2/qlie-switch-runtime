@@ -93,6 +93,7 @@ uvec4 tint(Draw p,uvec4 s){
 uvec4 composite(uint mode,uvec4 s,uvec4 d){
  uint a=s.a;
 #ifdef DEKO_RASTER
+#ifndef DEKO_MOTION_KERNEL
  if(mode==2u){
   uvec4 w=(s*(a+(a>>7u)))>>8u;
   return min(uvec4(255u),w+d-((w*d)>>8u));
@@ -104,6 +105,7 @@ uvec4 composite(uint mode,uvec4 s,uvec4 d){
   if(a==255u)return target;
   return uvec4(ivec4(d)+((ivec4(target)-ivec4(d))*int((a+(a>>7u))>>1u)>>7));
  }
+#endif
  if(mode==8u){
   uvec4 contribution=(s*(a+(a>>7u)))>>8u;
   return d-min(d,contribution);

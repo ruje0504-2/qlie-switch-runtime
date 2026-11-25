@@ -1161,10 +1161,10 @@ void SceneImages::loadReplacement(Layer&layer,const std::string&path){
  layer.scriptReplacement=at->second;
 }
 void SceneImages::prepareUiBitmap(const std::string&path){if(!cache.count(path))cache.emplace(path,loadBitmap(path));}
-void SceneImages::warmUiBitmaps(const std::string&key,std::vector<std::string> paths){
- if(!readAhead)return;
+bool SceneImages::warmUiBitmaps(const std::string&key,std::vector<std::string> paths,bool required){
+ if(!readAhead)return false;
  paths.erase(std::remove_if(paths.begin(),paths.end(),[&](const auto&path){return cache.count(path)>0;}),paths.end());
- if(paths.empty())return;
+ if(paths.empty())return false;
  readAhead->request(key,[&assetSource=assets,paths=std::move(paths)]{
   WarmAsset result;
   for(const auto&path:paths){
@@ -1173,7 +1173,8 @@ void SceneImages::warmUiBitmaps(const std::string&key,std::vector<std::string> p
    result.uiBitmaps.emplace(path,std::move(bitmap));
   }
   return result;
- });
+ },required);
+ return true;
 }
 void SceneImages::takeUiBitmaps(const std::string&key){
  if(readAhead)if(auto batch=readAhead->take(key))cache.merge(batch->uiBitmaps);

@@ -101,7 +101,7 @@ public:
  void uiSlot(const std::string&layer,unsigned slot,const std::string&asset);
  void uiSlot(const std::string&layer,unsigned slot,const Image&);
  void prepareUiBitmap(const std::string&asset);
- void warmUiBitmaps(const std::string&key,std::vector<std::string> paths);
+ bool warmUiBitmaps(const std::string&key,std::vector<std::string> paths,bool required=false);
  void takeUiBitmaps(const std::string&key);
  void setUiMotion(const std::string&layer,const char*motion);
  void removeUiLayer(const std::string&layer,bool releaseAsset=false);

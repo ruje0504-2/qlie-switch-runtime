@@ -4,6 +4,10 @@
 #include "profile.hpp"
 #include <algorithm>
 namespace whj2 {
+namespace {
+constexpr auto openingBitmaps="@cg/opening-bitmaps";
+constexpr auto lockedThumbnail="script/albummode/サムネイル_no_image.png";
+}
 void CgScreen::prepareLayout(){
  auto add=[&](const std::string&id,const std::string&file,int x,int y,int pri){menuScene.command("^"+id+",file:script/albummode/"+file+",x:"+std::to_string(x)+",y:"+std::to_string(y)+",pri:"+std::to_string(pri));};
  add("ui_cg_bg","背景.png",0,0,100);add("ui_cg_upper","アッパーフレーム.png",0,0,100);add("ui_cg_lower","アンダーフレーム.png",0,656,100);
@@ -16,7 +20,7 @@ void CgScreen::prepareLayout(){
   menuScene.uiSlot(id,0,"script/albummode/"+std::string(names[i])+"_off.png");
   menuScene.uiSlot(id,1,"script/albummode/"+std::string(names[i])+"_on.png");
  }
- menuScene.prepareUiBitmap("script/albummode/サムネイル_no_image.png");
+ menuScene.prepareUiBitmap(lockedThumbnail);
  const char*buttons[]={"ViewPrev_n.png","ViewZoom_n.png","ViewQuit_n.png","ViewNext_n.png"};
  for(int i=0;i<4;i++){
   auto id="ui_cg_viewbutton"+std::to_string(i);
@@ -34,13 +38,32 @@ void CgScreen::prepare(){
  for(size_t i=0;i<catalog.items().size();++i)
   if(catalog.unlocked(i,progress))menuScene.prepareUiBitmap(catalog.items()[i].thumbnail);
 }
-void CgScreen::open(){
+void CgScreen::warmOpening(){
+ if(!readAhead||openingWarm||prepared)return;
+ std::vector<std::string> paths{
+  "script/albummode/背景.png",
+  "script/albummode/アッパーフレーム.png",
+  "script/albummode/アンダーフレーム.png",
+  lockedThumbnail
+ };
+ for(size_t i=0;i<std::min<size_t>(24,catalog.items().size());++i)
+  if(catalog.unlocked(i,progress))paths.push_back(catalog.items()[i].thumbnail);
+ // Keep the small menu batch even when title or story hints change.
+ openingWarm=menuScene.warmUiBitmaps(openingBitmaps,std::move(paths),true);
+}
+bool CgScreen::open(){
+ if(openingWarm){
+  if(!readAhead->ready(openingBitmaps))return false;
+  menuScene.takeUiBitmaps(openingBitmaps);
+  openingWarm=false;
+ }
  close();
- if(!prepared)prepare();
+ if(!prepared)prepareLayout();
  opened=true;page=0;selected=pageCount()?0:navigationStart()+3;
  setup();
+ return true;
 }
-void CgScreen::setup(){elapsed=0;menuScene.resetUiAnimations();for(unsigned i=0;i<24;i++){auto index=page*24+i;auto id="ui_cg_item"+std::to_string(i);if(index>=catalog.items().size()){menuScene.command("^"+id+",show:false");continue;}menuScene.command("^"+id+",show:true,motion:*Enable");menuScene.uiSlot(id,0,catalog.unlocked(index,progress)?catalog.items()[index].thumbnail:"script/albummode/サムネイル_no_image.png");}highlight();}
+void CgScreen::setup(){elapsed=0;menuScene.resetUiAnimations();for(unsigned i=0;i<24;i++){auto index=page*24+i;auto id="ui_cg_item"+std::to_string(i);if(index>=catalog.items().size()){menuScene.command("^"+id+",show:false");continue;}menuScene.command("^"+id+",show:true,motion:*Enable");menuScene.uiSlot(id,0,catalog.unlocked(index,progress)?catalog.items()[index].thumbnail:lockedThumbnail);}highlight();}
 int CgScreen::pageCount()const{return int((catalog.items().size()+23)/24);}
 int CgScreen::pageButtons()const{return game_profile::story.legacyAvg&&pageCount()==1?0:pageCount();}
 int CgScreen::navigationStart()const{return 24+pageButtons();}

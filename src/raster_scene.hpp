@@ -16,6 +16,7 @@ constexpr unsigned Tile=SwapDamage::Tile, Width=SwapDamage::Width, Height=SwapDa
 constexpr unsigned TileCount=Columns*Rows;
 constexpr size_t CanvasBytes=size_t(Width)*Height*sizeof(uint32_t);
 using Clock=std::chrono::steady_clock;
+constexpr unsigned FrameTraceInterval=12;
 inline double milliseconds(Clock::duration elapsed){return std::chrono::duration<double,std::milli>(elapsed).count();}
 
 struct DrawSources {

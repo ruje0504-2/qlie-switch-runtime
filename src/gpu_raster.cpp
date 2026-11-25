@@ -94,7 +94,7 @@ void Scene::completeFrame(){
   }
   pendingReclaim.swap(retired);
   std::swap(previous,current);
-  if(qlie::diagnostics&&(frames==1||frames%120==0)){
+  if(qlie::diagnostics&&(frames==1||frames%FrameTraceInterval==0)){
    traceFrame("%s FRAME %llu draws=%u dispatches=%u dirty_tiles=%zu/%u cached_prefix_refs=%u textures=%zu texture_checks=%u upload_bytes=%zu cpu_build_ms=%.3f prior_wait_ms=%.3f reused_display=%d ordered_geometry=%d folded_solids=%u occluded_tile_refs=%u direct_base=%d\n",
                 backendName,(unsigned long long)frames,draws,dispatches,workTiles.size(),TileCount,cachedReferences,textures.size(),textureChecks,uploadBytes,cpuBuildMs,priorWaitMs,int(reusedDisplay),int(previous->geometry),foldedSolids,occludedReferences,int(baseCopy!=UINT32_MAX));
   }

@@ -2364,6 +2364,9 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   if(opening)showTitle();
   if(!titleTest){title->skipIntro();updateTitleAudio(0,true);}
  }
+#if defined(__SWITCH__) && defined(QLIE_PROFILE_WHJ6) && QLIE_DIAGNOSTICS
+ uint64_t snowStart=0,snowNextSample=0;
+#endif
  uint64_t lastUpdate=SDL_GetTicks64();
  while(!done){auto now=SDL_GetTicks64();
  const bool skipAtFrameStart=normalSkip;
@@ -2459,9 +2462,25 @@ controllerKey(e.cbutton.button);
  prepareTitleDuringOpening();
 #endif
  const auto beforeDraw=qlie::diagnostics?SDL_GetTicks64():0;
+#if defined(__SWITCH__) && defined(QLIE_PROFILE_WHJ6) && QLIE_DIAGNOSTICS
+ if(!opening&&menu&&!titleStarting&&!snowStart){
+  snowStart=now;
+  QLIE_LOGF("WHJ6 SNOW start_ms=%llu\n",(unsigned long long)snowStart);
+ }
+ const bool sampleSnow=snowStart&&menu&&!titleStarting&&now-snowStart<=9000&&now>=snowNextSample;
+#endif
  draw();
  finishMenuFade();
  const auto afterDraw=qlie::diagnostics?SDL_GetTicks64():0;
+#if defined(__SWITCH__) && defined(QLIE_PROFILE_WHJ6) && QLIE_DIAGNOSTICS
+ if(sampleSnow){
+  snowNextSample=now+200;
+  const auto loads=readAhead->stats();
+  QLIE_LOGF("WHJ6 SNOW elapsed_ms=%llu update_ms=%llu draw_ms=%llu fps=%u asset_ready=%u asset_waited=%u asset_urgent=%u asset_cold=%u\n",
+            (unsigned long long)(now-snowStart),(unsigned long long)(beforeDraw-now),(unsigned long long)(afterDraw-beforeDraw),
+            fpsDisplay.fps(),loads.ready,loads.waited,loads.urgent,loads.cold);
+ }
+#endif
  if(qlie::diagnostics&&afterDraw-now>=250)
   QLIE_LOGF("FRAME stall_ms=%llu update_ms=%llu draw_ms=%llu page=%s pending=%d skip=%d skip_wait_ms=%.1f music=%d cg=%d\n",
                static_cast<unsigned long long>(afterDraw-now),static_cast<unsigned long long>(beforeDraw-now),
@@ -2768,19 +2787,23 @@ controllerKey(e.cbutton.button);
 #endif
 extern "C" const char qlie_build_revision[]=WHJ2_BUILD_REV;
 int main(int argc,char**argv){
- if constexpr (qlie::diagnostics){
-  const char*logPath=argc<2?std::getenv(game_profile::logEnv):nullptr;
-  if(logPath){
-   if(auto*file=std::fopen(logPath,"a")){
-    std::fclose(file);
-    if(std::freopen(logPath,"a",stderr))std::setvbuf(stderr,nullptr,_IONBF,0);
-   }
-  }
- }else kvideo_silence_library_logs();
-try{whj2::SwitchStorage storage;
+ try{whj2::SwitchStorage storage;
 #ifdef __SWITCH__
  fsdevMountSdmc();
 #endif
+ if constexpr (qlie::diagnostics){
+  const char*logPath=argc<2?std::getenv(game_profile::logEnv):nullptr;
+  const char*mode="a";
+#if defined(__SWITCH__) && defined(QLIE_PROFILE_WHJ6)
+  if(!logPath&&argc<2){logPath="sdmc:/switch/whj6/snow-probe.log";mode="w";}
+#endif
+  if(logPath){
+   if(auto*file=std::fopen(logPath,mode)){
+    std::fclose(file);
+    if(std::freopen(logPath,mode,stderr))std::setvbuf(stderr,nullptr,_IOLBF,0);
+   }
+  }
+ }else kvideo_silence_library_logs();
 std::string game=argc>1?argv[1]:(std::getenv(game_profile::gameEnv)?std::getenv(game_profile::gameEnv):"");
 #ifdef __SWITCH__
 if(game.empty())game=game_profile::sdGame;

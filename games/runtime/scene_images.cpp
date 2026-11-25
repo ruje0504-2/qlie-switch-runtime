@@ -305,7 +305,22 @@ struct EmbeddedDecoder {
   KImage dst{0,0,output->width,output->height,size_t(output->width)*4,output->pixels.data()};
   uint8_t*pcm=nullptr;size_t count=0;
   auto before=kvideo_written_frames(video);
+#if defined(__SWITCH__) && defined(QLIE_PROFILE_WHJ6) && QLIE_DIAGNOSTICS
+  const bool sample=due<=540&&(!before||due/12!=ticks/12)&&source.rfind("script/title/back01.b#",0)==0;
+  const auto started=sample?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
+#endif
   int code=kvideo_advance(video,due,&dst,&pcm,&count);
+#if defined(__SWITCH__) && defined(QLIE_PROFILE_WHJ6) && QLIE_DIAGNOSTICS
+  if(sample){
+   using std::chrono::duration;
+   const auto ms=duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
+   KVideoStats stats{};
+   kvideo_stats(video,&stats);
+   QLIE_LOGF("WHJ6 SNOW decode tick=%llu requested=%llu decode_ms=%.3f hardware_frames=%llu software_frames=%llu output=%d\n",
+             (unsigned long long)due,(unsigned long long)target,ms,(unsigned long long)stats.hardware_frames,
+             (unsigned long long)stats.software_frames,int(kvideo_written_frames(video)!=before));
+  }
+#endif
   if(pcm&&count&&std::any_of(pcm,pcm+count,[](uint8_t sample){return sample!=0;}))audible=true;
   free(pcm);
   if(code<0){

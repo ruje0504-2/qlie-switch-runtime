@@ -58,7 +58,8 @@ class DekoScene final : public Scene {
  uint32_t gpuControl=UINT32_MAX;
  uint64_t sampleFrame=0;
  size_t sampleDirect=0;
- unsigned sampleCopied=0;
+ unsigned sampleCopied=0,sampleVideoTextures=0;
+ double sampleAcquireMs=0;
  size_t sampleTiles=0,sampleMotionTiles=0,sampleBaseTiles=0;
  std::array<dk::Image,ImageCount> images;
  dk::UniqueSwapchain swapchain;
@@ -125,7 +126,7 @@ class DekoScene final : public Scene {
   if(!cmd)throw std::runtime_error("deko3d command buffer creation");
   commandMemory=allocate(128*1024,Mapped);
   uniform=allocate(DK_UNIFORM_BUF_ALIGNMENT,Mapped);
-  if constexpr (qlie::diagnostics) reports=allocate(4*sizeof(CounterReport),DkMemBlockFlags_CpuUncached|DkMemBlockFlags_GpuUncached);
+  if constexpr (qlie::diagnostics) reports=allocate(6*sizeof(CounterReport),DkMemBlockFlags_CpuUncached|DkMemBlockFlags_GpuUncached);
   output=allocate(2*CanvasBytes,DkMemBlockFlags_GpuCached);
 
   dk::ImageLayout layout;
@@ -177,10 +178,11 @@ class DekoScene final : public Scene {
   inFlight=false;
   if constexpr (qlie::diagnostics) priorWaitMs+=milliseconds(Clock::now()-start);
   if(qlie::diagnostics&&sampleFrame){
-   traceFrame("DEKO3D PRESENT frame=%llu direct_tiles=%zu copy_tiles=%u kernel=%s motion_tiles=%zu raster_gpu_ms=%.3f copy_gpu_ms=%.3f gpu_load_pct=%.1f base_tiles=%zu\n",
+   traceFrame("DEKO3D PRESENT frame=%llu direct_tiles=%zu copy_tiles=%u kernel=%s motion_tiles=%zu raster_gpu_ms=%.3f copy_gpu_ms=%.3f gpu_load_pct=%.1f base_tiles=%zu nv12_frames=%u nv12_gpu_ms=%.3f acquire_ms=%.3f\n",
                 (unsigned long long)sampleFrame,sampleDirect,sampleCopied,
                 !sampleTiles?"idle":!sampleMotionTiles?"general":sampleMotionTiles==sampleTiles?"motion":"mixed",sampleMotionTiles,
-                sampleTiles?stageMs(0):0.0,sampleCopied?stageMs(2):0.0,gpuLoadPercent(),sampleBaseTiles);
+                sampleTiles?stageMs(0):0.0,sampleCopied?stageMs(2):0.0,gpuLoadPercent(),sampleBaseTiles,
+                sampleVideoTextures,sampleVideoTextures?stageMs(4):0.0,sampleAcquireMs);
    sampleFrame=0;
   }
  }
@@ -278,6 +280,10 @@ class DekoScene final : public Scene {
   grow(videoUniforms,count*DK_UNIFORM_BUF_ALIGNMENT);
   // receive_frame waited for NVDEC; invalidate cached reads of reused pool memory.
   cmd.barrier(DkBarrier_Full,DkInvalidateFlags_Image);
+  if(qlie::diagnostics&&sampleFrame){
+   sampleVideoTextures=unsigned(count);
+   timestamp(4,DkCounter_TimestampPipelineTop);
+  }
   cmd.bindStorageBuffer(DkStage_Compute,0,texels.getGpuAddr(),texels.getSize());
   const DkShader* program=&videoShader;
   cmd.bindShaders(DkStageFlag_Compute,program);
@@ -301,6 +307,7 @@ class DekoScene final : public Scene {
    ++slot;
   }
   cmd.barrier(DkBarrier_Full,DkInvalidateFlags_Shader);
+  if(qlie::diagnostics&&sampleFrame)timestamp(5,DkCounter_Timestamp);
  }
  SwapDamage::Mask planFrame(){
   if(!recording)throw std::runtime_error("deko3d frame not begun");
@@ -453,21 +460,23 @@ class DekoScene final : public Scene {
    std::this_thread::sleep_until(lastRefresh+std::chrono::nanoseconds(16666667));
    lastRefresh=Clock::now();
    if constexpr (qlie::diagnostics) reusedDisplay=true;
-   if(qlie::diagnostics&&(frames==0||(frames+1)%120==0))
+   if(qlie::diagnostics&&(frames==0||(frames+1)%FrameTraceInterval==0))
     traceFrame("DEKO3D IDLE frame=%llu gpu_load_pct=%.1f\n",(unsigned long long)(frames+1),gpuLoadPercent());
    finishFrame();
    return std::nullopt;
   }
+  const auto acquireStart=qlie::diagnostics?Clock::now():Clock::time_point{};
   const int slot=queue.acquireImage(swapchain);
   if(slot<0||unsigned(slot)>=ImageCount)throw std::runtime_error("deko3d swapchain acquisition");
   // The changed tiles get their final pixels in the raster dispatch. Only
   // older misses in this particular swap image need the retained canvas.
   const bool direct=!interlaced&&current->cleared&&changed.any();
   const auto stale=direct?damage[slot]&~changed:damage[slot];
-  if(qlie::diagnostics&&(frames==0||(frames+1)%120==0)){
+  if(qlie::diagnostics&&(frames==0||(frames+1)%FrameTraceInterval==0)){
    sampleFrame=frames+1;sampleDirect=direct?workTiles.size():0;
-   sampleTiles=0;sampleMotionTiles=0;sampleBaseTiles=0;sampleCopied=0;
-   std::memset(reports.getCpuAddr(),0,4*sizeof(CounterReport));
+   sampleAcquireMs=milliseconds(Clock::now()-acquireStart);
+   sampleTiles=0;sampleMotionTiles=0;sampleBaseTiles=0;sampleCopied=0;sampleVideoTextures=0;
+   std::memset(reports.getCpuAddr(),0,6*sizeof(CounterReport));
   }
   recordCanvas(direct?slot:-1,interlaced);
   repairDisplay(unsigned(slot),stale);

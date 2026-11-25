@@ -10,6 +10,11 @@ pc="$dkp/tools/bin/pkg-config"
 mkdir -p build-switch
 . ./engine/sources.sh
 flags="-O2 -Wall -Wextra -Werror -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE -D__SWITCH__ -Iinclude -Isrc -isystem $dkp/libnx/include"
+if [ "${QLIE_SWITCH_DIAGNOSTICS:-0}" = 1 ]; then
+  flags="$flags -DQLIE_DIAGNOSTICS=1"
+  qlie_binary="$qlie_binary-probe"
+  qlie_nro_title="$qlie_nro_title (采样版)"
+fi
 revision=$(git rev-parse --verify HEAD 2>/dev/null || printf unversioned)
 if [ "$revision" != unversioned ] && ! git diff --quiet HEAD -- src include engine games shaders build-host.sh build-switch.sh; then revision="$revision-dirty"; fi
 flags="$flags -DWHJ2_BUILD_REV=\"$revision\""

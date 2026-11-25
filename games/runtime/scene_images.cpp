@@ -16,6 +16,7 @@ extern "C" {
 #include <sstream>
 #include <algorithm>
 #include <chrono>
+#include <charconv>
 #include <cstdio>
 #include <iostream>
 #include <cmath>
@@ -332,10 +333,12 @@ struct EyecatchFilm {
  }
 };
 struct Composite {
+ struct MaterialDraw {size_t slot;unsigned alpha;uint32_t tint;};
  struct Element {std::shared_ptr<const Image>image;std::shared_ptr<Model>mesh;std::string name;
  std::shared_ptr<Composite>nested;
  std::shared_ptr<const qlie::Bytes> video;
  std::shared_ptr<JpegAnimation> jpegAnimation;
+ std::vector<MaterialDraw> materialDraw;
  };
  Animation definition;
  std::array<float,16> externalDefaults{};
@@ -343,6 +346,7 @@ struct Composite {
  bool hasVideo=false,standaloneVideo=false;
  uint32_t identity=0;std::vector<uint32_t>motionIdentities;
  std::vector<Element>members;
+ std::vector<std::pair<unsigned,unsigned>> linkedSlots;
  std::optional<size_t> messagePlaceholder;
  qlie::Bytes eyecatchFallback;
  std::vector<qlie::Bytes>sounds;
@@ -368,6 +372,12 @@ struct Composite {
  metadata=true;
  }
    else if(m.type.rfind("abimg",0)==0){Element e;e.name=m.name;
+ if(e.name.rfind("*Link,",0)==0){
+  unsigned source=0;
+  const auto end=e.name.data()+e.name.size();
+  auto parsed=std::from_chars(e.name.data()+6,end,source);
+  if(parsed.ec==std::errc{}&&parsed.ptr==end)linkedSlots.emplace_back(unsigned(members.size()),source);
+ }
  if(e.name=="*MesSurface")messagePlaceholder=members.size();
  if(!m.data.empty()){
     if(m.data.size()>=5&&std::equal(m.data.begin(),m.data.begin()+5,"abmp1"))e.nested=std::make_shared<Composite>(std::move(m.data),name+"#"+m.name,randomState,deferred,film);
@@ -387,6 +397,24 @@ struct Composite {
    else if(m.type.rfind("absnd",0)==0)sounds.push_back(std::move(m.data));
   }
   if(!metadata)throw std::runtime_error("Composite lacks animation metadata "+name);
+  for(auto&member:members)if(member.mesh){
+   for(const auto&material:member.mesh->materials){
+    auto picture=std::find_if(members.begin(),members.end(),[&](const auto&slot){
+     return slot.image&&(slot.name==material.name||(!material.texture.empty()&&slot.name==material.texture));
+    });
+    size_t slot=picture==members.end()?SIZE_MAX:size_t(picture-members.begin());
+    // Legacy embedded models can name an external texture in MQO and
+    // supply its only image through a linked ABMP member.
+    if(slot==SIZE_MAX&&!material.texture.empty()&&member.mesh->materials.size()==1&&linkedSlots.size()==1)
+     slot=linkedSlots.front().first;
+    auto channel=[&](unsigned index){
+     float value;const auto bits=material.properties[index];
+     std::memcpy(&value,&bits,sizeof(value));
+     return unsigned(std::lround(std::clamp(value,0.f,1.f)*255));
+    };
+    member.materialDraw.push_back({slot,channel(2),(channel(3)<<16)|(channel(4)<<8)|channel(5)});
+   }
+  }
   bool wideKeys=false;
   for(const auto&motion:definition.motions)
    for(const auto&layer:motion.layers)wideKeys=wideKeys||layer.version>=21;
@@ -406,7 +434,7 @@ struct Composite {
    }
   }
   for(auto&motion:definition.motions)for(auto&layer:motion.layers){if(layer.mode>2)warn("layer-mode="+std::to_string(layer.mode));
- for(auto&k:layer.keys)if(k[4]!=0&&k[4]!=1&&k[4]!=3&&k[4]!=4&&k[4]!=6&&k[4]!=9&&k[4]!=10&&k[4]!=15&&k[4]!=16&&k[4]!=17&&k[4]!=18&&k[4]!=20)warn("primitive="+std::to_string(k[4]));
+ for(auto&k:layer.keys)if(k[4]!=0&&k[4]!=1&&k[4]!=3&&k[4]!=4&&k[4]!=5&&k[4]!=6&&k[4]!=9&&k[4]!=10&&k[4]!=15&&k[4]!=16&&k[4]!=17&&k[4]!=18&&k[4]!=20)warn("primitive="+std::to_string(k[4]));
  }
  }
  size_t closeVideoClips(AssetReadAhead*worker){
@@ -507,6 +535,20 @@ struct Composite {
    context.externalMask|=external->externalMask;context.randomCursor=external->randomCursor;
   }
   auto samples=sampleMotion(*motion,ms,1280,720,false,context);
+  auto bitmap=[&](size_t slot)->const Image*{
+   if(slot>=members.size())return nullptr;
+   if(uiSlots){
+    const auto override=uiSlots->find(unsigned(slot));
+    if(override!=uiSlots->end())return override->second;
+   }
+   if(slot==0&&replacement)return replacement;
+   return members[slot].image.get();
+  };
+  auto childBitmaps=[&](const Composite&nested){
+   std::map<unsigned,const Image*> result;
+   for(auto [local,parentSlot]:nested.linkedSlots)if(const auto*image=bitmap(parentSlot))result.emplace(local,image);
+   return result;
+  };
   const size_t messageSlot=messagePlaceholder.value_or(1);
   auto replacementFrame=[&](double time){
    auto&clip=replacementMedia->videoClip(0,replacementMedia->members.front(),worker);
@@ -519,6 +561,7 @@ struct Composite {
  if(parentBlend)k.flags=parentBlend;
  for(auto&w:k.unsupported)if(w!="primitive=20"&&!(w=="3d-rotation"&&(k.kind==18||k.kind==3||k.kind==4)))warn(w);
  if(!motion->layers[index].flags||!k.kind)continue;
+ if(k.kind==5){queue.requestFieldPresentation();continue;}
  k.alpha=int(k.alpha)*int(opacity)/255;if(messageSurface.value_or(nullptr)&&messageSlot!=0&&k.kind==4&&k.resource==0)k.alpha=int(k.alpha)*int(windowAlpha)/255;k.addColor=colorAdd(k.addColor,parentAdd);k.mulColor=colorMultiply(k.mulColor,parentMul);
  if(k.kind==15||k.kind==16||k.kind==17){queue.control(k,depth+k.priority);continue;}
  if(k.kind==1){
@@ -576,11 +619,12 @@ struct Composite {
    auto frame=k;frame.scaleX=frame.scaleY=frame.scaleZ=100;
    auto base=combine(parent3D?*parent3D:from2D(parent),placement3D(frame,unsigned(k.particles.extent[0]),unsigned(k.particles.extent[1])));
    Matrix3D center;center.m[2][3]=-k.particles.extent[2]*.5f;base=combine(base,center);
+   const auto resolved=childBitmaps(*e.nested);
    for(auto&point:particlePoints(k.particles,randomSeed,unsigned(e.nested->definition.motions.size()))){
     Matrix3D child;child.m[0][0]=child.m[1][1]=child.m[2][2]=point.scale;
     child.m[0][3]=point.x-e.nested->definition.bounds[0]*.5f;child.m[1][3]=point.y-e.nested->definition.bounds[1]*.5f;child.m[2][3]=point.z;
     child=combine(base,child);
-    e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,point.milliseconds),e.nested->definition.motions.at(point.motion).name,{},depth+k.priority,k.alpha*point.alpha/255,k.addColor,k.mulColor,k.flags&0x7f,nullptr,std::nullopt,255,nullptr,nullptr,&child,filterOverride,liveVideo,worker,false);
+    e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,point.milliseconds),e.nested->definition.motions.at(point.motion).name,{},depth+k.priority,k.alpha*point.alpha/255,k.addColor,k.mulColor,k.flags&0x7f,nullptr,std::nullopt,255,resolved.empty()?nullptr:&resolved,nullptr,&child,filterOverride,liveVideo,worker,false);
    }
    continue;
   }
@@ -600,21 +644,27 @@ struct Composite {
  }
  if(k.kind==18){
   if(k.resource>=members.size()||!members[k.resource].mesh)throw std::runtime_error("Missing model resource "+path);
-  const auto&mesh=*members[k.resource].mesh;
+  const auto&element=members[k.resource];
+  const auto&mesh=*element.mesh;
   auto matrix=combine(parent3D?*parent3D:from2D(parent),placement3D(k,0,0));
-  for(const auto&object:mesh.objects)if(object.visible)for(const auto&face:object.faces){
-   if(face.material<0)continue;
-   const auto&material=mesh.materials.at(unsigned(face.material));const Image*texture=nullptr;
-   // PE df684 maps properties[0] to material+0xc; e0198 bypasses lighting for1.
-   if(material.properties[0]!=1)warn("model-material-lighting="+std::to_string(material.properties[0]));
-   auto channel=[&](unsigned index){float v;auto bits=material.properties[index];std::memcpy(&v,&bits,4);return unsigned(std::lround(std::clamp(v,0.f,1.f)*255));};
-   unsigned materialAlpha=channel(2);uint32_t materialColor=(channel(3)<<16)|(channel(4)<<8)|channel(5);
-
-   for(const auto&member:members)if(member.name==material.name){texture=member.image.get();break;}
-   if(!texture){warn("model-material-texture="+material.name);continue;}
-   std::array<TextureVertex,4> vertices;for(unsigned i=0;i<face.corners;i++){auto point=matrix.point(object.vertices.at(face.vertices[i]));vertices[i]={point.x,point.y,1000-point.z,face.uv[i]*texture->width,face.uv[i+4]*texture->height};}
-   queue.triangle(*texture,{vertices[0],vertices[1],vertices[2]},depth+k.priority,k.alpha*materialAlpha/255,k.addColor,colorMultiply(k.mulColor,materialColor),k.flags&0x7f,k.textureFilter);
-   if(face.corners==4)queue.triangle(*texture,{vertices[0],vertices[2],vertices[3]},depth+k.priority,k.alpha*materialAlpha/255,k.addColor,colorMultiply(k.mulColor,materialColor),k.flags&0x7f,k.textureFilter);
+  std::vector<Vec3> transformed;
+  for(const auto&object:mesh.objects)if(object.visible){
+   transformed.clear();
+   transformed.reserve(object.vertices.size());
+   for(auto vertex:object.vertices)transformed.push_back(matrix.point(vertex));
+   for(const auto&face:object.faces){
+    if(face.material<0)continue;
+    const auto index=unsigned(face.material);
+    const auto&material=mesh.materials.at(index);
+    const auto&draw=element.materialDraw.at(index);
+    const auto*texture=bitmap(draw.slot);
+    // PE df684 maps properties[0] to material+0xc; e0198 bypasses lighting for1.
+    if(material.properties[0]!=1)warn("model-material-lighting="+std::to_string(material.properties[0]));
+    if(!texture){warn("model-material-texture="+material.name);continue;}
+    std::array<TextureVertex,4> vertices;for(unsigned i=0;i<face.corners;i++){const auto&point=transformed.at(face.vertices[i]);vertices[i]={point.x,point.y,1000-point.z,face.uv[i]*texture->width,face.uv[i+4]*texture->height};}
+    queue.triangle(*texture,{vertices[0],vertices[1],vertices[2]},depth+k.priority,k.alpha*draw.alpha/255,k.addColor,colorMultiply(k.mulColor,draw.tint),k.flags&0x7f,k.textureFilter);
+    if(face.corners==4)queue.triangle(*texture,{vertices[0],vertices[2],vertices[3]},depth+k.priority,k.alpha*draw.alpha/255,k.addColor,colorMultiply(k.mulColor,draw.tint),k.flags&0x7f,k.textureFilter);
+   }
   }
   continue;
  }
@@ -637,12 +687,14 @@ struct Composite {
  if(!k.childTimeResolved){warn("nested-time context unresolved");continue;}
  if(k.childMotion>=e.nested->definition.motions.size())throw std::runtime_error("Nested motion index "+path);
  AnimationContext nestedContext;nestedContext.randomCursor=context.randomCursor;
+ const auto resolved=childBitmaps(*e.nested);
+ const auto*slots=resolved.empty()?nullptr:&resolved;
  if(parent3D||k.rotationX||k.rotationY||k.z){
   auto matrix=combine(parent3D?*parent3D:from2D(parent),placement3D(k,unsigned(e.nested->definition.bounds[0]),unsigned(e.nested->definition.bounds[1])));
-  e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,k.childTime),e.nested->definition.motions[k.childMotion].name,{},depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,nullptr,std::nullopt,255,nullptr,&nestedContext,&matrix,filterOverride,liveVideo,worker,asyncVideo);continue;
+  e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,k.childTime),e.nested->definition.motions[k.childMotion].name,{},depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,nullptr,std::nullopt,255,slots,&nestedContext,&matrix,filterOverride,liveVideo,worker,asyncVideo);continue;
  }
  auto local=imagePlacement(k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,unsigned(e.nested->definition.bounds[0]),unsigned(e.nested->definition.bounds[1]));
- e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,k.childTime),e.nested->definition.motions[k.childMotion].name,affine(parent,local),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,nullptr,std::nullopt,255,nullptr,&nestedContext,nullptr,filterOverride,liveVideo,worker,asyncVideo);
+ e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,k.childTime),e.nested->definition.motions[k.childMotion].name,affine(parent,local),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,nullptr,std::nullopt,255,slots,&nestedContext,nullptr,filterOverride,liveVideo,worker,asyncVideo);
  continue;
  }
    else if(!slot&&e.video){
@@ -1454,9 +1506,9 @@ std::pair<unsigned,unsigned> SceneImages::dimensions(const std::string&name)cons
  }
  return layer.composite->dimensions();
 }if(layer.pixels)return {layer.pixels->width,layer.pixels->height};throw std::runtime_error("Image dimensions unavailable: "+name);}
-void SceneImages::draw(qlie::Bytes&out,bool liveVideo,const Affine2D*view)const{render(out,0,nullptr,999,liveVideo,view);}
+bool SceneImages::draw(qlie::Bytes&out,bool liveVideo,const Affine2D*view)const{return render(out,0,nullptr,999,liveVideo,view);}
 void SceneImages::drawThumbnail(qlie::Bytes&out,float maxPriority)const{render(out,4,nullptr,maxPriority);}
-void SceneImages::drawScene(qlie::Bytes&out,bool liveVideo)const{render(out,1,nullptr,999,liveVideo);}
+bool SceneImages::drawScene(qlie::Bytes&out,bool liveVideo)const{return render(out,1,nullptr,999,liveVideo);}
 void SceneImages::drawFaces(qlie::Bytes&out)const{render(out,2);}
 void SceneImages::drawMessages(qlie::Bytes&out)const{render(out,3);}
 void SceneImages::setViewPan(std::string layer,float horizontal,float vertical){
@@ -1496,11 +1548,12 @@ RenderQueue SceneImages::captureQueue(bool shaderMasks,bool nativeVideo)const{
  enqueue(queue,1,999,true);
  return queue;
 }
-void SceneImages::render(qlie::Bytes&out,unsigned pass,RenderTarget*target,float maxPriority,bool liveVideo,const Affine2D*view)const{
+bool SceneImages::render(qlie::Bytes&out,unsigned pass,RenderTarget*target,float maxPriority,bool liveVideo,const Affine2D*view)const{
  if(!target&&out.size()!=1280*720*4)throw std::runtime_error("Scene canvas size");
  RenderQueue queue(target&&target->supportsMasks(),target&&target->supportsVideoSurfaces(),view);
  enqueue(queue,pass,maxPriority,liveVideo);
  if(target)queue.draw(*target,1280,720);else queue.draw(out,1280,720);
+ return queue.usesFieldPresentation();
 }
 void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool liveVideo)const{
  const auto priority=[](const Layer&layer){return value(layer,"pri",0)+value(layer,"addpri",0);};

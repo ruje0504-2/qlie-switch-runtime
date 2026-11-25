@@ -17,6 +17,7 @@ public:
  explicit Progress(const char*flag):extrasFlag(flag){}
  bool capture(const Story&);
  bool markRead(const std::string&key){return !key.empty()&&readPages.insert(key).second;}
+ bool markSceneComplete(const std::string&key){return labels.insert(key).second;}
  bool wasRead(const std::string&key)const{return !key.empty()&&readPages.count(key)!=0;}
  bool captureFiles(const std::set<std::string>&);
  bool seenFile(const std::string&path)const{return files.count(qlie::canonical(path))!=0;}

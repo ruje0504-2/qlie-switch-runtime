@@ -243,7 +243,7 @@ bool RenderQueue::captureAlignedBitmap(qlie::Bytes&out,unsigned w,unsigned h,uin
  }
  return true;
 }
-void RenderQueue::draw(RenderTarget&target,unsigned w,unsigned h)const{qlie::Bytes unused;target.beginBatch();drawRows(unused,w,h,0,h,&target);target.endBatch();}
+void RenderQueue::draw(RenderTarget&target,unsigned w,unsigned h)const{qlie::Bytes unused;target.beginBatch();drawRows(unused,w,h,0,h,&target);target.endBatch();if(fieldPresentation)target.requestFieldPresentation();}
 void RenderQueue::draw(qlie::Bytes&out,unsigned w,unsigned h)const{
  if(out.size()!=size_t(w)*h*4)throw std::runtime_error("Render canvas size");
  // Materialize before workers read rows in parallel.

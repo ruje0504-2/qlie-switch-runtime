@@ -8,6 +8,7 @@ namespace whj2 {
 namespace gpu { struct Scene; }
 class GpuRaster:public RenderTarget {
  std::unique_ptr<gpu::Scene> impl;
+ bool fieldRequested=false,nextField=false,forcedField=false;
  void drawImage(const Image&,const Affine2D&,float,uint32_t,uint32_t,unsigned,unsigned);
 protected:
  explicit GpuRaster(std::unique_ptr<gpu::Scene>);
@@ -15,6 +16,7 @@ public:
  ~GpuRaster() override;
  bool nativePresentation()const;
  void setInterlaced(bool);
+ void requestFieldPresentation()override{fieldRequested=true;}
  void begin(const qlie::Bytes&);void end(qlie::Bytes&);
  void begin(uint32_t clearColor);
  void beginVideo(const Image&);

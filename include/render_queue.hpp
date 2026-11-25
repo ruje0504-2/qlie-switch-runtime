@@ -19,6 +19,7 @@ public:
  // A queue keeps its source images immutable for the duration of this batch.
  virtual void beginBatch(){}
  virtual void endBatch(){}
+ virtual void requestFieldPresentation(){}
  virtual bool supportsMasks()const{return false;}
  virtual bool supportsVideoSurfaces()const{return false;}
  virtual void maskedImage(const Image&,const Image&,const AnimationSample::Mask&,const Affine2D&,float,uint32_t,uint32_t,unsigned,unsigned){throw std::runtime_error("Render target mask unsupported");}
@@ -34,7 +35,7 @@ class RenderQueue {
  std::deque<Image> snapshots;
  std::vector<std::shared_ptr<const Image>> retainedImages;
  size_t visibleImages=0;
- bool shaderMasks=false,nativeVideo=false;
+ bool shaderMasks=false,nativeVideo=false,fieldPresentation=false;
  std::optional<Affine2D> view;
  void drawRows(qlie::Bytes&,unsigned,unsigned,unsigned,unsigned,RenderTarget* =nullptr)const;
 public:
@@ -42,6 +43,8 @@ public:
   :shaderMasks(masks),nativeVideo(video){if(outerView)view=*outerView;}
  bool supportsMasks()const{return shaderMasks;}
  bool supportsVideoSurfaces()const{return nativeVideo;}
+ void requestFieldPresentation(){fieldPresentation=true;}
+ bool usesFieldPresentation()const{return fieldPresentation;}
  size_t imageCount()const{return visibleImages;}
  void image(const Image&,const Affine2D&,float priority,float alpha,uint32_t add,uint32_t mul,unsigned blend=0,unsigned filter=0);
  void maskedImage(const Image&,const Image&,const AnimationSample::Mask&,const Affine2D&,float,float,uint32_t,uint32_t,unsigned,unsigned);

@@ -51,7 +51,7 @@ class SceneImages {
  void setWave(Layer&,std::string);
  static std::array<float,3> sampleWave(const Layer&);
  bool cameraCommand(const std::string&);
- void render(qlie::Bytes&,unsigned pass,RenderTarget*target=nullptr,float maxPriority=999,bool liveVideo=false,const Affine2D* view=nullptr)const;
+ bool render(qlie::Bytes&,unsigned pass,RenderTarget*target=nullptr,float maxPriority=999,bool liveVideo=false,const Affine2D* view=nullptr)const;
  void enqueue(RenderQueue&,unsigned pass,float maxPriority,bool liveVideo)const;
  std::string mappedFace(std::string)const;
  std::string faceResource(const std::string&,bool packedOnly)const;
@@ -96,7 +96,7 @@ public:
  std::vector<SceneSoundEvent> takeSoundEvents();
  void update(double milliseconds);bool command(const std::string&);void clear(bool keepBitmaps=false);void beginPage();
  std::optional<std::string> selectFace(const std::string&speaker,const std::string&voice,bool deferCold=false);
- void draw(qlie::Bytes&,bool liveVideo=false,const Affine2D* view=nullptr)const;void drawThumbnail(qlie::Bytes&,float maxPriority)const;void drawScene(qlie::Bytes&,bool liveVideo=false)const;void drawFaces(qlie::Bytes&)const;void drawMessages(qlie::Bytes&)const;
+ bool draw(qlie::Bytes&,bool liveVideo=false,const Affine2D* view=nullptr)const;void drawThumbnail(qlie::Bytes&,float maxPriority)const;bool drawScene(qlie::Bytes&,bool liveVideo=false)const;void drawFaces(qlie::Bytes&)const;void drawMessages(qlie::Bytes&)const;
  void setViewPan(std::string layer,float horizontal,float vertical);
  void moveViewPan(float dx,float dy);
  void pointViewPan(float x,float y);

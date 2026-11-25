@@ -8,9 +8,9 @@ UpperMenu::UpperMenu(qlie::Assets&assets):frame(image(assets.read("avg/uppermenu
  const char*names[]={"ゲームの終了","タイトルへ戻る","画面の切り替え"};
  for(unsigned i=0;i<3;i++){off[i]=image(assets.read(std::string("avg/uppermenu/")+names[i]+"_off.png"));on[i]=image(assets.read(std::string("avg/uppermenu/")+names[i]+"_on.png"));off[i].version.publish();on[i].version.publish();}
 }
-void UpperMenu::move(int direction){if(shown)selected=(selected+direction%3+3)%3;}
+void UpperMenu::move(int direction){const int count=sectionSkip?4:3;if(shown)selected=(selected+direction%count+count)%count;}
 UpperMenu::Action UpperMenu::confirm(){return shown?Action(selected+1):None;}
-UpperMenu::Action UpperMenu::tap(float x,float y){if(!shown)return None;for(int i=0;i<3;i++){float center=935+i*135;if(std::abs(x-center)<=56&&std::abs(y-25)<=14){selected=i;return Action(i+1);}}close();return None;}
+UpperMenu::Action UpperMenu::tap(float x,float y){if(!shown)return None;if(sectionSkip&&std::abs(x-800)<=56&&std::abs(y-25)<=14){selected=3;return SectionSkip;}for(int i=0;i<3;i++){float center=935+i*135;if(std::abs(x-center)<=56&&std::abs(y-25)<=14){selected=i;return Action(i+1);}}close();return None;}
 bool UpperMenu::swipe(float dx,float dy){if(dy>=64&&dy>std::abs(dx)){open();return true;}return false;}
 void UpperMenu::draw(qlie::Bytes&pixels)const{render(&pixels,nullptr);}
 void UpperMenu::draw(RenderTarget&target)const{render(nullptr,&target);}

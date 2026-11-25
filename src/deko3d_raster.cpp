@@ -19,6 +19,7 @@ using namespace gpu;
 #include "deko_restore.inc"
 #include "deko_base.inc"
 #include "deko_video.inc"
+#include "deko_field.inc"
 
 constexpr unsigned ImageCount = 3;
 // NVGPU_GPU_IOCTL_PMU_GET_GPU_LOAD returns the PMU's device-wide load in tenths of a percent.
@@ -45,7 +46,7 @@ class DekoScene final : public Scene {
  dk::UniqueMemBlock imageMemory, code, commandMemory, uniform, output, staging, history;
  dk::UniqueMemBlock texels, drawBuffer, tileBuffer, imageDescriptors, repairTiles;
  dk::UniqueCmdBuf cmd;
- dk::Shader shader,motionShader,restoreShader,baseShader,videoShader;
+ dk::Shader shader,motionShader,restoreShader,baseShader,videoShader,fieldShader;
  std::map<uint32_t,VideoMapping> videoMaps;
  std::map<uint64_t,VideoTexture> videoTextures;
  dk::UniqueMemBlock videoDescriptors,videoUniforms;
@@ -89,7 +90,7 @@ class DekoScene final : public Scene {
   device=dk::DeviceMaker{}.create();
   if(!device)throw std::runtime_error("deko3d device creation");
   queue=dk::QueueMaker{device}.setFlags(DkQueueFlags_Graphics|DkQueueFlags_Compute)
-         .setPerWarpScratchMemorySize(std::max<unsigned>({rasterScratchPerWarp,motionScratchPerWarp,restoreScratchPerWarp,baseScratchPerWarp,videoScratchPerWarp,DK_PER_WARP_SCRATCH_MEM_ALIGNMENT})).create();
+         .setPerWarpScratchMemorySize(std::max<unsigned>({rasterScratchPerWarp,motionScratchPerWarp,restoreScratchPerWarp,baseScratchPerWarp,videoScratchPerWarp,fieldScratchPerWarp,DK_PER_WARP_SCRATCH_MEM_ALIGNMENT})).create();
   if(!queue)throw std::runtime_error("deko3d queue creation");
   static_assert(sizeof(rasterDksh)%DK_SHADER_CODE_ALIGNMENT==0);
   static_assert(sizeof(motionDksh)%DK_SHADER_CODE_ALIGNMENT==0);
@@ -98,12 +99,17 @@ class DekoScene final : public Scene {
   constexpr size_t baseOffset=restoreOffset+sizeof(restoreDksh);
   static_assert(sizeof(baseDksh)%DK_SHADER_CODE_ALIGNMENT==0);
   constexpr size_t videoOffset=baseOffset+sizeof(baseDksh);
-  code=allocate(videoOffset+sizeof(videoDksh)+DK_SHADER_CODE_UNUSABLE_SIZE,Mapped|DkMemBlockFlags_Code);
+  static_assert(sizeof(videoDksh)%DK_SHADER_CODE_ALIGNMENT==0);
+  constexpr size_t fieldOffset=videoOffset+sizeof(videoDksh);
+  code=allocate(fieldOffset+sizeof(fieldDksh)+DK_SHADER_CODE_UNUSABLE_SIZE,Mapped|DkMemBlockFlags_Code);
   std::memcpy(code.getCpuAddr(),rasterDksh,sizeof(rasterDksh));
   std::memcpy(static_cast<uint8_t*>(code.getCpuAddr())+sizeof(rasterDksh),motionDksh,sizeof(motionDksh));
   std::memcpy(static_cast<uint8_t*>(code.getCpuAddr())+restoreOffset,restoreDksh,sizeof(restoreDksh));
   std::memcpy(static_cast<uint8_t*>(code.getCpuAddr())+baseOffset,baseDksh,sizeof(baseDksh));
   std::memcpy(static_cast<uint8_t*>(code.getCpuAddr())+videoOffset,videoDksh,sizeof(videoDksh));
+  std::memcpy(static_cast<uint8_t*>(code.getCpuAddr())+fieldOffset,fieldDksh,sizeof(fieldDksh));
+  dk::ShaderMaker{code,fieldOffset}.initialize(fieldShader);
+  if(!fieldShader.isValid()||fieldShader.getStage()!=DkStage_Compute)throw std::runtime_error("deko3d field presentation shader");
   dk::ShaderMaker{code,videoOffset}.initialize(videoShader);
   if(!videoShader.isValid()||videoShader.getStage()!=DkStage_Compute)throw std::runtime_error("deko3d NV12 movie shader");
   dk::ShaderMaker{code,baseOffset}.initialize(baseShader);
@@ -354,10 +360,10 @@ class DekoScene final : public Scene {
   cmd.barrier(DkBarrier_Primitives,0);
   if(qlie::diagnostics&&sampleFrame)timestamp(1,DkCounter_Timestamp);
  }
- void recordCanvas(int presentSlot){
+ void recordCanvas(int presentSlot,bool fieldOutput){
   cmd.clear();
   cmd.addMemory(commandMemory,0,commandMemory.getSize());
-  if(interlaced&&!historyValid&&canvasValid){
+  if(fieldOutput&&!historyValid&&canvasValid){
    cmd.copyBuffer(output.getGpuAddr(),history.getGpuAddr(),CanvasBytes);
    cmd.barrier(DkBarrier_Full,0);
    historyValid=true;
@@ -367,11 +373,20 @@ class DekoScene final : public Scene {
    cmd.barrier(DkBarrier_Full,DkInvalidateFlags_Shader);
   }
   if(!workTiles.empty()){recordVideos();recordTiles(presentSlot);}
-  if(interlaced){
+  if(fieldOutput){
    if(!historyValid)cmd.copyBuffer(output.getGpuAddr(),history.getGpuAddr(),CanvasBytes);
-   else for(unsigned y=(frames+1)&1;y<Height;y+=2){
-    size_t offset=size_t(y)*Width*4;
-    cmd.copyBuffer(output.getGpuAddr()+offset,history.getGpuAddr()+offset,Width*4);
+   else {
+    static_assert(Width%16==0&&Width*4%256==0);
+    const auto offset=uint32_t(((frames+1)&1)*Width*4);
+    const std::array<DkBufExtents,2> buffers{{
+     {output.getGpuAddr()+offset,uint32_t(CanvasBytes)-offset},{history.getGpuAddr()+offset,uint32_t(CanvasBytes)-offset}
+    }};
+    cmd.barrier(DkBarrier_Full,DkInvalidateFlags_Shader);
+    cmd.bindStorageBuffers(DkStage_Compute,0,buffers);
+    const DkShader* program=&fieldShader;
+    cmd.bindShaders(DkStageFlag_Compute,program);
+    cmd.dispatchCompute(Width/16,(Height/2+15)/16,1);
+    cmd.barrier(DkBarrier_Full,DkInvalidateFlags_Shader);
    }
    historyValid=true;
   }
@@ -448,7 +463,7 @@ class DekoScene final : public Scene {
    sampleTiles=0;sampleMotionTiles=0;sampleBaseTiles=0;sampleCopied=0;
    std::memset(reports.getCpuAddr(),0,4*sizeof(CounterReport));
   }
-  recordCanvas(direct?slot:-1);
+  recordCanvas(direct?slot:-1,interlaced);
   repairDisplay(unsigned(slot),stale);
   submit(false);
   queue.presentImage(swapchain,slot);
@@ -459,14 +474,14 @@ class DekoScene final : public Scene {
   return uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(lastRefresh.time_since_epoch()).count());
  }
  void readCanvas(qlie::Bytes& pixels) override {
-  if(!interlaced&&readCoveredSolid(pixels)){
+  if(readCoveredSolid(pixels)){
    for(auto& entry:videoTextures)if(entry.second.lastUsed==frames+1)entry.second.lastUsed=frames;
    return;
   }
   planFrame();
   grow(staging,CanvasBytes);
-  recordCanvas(-1);
-  cmd.copyBuffer(displayAddress(),staging.getGpuAddr(),CanvasBytes);
+  recordCanvas(-1,false);
+  cmd.copyBuffer(output.getGpuAddr(),staging.getGpuAddr(),CanvasBytes);
   submit(true);
   queue.flush();
   waitForPrevious();

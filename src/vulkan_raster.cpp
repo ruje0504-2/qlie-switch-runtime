@@ -474,7 +474,7 @@ struct VulkanRaster::Impl final : Scene {
   texelsDirty=true;
  }
  void barrier(VkPipelineStageFlags source,VkPipelineStageFlags dest,VkAccessFlags from,VkAccessFlags to){VkMemoryBarrier b{VK_STRUCTURE_TYPE_MEMORY_BARRIER};b.srcAccessMask=from;b.dstAccessMask=to;CmdPipelineBarrier(command,source,dest,0,1,&b,0,nullptr,0,nullptr);}
- void prepareGpuCommands(){
+ void prepareGpuCommands(bool fieldOutput=true){
   // The next command list and its tiles are CPU-owned while the previous
   // frame presents. Reuse command/GPU upload memory only after its fence.
   planTiles();
@@ -482,7 +482,7 @@ struct VulkanRaster::Impl final : Scene {
 #ifdef __SWITCH__
   markSwapDamage();
 #endif
-  beginGpuCommands();
+  beginGpuCommands(fieldOutput);
  }
  void setInterlaced(bool enabled) override {
   if(interlaced==enabled)return;
@@ -510,12 +510,12 @@ struct VulkanRaster::Impl final : Scene {
   }
   barrier(VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_TRANSFER_READ_BIT|VK_ACCESS_SHADER_READ_BIT|VK_ACCESS_SHADER_WRITE_BIT);
  }
- void beginGpuCommands(){
+ void beginGpuCommands(bool fieldOutput=true){
   checked(ResetCommandPool(device,commandPool,0),"reset commands");
   VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   bi.flags=VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   checked(BeginCommandBuffer(command,&bi),"begin commands");
-  if(interlaced&&!scanlineValid&&canvasValid)copyScanlines(true);
+  if(fieldOutput&&interlaced&&!scanlineValid&&canvasValid)copyScanlines(true);
 #ifdef __SWITCH__
   if constexpr (qlie::diagnostics){
    timingFrame=(frames==0||(frames+1)%120==0)?frames+1:0;
@@ -527,7 +527,7 @@ struct VulkanRaster::Impl final : Scene {
    barrier(VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT|VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT|VK_ACCESS_SHADER_WRITE_BIT);
   }
   if(!workTiles.empty())recordTiles();
-  if(interlaced)copyScanlines(!scanlineValid);
+  if(fieldOutput&&interlaced)copyScanlines(!scanlineValid);
   canvasValid=true;
   if constexpr (qlie::diagnostics) cpuBuildMs=milliseconds(Clock::now()-cpuFrameStart)-priorWaitMs;
  }
@@ -666,16 +666,16 @@ struct VulkanRaster::Impl final : Scene {
  }
  void readCanvas(qlie::Bytes&pixels) override {
  auto&s=*this;
- if(!s.interlaced&&s.readCoveredSolid(pixels))return;
+ if(s.readCoveredSolid(pixels))return;
 #ifdef __SWITCH__
  s.current->geometry=s.scenePipeline&&s.current->cleared;
 #endif
- s.prepareGpuCommands();
+ s.prepareGpuCommands(false);
  VkPipelineStageFlags writers=VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT|VK_PIPELINE_STAGE_TRANSFER_BIT;
 #ifdef __SWITCH__
  writers|=VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
 #endif
- auto&display=s.interlaced?s.scanlineHistory:s.output;
+ auto&display=s.output;
  if(!display.data){
   s.ensureStaging();s.barrier(writers,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_SHADER_WRITE_BIT|VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_TRANSFER_READ_BIT);
   VkBufferCopy copy{0,0,CanvasBytes};s.CmdCopyBuffer(s.command,display.buffer,s.staging.buffer,1,&copy);

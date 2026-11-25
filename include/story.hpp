@@ -22,6 +22,7 @@ struct StoryProfile {
  bool presentCommandParagraphs=false;
  std::string nameEntryScript{}, alternateHeader{}, endingMovieScript{};
  unsigned historyJumpLimit=0;
+ bool sceneSkip=false;
 };
 class Story {
  enum class After {None,Interlude,VisualWait};

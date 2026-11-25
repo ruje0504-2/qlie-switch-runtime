@@ -250,21 +250,22 @@ void SceneTransition::update(double ms){
  if(elapsed>=duration){reset();return;}
  if(mode==Mode::Animation)animation->update(increment*(animationLength>0?animationLength/duration:1));
 }
-void SceneTransition::blend(qlie::Bytes&out)const{if(!active||previous.pixels.empty())return;if(out.size()!=previous.pixels.size())throw std::runtime_error("Transition frame dimensions");
+bool SceneTransition::blend(qlie::Bytes&out)const{if(!active||previous.pixels.empty())return false;if(out.size()!=previous.pixels.size())throw std::runtime_error("Transition frame dimensions");
  double amount=duration>0?std::clamp(elapsed/duration,0.,1.):1;
  if(mode==Mode::Animation){
   if(needsTarget())out=previous.pixels;
-  else animation->draw(out);
-  return;
+  else return animation->draw(out);
+  return false;
  }
- if(mode==Mode::Mosaic){mosaic(out,previous.pixels,amount);return;}
- if(mode==Mode::Overlap){for(size_t i=0;i<out.size();i++)out[i]=uint8_t(previous.pixels[i]*(1-amount)+out[i]*amount);return;}
+ if(mode==Mode::Mosaic){mosaic(out,previous.pixels,amount);return false;}
+ if(mode==Mode::Overlap){for(size_t i=0;i<out.size();i++)out[i]=uint8_t(previous.pixels[i]*(1-amount)+out[i]*amount);return false;}
  auto opacity=uint8_t(255*(1-amount));
  for(unsigned y=0;y<Height;y++)for(unsigned x=0;x<Width;x++){
   size_t at=(size_t(y)*Width+x)*4;unsigned mx=unsigned(uint64_t(x)*rule->width/Width),my=unsigned(uint64_t(y)*rule->height/Height);
   auto alpha=gradientMaskAlpha(255,rule->pixels[(size_t(my)*rule->width+mx)*4],opacity,uint8_t(ruleMode));
   for(unsigned c=0;c<4;c++)out[at+c]=blendChannel(0,previous.pixels[at+c],out[at+c],alpha);
  }
+ return false;
 }
 void SceneTransition::blend(RenderTarget&target)const{
  if(!active||previous.pixels.empty())return;

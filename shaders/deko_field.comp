@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+#version 430
+layout(local_size_x=16,local_size_y=16) in;
+layout(binding=0,std430) readonly buffer Canvas { uint pixels[]; };
+layout(binding=1,std430) writeonly buffer FieldHistory { uint history[]; };
+void main(){
+ uvec2 q=gl_GlobalInvocationID.xy;
+ if(q.y>=360u)return;
+ // Both bindings start at the first row of the selected parity.
+ uint at=q.y*2u*1280u+q.x;
+ history[at]=pixels[at];
+}

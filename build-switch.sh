@@ -49,6 +49,7 @@ esac
 python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --output build-switch/deko_raster.inc
 python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --motion --output build-switch/deko_motion.inc
 python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --restore --output build-switch/deko_restore.inc
+python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --field --output build-switch/deko_field.inc
 python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --base --output build-switch/deko_base.inc
 python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --video --output build-switch/deko_video.inc
 $cxx -std=c++17 $flags -ffp-contract=off -Wno-misleading-indentation -c src/gpu_raster.cpp -o build-switch/gpu_raster.o

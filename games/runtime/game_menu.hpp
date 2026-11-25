@@ -27,7 +27,7 @@ class GameMenu {
  void render(qlie::Bytes*,RenderTarget*,const PanelContent&,const PanelContent&);
 public:
  enum Panel {None,Save,Load,History,Settings};
- enum Action {Nothing,Close,Slot,Quit,Title,Yes,No,SettingsChanged,ResetSettings,SceneReturn,ReplayVoice,TestVolume,DeleteSlot,PageChange,JumpHistory};
+ enum Action {Nothing,Close,Slot,Quit,Title,Yes,No,SettingsChanged,ResetSettings,SceneReturn,ReplayVoice,TestVolume,DeleteSlot,PageChange,JumpHistory,SectionSkip};
  Panel panel=None;int focus=0,page=0,requestedPage=0,historyOffset=0;bool asking=false;
  Action requested=Nothing;
  bool settingsDirty=false,allowSceneReturn=false;

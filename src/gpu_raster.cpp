@@ -366,11 +366,18 @@ bool GpuRaster::nativePresentation()const{
  return false;
 #endif
 }
-std::optional<uint64_t> GpuRaster::present(bool refreshUnchanged){return impl->presentNative(refreshUnchanged);}
+std::optional<uint64_t> GpuRaster::present(bool refreshUnchanged){
+ // The renderer consumes the flag on the next presented frame.
+ impl->setInterlaced(nextField||forcedField);
+ const auto stamp=impl->presentNative(refreshUnchanged);
+ nextField=fieldRequested;
+ return stamp;
+}
 std::optional<uint64_t> GpuRaster::presentPixels(const qlie::Bytes& pixels){begin(pixels);return present();}
-void GpuRaster::setInterlaced(bool enabled){impl->setInterlaced(enabled);}
+void GpuRaster::setInterlaced(bool enabled){forcedField=enabled;impl->setInterlaced(enabled||nextField);}
 void GpuRaster::begin(const qlie::Bytes& pixels){
  if(pixels.size()!=CanvasBytes)throw std::runtime_error("GPU input frame dimensions");
+ fieldRequested=false;
  impl->beginFrame(false,0);
  impl->waitForPrevious();
  impl->uploadCanvas(pixels);
@@ -379,7 +386,7 @@ void GpuRaster::end(qlie::Bytes& pixels){
  if(!impl->recording||pixels.size()!=CanvasBytes)throw std::runtime_error("GPU readback dimensions or state");
  impl->readCanvas(pixels);
 }
-void GpuRaster::begin(uint32_t color){impl->beginFrame(true,color);}
+void GpuRaster::begin(uint32_t color){fieldRequested=false;impl->beginFrame(true,color);}
 void Scene::appendVideo(uint32_t address,uint64_t identity){
  Push p;p.rect[2]=Width;p.rect[3]=Height;p.meta[2]=4u<<20;p.colors[2]=address;
  DrawSources source;source.primary=identity;
@@ -393,7 +400,7 @@ void GpuRaster::beginVideo(const Image&image){
  impl->appendVideo(address,identity);
 }
 bool GpuRaster::supportsVideoSurfaces()const{return impl->supportsVideoSurfaces();}
-bool GpuRaster::beginVideoSurface(const KVideoSurface&surface){return impl->beginVideoSurface(surface);}
+bool GpuRaster::beginVideoSurface(const KVideoSurface&surface){fieldRequested=false;return impl->beginVideoSurface(surface);}
 void GpuRaster::beginBatch(){++impl->batch;impl->inBatch=true;}
 void GpuRaster::endBatch(){impl->inBatch=false;}
 void GpuRaster::maskedImage(const Image&source,const Image&mask,const AnimationSample::Mask&settings,const Affine2D&m,float alpha,uint32_t add,uint32_t mul,unsigned blend,unsigned filter){

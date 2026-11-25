@@ -41,7 +41,7 @@ public:
  bool needsTarget()const;
  bool needsCanvas()const;
  void captureTarget(const qlie::Bytes&);
- void present();void update(double milliseconds);void blend(qlie::Bytes&)const;void reset();
+ void present();void update(double milliseconds);bool blend(qlie::Bytes&)const;void reset();
  void blend(class RenderTarget&)const;
  qlie::Bytes save()const;void restore(const qlie::Bytes&);
 };

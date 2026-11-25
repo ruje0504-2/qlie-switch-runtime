@@ -2006,8 +2006,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    if(gameMenu.requested==UI::SectionSkip)line("このシーンをスキップしますか？",475,317,24,0xffffff,&queue);
    return;
   }
-  if(gameMenu.panel==UI::Settings)line("等待语音",205*2/3,
-   (game_profile::settingsVoiceWaitY-15)*2/3,19,0xffffff,&queue);
+  if(gameMenu.panel==UI::Settings)line("等待语音",217,632,19,0xffffff,&queue);
   if(gameMenu.panel==UI::Load&&gameMenu.choiceBackupAvailable)
    line("上一个选项",37,679,20,gameMenu.focus==UI::ChoiceBackupFocus?0xffea99:0xffffff,&queue);
 #else

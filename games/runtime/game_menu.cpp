@@ -23,7 +23,7 @@ struct SettingToggle{const char*key;const char*yes;const char*no;float y;bool le
 constexpr SettingToggle toggles[]={
 #ifdef QLIE_PROFILE_WHJ6
  {"ClickVoiceStop","on","off",whj6::ui::to720(500),false},
- {"AutoPlayVoiceWait","on","off",whj6::ui::to720(whj6::profile::settingsVoiceWaitY),true},
+ {"AutoPlayVoiceWait","on","off",whj6::ui::to720(963),true},
  {"SkipMode","既読のみ","全て",whj6::ui::to720(700+whj6::profile::settingsTextShift),true}
 #else
  {"ClickVoiceStop","する","しない",353,!gameSettingsLayout.classic},

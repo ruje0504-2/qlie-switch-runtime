@@ -70,6 +70,9 @@ class DekoScene final : public Scene {
  unsigned sampleCopied=0,sampleVideoTextures=0;
  double sampleAcquireMs=0;
  size_t sampleTiles=0,sampleMotionTiles=0,sampleBaseTiles=0,sampleSnowTiles=0,sampleFogTiles=0,sampleHardLightTiles=0;
+#if defined(QLIE_PROFILE_WHJ6) && QLIE_DIAGNOSTICS
+ unsigned submittedFogTiles=0;
+#endif
  std::array<dk::Image,ImageCount> images;
  dk::UniqueSwapchain swapchain;
  std::array<SwapDamage::Mask,ImageCount> damage;
@@ -207,8 +210,15 @@ class DekoScene final : public Scene {
  void waitGpu() override {
   if(!inFlight)return;
   const auto start=qlie::diagnostics?Clock::now():Clock::time_point{};
-  auto result=done.wait(5'000'000'000LL);
-  if(result!=DkResult_Success||queue.isInErrorState())throw std::runtime_error("deko3d frame fence "+std::to_string(result));
+  const auto result=done.wait(5'000'000'000LL);
+  if(result!=DkResult_Success)throw std::runtime_error("deko3d frame fence "+std::to_string(result));
+  if(queue.isInErrorState()){
+#if defined(QLIE_PROFILE_WHJ6) && QLIE_DIAGNOSTICS
+   QLIE_LOGF("DEKO3D queue error frame=%llu fog_tiles=%u fence=%d\n",
+             (unsigned long long)frames,submittedFogTiles,int(result));
+#endif
+   throw std::runtime_error("deko3d GPU queue error");
+  }
   inFlight=false;
   if constexpr (qlie::diagnostics) priorWaitMs+=milliseconds(Clock::now()-start);
   if(qlie::diagnostics&&sampleFrame){
@@ -392,6 +402,9 @@ class DekoScene final : public Scene {
   grow(texels,sizeof(uint32_t));
   if(drawBytes)std::memcpy(drawBuffer.getCpuAddr(),current->commands.data(),drawBytes);
   batches.write(*this,static_cast<uint32_t*>(tileBuffer.getCpuAddr()));
+#if defined(QLIE_PROFILE_WHJ6) && QLIE_DIAGNOSTICS
+  submittedFogTiles=batches.count[DekoTileBatches::Fog];
+#endif
   Push parameters;
   parameters.meta[0]=Width;
   parameters.meta[1]=Height;
@@ -443,6 +456,9 @@ class DekoScene final : public Scene {
   if(qlie::diagnostics&&sampleFrame)timestamp(1,DkCounter_Timestamp);
  }
  void recordCanvas(int presentSlot,bool fieldOutput){
+#if defined(QLIE_PROFILE_WHJ6) && QLIE_DIAGNOSTICS
+  submittedFogTiles=0;
+#endif
   cmd.clear();
   cmd.addMemory(commandMemory,0,commandMemory.getSize());
   if(fieldOutput&&!historyValid&&canvasValid){

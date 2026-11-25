@@ -40,7 +40,7 @@ class DekoScene final : public Scene {
   Span span;
   uint64_t identity=0,lastUsed=0;
   unsigned height=0;
-  bool converted=false;
+  bool converted=false,sepia=false;
  };
  dk::UniqueDevice device;
  dk::UniqueQueue queue;
@@ -203,7 +203,7 @@ class DekoScene final : public Scene {
   for(auto& pending:damage)pending.set();
  }
  bool supportsVideoSurfaces()const override{return true;}
- std::optional<uint32_t> videoTexture(const KVideoSurface& s,uint64_t& identity) override {
+ std::optional<uint32_t> videoTexture(const KVideoSurface& s,uint64_t& identity,bool sepia) override {
   if(!kvideo_scene_surface_size(s.width,s.height)||s.pitch[0]<s.width||s.pitch[1]<s.width||
      s.pitch[1]%2||!s.frame||!s.frame->hw_frames_ctx||!s.storage||!s.storage_size||
      (reinterpret_cast<uintptr_t>(s.storage)|s.storage_size)%DK_MEMBLOCK_ALIGNMENT||
@@ -248,6 +248,7 @@ class DekoScene final : public Scene {
   if(!texture.frame)throw std::runtime_error("deko3d video frame reference");
   texture.mapping=&found->second;
   texture.height=s.height;
+  texture.sepia=sepia;
   texture.span=allocateSpan(size_t(s.width)*s.height*sizeof(uint32_t));
   texture.identity=identity=nextUploadId++;
   texture.lastUsed=frames+1;
@@ -258,7 +259,7 @@ class DekoScene final : public Scene {
  bool beginVideoSurface(const KVideoSurface& s) override {
   if(s.width!=Width||s.height!=Height)return false;
   uint64_t identity=0;
-  auto address=videoTexture(s,identity);
+  auto address=videoTexture(s,identity,false);
   if(!address)return false;
   beginFrame(true,0);
   appendVideo(*address,identity);
@@ -286,8 +287,8 @@ class DekoScene final : public Scene {
    if(texture.converted)continue;
    const size_t descriptors=slot*planeBytes,parameters=slot*DK_UNIFORM_BUF_ALIGNMENT;
    std::memcpy(static_cast<uint8_t*>(videoDescriptors.getCpuAddr())+descriptors,texture.mapping->planes.data(),planeBytes);
-   const uint32_t firstWord=uint32_t(texture.span.offset/sizeof(uint32_t));
-   std::memcpy(static_cast<uint8_t*>(videoUniforms.getCpuAddr())+parameters,&firstWord,sizeof(firstWord));
+   const std::array<uint32_t,2> target{{uint32_t(texture.span.offset/sizeof(uint32_t)),uint32_t(texture.sepia)}};
+   std::memcpy(static_cast<uint8_t*>(videoUniforms.getCpuAddr())+parameters,target.data(),sizeof(target));
    cmd.bindUniformBuffer(DkStage_Compute,0,videoUniforms.getGpuAddr()+parameters,DK_UNIFORM_BUF_ALIGNMENT);
    cmd.bindImageDescriptorSet(videoDescriptors.getGpuAddr()+descriptors,2);
    const std::array<DkResHandle,2> handles{{dkMakeImageHandle(0),dkMakeImageHandle(1)}};

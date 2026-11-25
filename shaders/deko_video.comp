@@ -3,12 +3,17 @@
 layout(local_size_x=16,local_size_y=8) in;
 layout(r8ui,binding=0) uniform readonly uimage2D lumaPlane;
 layout(rg8ui,binding=1) uniform readonly uimage2D chromaPlane;
-layout(std140,binding=0) uniform Target { uint firstWord; };
+layout(std140,binding=0) uniform Target { uint firstWord; uint sepia; };
 layout(std430,binding=0) writeonly buffer Texels { uint texels[]; };
 
 void convert(ivec2 q,ivec3 chromaBias){
  int y=(int(imageLoad(lumaPlane,q).r)-16)*298;
  ivec3 rgb=clamp((ivec3(y)+chromaBias)>>8,0,255);
+ if(sepia!=0u){
+  int gray=(rgb.r+rgb.g+rgb.b)*85>>8;
+  const ivec3 tone=ivec3(68,34,17);
+  rgb=gray+tone-gray*tone/255;
+ }
  texels[firstWord+uint(q.y)*1280u+uint(q.x)]=0xff000000u|uint(rgb.r)<<16|uint(rgb.g)<<8|uint(rgb.b);
 }
 

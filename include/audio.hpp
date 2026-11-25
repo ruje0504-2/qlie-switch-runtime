@@ -15,6 +15,7 @@ private:
  friend struct PreparedAudioRestore;
  struct Channel {DecodedPcm pcm;std::string path;unsigned category=2;size_t pos=0;bool loop=false,stop=false;float gain=0,target=0,step=0;uint64_t fade=0,delay=0;};
  struct Pending {Channel channel;std::string key;std::optional<uint64_t> seek;unsigned crossfade=0;bool music=false,explicitFade=false;};
+ std::array<float,ChannelCount> channelUserGains;
  std::array<float,6> userGains{{1,1,1,1,1,1}};
  SDL_AudioDeviceID device=0;std::array<Channel,ChannelCount>channels;std::atomic<uint64_t>frames{0},nonzero{0};
  AssetReadAhead*readAhead=nullptr;
@@ -54,6 +55,7 @@ public:
  void play(unsigned,qlie::Bytes,bool,float,unsigned fadeMs=0,const std::string&path="",unsigned category=6);
  void volume(unsigned,float,unsigned fadeMs=0,bool stopAfter=false);
  void setMusicModeGain(float);
+ void setChannelUserGain(unsigned,float);
  void setUserGains(const std::array<float,5>&);
  qlie::Bytes save();void restore(const qlie::Bytes&,qlie::Assets&);
  static WarmAsset prepareRestore(const qlie::Bytes&,qlie::Assets&);

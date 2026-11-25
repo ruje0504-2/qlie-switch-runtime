@@ -12,6 +12,12 @@ const SettingSlider sliders[]={
  {"SEVolume",664,340,461},{"SysSEVolume",664,399,461},{"MovieVolume",664,458,461},{"AutoTextWait",357,373,241}};
 const float testButtonY[]={202,260,321,381,440};
 constexpr int SettingsFocusCount=22;
+struct CharacterVoiceButton{float x,y;const char* label;};
+constexpr CharacterVoiceButton voiceButtons[]={
+ {790,540,"Voice_蓮華.png"},{930,540,"Voice_香恋.png"},{1080,540,"Voice_もよか.png"},
+ {790,570,"Voice_はる.png"},{930,570,"Voice_公暁.png"},{1080,570,"Voice_舞斗.png"},
+ {790,600,nullptr}
+};
 constexpr int HistoryVisibleRows=4, HistoryBrowserLimit=100;
 constexpr int HistoryBarX=1200,HistoryBarY=95;
 constexpr int HistoryTrackWidth=34,HistoryTrackHeight=528;
@@ -140,7 +146,7 @@ void GameMenu::move(int dx,int dy){if(panelClosing||panelTransitioning())return;
   if(dy>0){if(focus>0)--focus;else historyOffset=std::max(0,historyOffset-1);}
   historyVoiceRow=focus;
  }
- else if(panel==Settings){constexpr int count=SettingsFocusCount;if(dy){focus=(focus+dy+count)%count;if(focus==16&&!allowSceneReturn)focus=(focus+dy+count)%count;}else if(dx&&focus>=3&&focus<=11){int index=focus-3;setPosition(settings,index,sliderPosition(settings,index)+dx);settingsDirty=true;}else if(dx&&(focus>=13&&focus<=15)){const char*key=focus==13?"ClickVoiceStop":focus==14?"AutoPlayVoiceWait":"SkipMode";settings.set(key,1-settings.get(key));settingsDirty=true;}else if(dx){focus=(focus+dx+count)%count;if(focus==16&&!allowSceneReturn)focus=(focus+dx+count)%count;}}
+ else if(panel==Settings){const int count=SettingsFocusCount+int(settings.voiceActorCount());if(dy){focus=(focus+dy+count)%count;if(focus==16&&!allowSceneReturn)focus=(focus+dy+count)%count;}else if(dx&&focus>=3&&focus<=11){int index=focus-3;setPosition(settings,index,sliderPosition(settings,index)+dx);settingsDirty=true;}else if(dx&&(focus>=13&&focus<=15)){const char*key=focus==13?"ClickVoiceStop":focus==14?"AutoPlayVoiceWait":"SkipMode";settings.set(key,1-settings.get(key));settingsDirty=true;}else if(dx){focus=(focus+dx+count)%count;if(focus==16&&!allowSceneReturn)focus=(focus+dx+count)%count;}}
 }
 GameMenu::Action GameMenu::confirm(){
  if(panelClosing||panelTransitioning())return Nothing;
@@ -158,6 +164,9 @@ GameMenu::Action GameMenu::confirm(){
  if(focus==12)return ResetSettings;
  if(focus==16&&allowSceneReturn)return SceneReturn;
  if(focus>=17&&focus<SettingsFocusCount){testVolumeCategory=unsigned(focus-17);return TestVolume;}
+ if(focus>=SettingsFocusCount&&unsigned(focus-SettingsFocusCount)<settings.voiceActorCount()){
+  settings.toggleCharacterVoice(unsigned(focus-SettingsFocusCount));settingsDirty=true;return SettingsChanged;
+ }
  if(focus>=13&&focus<=15){const char*key=focus==13?"ClickVoiceStop":focus==14?"AutoPlayVoiceWait":"SkipMode";settings.set(key,1-settings.get(key));settingsDirty=true;return SettingsChanged;}
  return Nothing;
 }
@@ -186,7 +195,15 @@ GameMenu::Action GameMenu::tap(float x,float y){
  if(panelClosing||panelTransitioning())return Nothing;
  panelPoint(x,y);
  if(asking){if(std::abs(y-325)<=20){if(std::abs(x-550)<=60){focus=0;return Yes;}if(std::abs(x-730)<=60){focus=1;return No;}}return Nothing;}
- if(panel==Settings){int test=volumeTestAt(x,y);if(test>=0){focus=17+test;return confirm();}}
+ if(panel==Settings){
+  int test=volumeTestAt(x,y);if(test>=0){focus=17+test;return confirm();}
+  for(unsigned i=0;i<settings.voiceActorCount();++i){
+   const auto& button=voiceButtons[i];
+   if(x>=button.x-16&&x<=button.x+111&&std::abs(y-button.y)<=13){
+    focus=SettingsFocusCount+int(i);return confirm();
+   }
+  }
+ }
  if(panel==Save||panel==Load){for(int i=0;i<8;i++)if(populatedSlots[i]&&std::abs(x-deleteButtonX[i])<=15&&std::abs(y-(148+(i%4)*135))<=15){focus=8+i;return DeleteSlot;}if(y>=72&&y<=108&&x>=674){requestedPage=std::clamp(int((x-674)/40),0,14);return PageChange;}if(y>=128&&y<=651){int col=x>=645?1:0;int row=int((y-128)/135);if(row<4){focus=col*4+row;return Slot;}}}
  if(panel==History){
   if(inHistoryScrollbar(x,y)){if(historyMaxOffset>0)historyOffset=historyOffsetAt(y,historyMaxOffset);return Nothing;}
@@ -244,6 +261,13 @@ void GameMenu::render(qlie::Bytes*pixels,RenderTarget*target,const PanelContent&
  if(!windowPreview.pixels.empty())q.image(windowPreview,imagePlacement(363,230,1,1,0,0,0,windowPreview.width,windowPreview.height),0,255,0,0xffffff);
  for(int i=0;i<5;i++)put(q,std::string("script/config/音量テスト")+(focus==17+i?"_on.png":"_off.png"),1070,testButtonY[i],true);
  for(int i=0;i<9;i++){const auto&slider=sliders[i];bool active=focus==i+3;auto part=std::to_string(active?1:0);put(q,std::string("script/config/")+((i<2||i==8)?"scroll_bar_s.b#":"scroll_bar.b#")+part,slider.x-((i<2||i==8)?8:10),slider.y-((i<2||i==8)?10:11));put(q,"script/config/scroll_button.b#"+part,slider.x+sliderPosition(settings,i)*slider.width/20,slider.y,true);}
+ for(unsigned i=0;i<settings.voiceActorCount();++i){
+  const auto& button=voiceButtons[i];
+  const unsigned part=(settings.characterVoiceMuted(i)?0:2)+(focus==SettingsFocusCount+int(i));
+  put(q,"script/config/button_check.b#"+std::to_string(part),button.x,button.y,true);
+  const std::string label=button.label?std::string("script/config/")+button.label:"script/config/button_check.b#4";
+  put(q,label,button.x+49,button.y,true);
+ }
  put(q,std::string("script/config/確認_設定初期化")+(focus==12?"_on.png":"_off.png"),1079,694,true);
  for(int i=0;i<3;i++){const char*yes=i==0?"する":i==1?"待つ":"既読";const char*no=i==0?"しない":i==1?"待たない":"未読";bool value=settings.get(i==0?"ClickVoiceStop":i==1?"AutoPlayVoiceWait":"SkipMode");put(q,std::string("script/config/")+yes+(value?"_on.png":"_off.png"),410,i==0?353:i==1?412:442,true);put(q,std::string("script/config/")+no+(!value?"_on.png":"_off.png"),534,i==0?353:i==1?412:442,true);}
  const char*names[]={"戻る","タイトルへ戻る","ゲームの終了"};const int xs[]={1210,950,820};for(int i=0;i<3;i++)put(q,std::string("script/config/")+names[i]+(focus==i?"_on.png":"_off.png"),xs[i],695,true);

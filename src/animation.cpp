@@ -191,11 +191,13 @@ float sampleValue(float a,float b,unsigned mode,float power,double t,std::vector
   q=t<.5?.5*std::pow(t*2,exponent):1-.5*std::pow((1-t)*2,exponent);
   break;
  }
- case 17:{
-  // WHJ5 0x4fd4c8 damps a table-quantized cosine by the remaining time.
-  const float angle=float(3.14159265L*float(t));
+ case 17:case 18:{
+  // WHJ5 0x4fd538 reverses the damped cosine used by 0x4fd4c8.
+  const double progress=mode==18?float(1.f-float(t)):t;
+  const float angle=float(3.14159265L*float(progress));
   const int phase=int(static_cast<long double>(angle)*512*0.3183098865475128L);
-  q=1-(1-t)*animationSine(phase+256);
+  const double cosinePart=(1-progress)*animationSine(phase+256);
+  q=mode==18?cosinePart:1-cosinePart;
   break;
  }
  default:warnings.push_back("easing="+std::to_string(mode));

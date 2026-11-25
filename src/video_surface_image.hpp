@@ -13,6 +13,7 @@ struct VideoSurfaceImage {
  using Reader = int (*)(const AVFrame*,KImage*,char*,size_t);
  Reader readFrame=nullptr;
  std::string source;
+ bool sepia=false;
  mutable qlie::Bytes bgra;
 
  const qlie::Bytes& pixels()const{
@@ -22,6 +23,7 @@ struct VideoSurfaceImage {
   char error[160]{};
   if(readFrame(frame.get(),&target,error,sizeof(error))<0)
    throw std::runtime_error("Embedded video "+source+": "+error);
+  if(sepia)applySepia(output);
   bgra=std::move(output);
   return bgra;
  }

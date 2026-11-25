@@ -83,7 +83,7 @@ WarmAsset preparePcm(const qlie::Bytes&bytes){
  return ready;
 }
 }
-Audio::Audio(){SDL_AudioSpec wanted{},got{};
+Audio::Audio(){channelUserGains.fill(1);SDL_AudioSpec wanted{},got{};
  wanted.freq=44100;
  wanted.format=AUDIO_S16SYS;
  wanted.channels=2;
@@ -117,22 +117,25 @@ void Audio::callback(void*context,Uint8*stream,int bytes){auto&a=*static_cast<Au
 #endif
  auto*out=reinterpret_cast<int16_t*>(stream);
  unsigned count=unsigned(bytes)/4;
- std::array<Channel*,ChannelCount> active;
+ struct ActiveChannel {Channel* channel;float userGain;};
+ std::array<ActiveChannel,ChannelCount> active;
  unsigned activeCount=0;
- for(auto&channel:a.channels){
-  if(!channel.pcm.empty())active[activeCount++]=&channel;
+ for(unsigned i=0;i<ChannelCount;++i){
+  auto&channel=a.channels[i];
+  if(!channel.pcm.empty())
+   active[activeCount++]={&channel,a.userGains[channel.category]*a.channelUserGains[i]};
  }
  unsigned audibleFrames=0;
  for(unsigned i=0;i<count;i++){float left=0,right=0;
- for(unsigned channel=0;channel<activeCount;++channel){auto&c=*active[channel];
+ for(unsigned channel=0;channel<activeCount;++channel){auto& mix=active[channel];auto&c=*mix.channel;
  if(c.delay){--c.delay;continue;}
  if(c.pos+1>=c.pcm.size()){if(c.loop)c.pos=0;
  else continue;
  }if(c.fade){c.gain+=c.step;
  if(!--c.fade)c.gain=c.target;
  }if(c.stop&&!c.fade&&c.gain==0)continue;
- left+=c.pcm[c.pos++]*c.gain*a.userGains[c.category];
- right+=c.pcm[c.pos++]*c.gain*a.userGains[c.category];
+ left+=c.pcm[c.pos++]*c.gain*mix.userGain;
+ right+=c.pcm[c.pos++]*c.gain*mix.userGain;
  }int l=std::clamp(int(left),-32768,32767),r=std::clamp(int(right),-32768,32767);
  out[2*i]=int16_t(l);
  out[2*i+1]=int16_t(r);
@@ -298,6 +301,12 @@ void Audio::volume(unsigned ch,float gain,unsigned ms,bool stopAfter){if(ch>=cha
  changeVolume(channels[ch],gain,ms,stopAfter);
  SDL_UnlockAudioDevice(device);
  }
+void Audio::setChannelUserGain(unsigned ch,float gain){
+ if(ch>=ChannelCount||!std::isfinite(gain)||gain<0||gain>1)throw std::runtime_error("Invalid channel user gain");
+ SDL_LockAudioDevice(device);
+ channelUserGains[ch]=gain;
+ SDL_UnlockAudioDevice(device);
+}
 void Audio::setMusicModeGain(float gain){if(!std::isfinite(gain)||gain<0||gain>1)throw std::runtime_error("Music mode gain");SDL_LockAudioDevice(device);userGains[5]=gain;SDL_UnlockAudioDevice(device);}
 void Audio::setUserGains(const std::array<float,5>&gains){for(float gain:gains)if(!std::isfinite(gain)||gain<0||gain>1)throw std::runtime_error("Invalid category gain");SDL_LockAudioDevice(device);std::copy(gains.begin(),gains.end(),userGains.begin());SDL_UnlockAudioDevice(device);}
 void Audio::stopAll(){

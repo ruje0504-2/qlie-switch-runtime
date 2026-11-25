@@ -88,6 +88,13 @@ static Image gradientOverlay(const Image&source,const std::string&name){
  }
  return out;
 }
+void applySepia(qlie::Bytes& pixels){
+ constexpr unsigned color[3]={17,34,68};
+ for(size_t i=0;i<pixels.size();i+=4){
+  const unsigned gray=(unsigned(pixels[i])+pixels[i+1]+pixels[i+2])*85>>8;
+  for(unsigned c=0;c<3;c++)pixels[i+c]=uint8_t(gray+color[c]-gray*color[c]/255);
+ }
+}
 Image filterImage(const Image&source,const std::string&name){
  if(!source.width||!source.height||source.pixels.size()!=size_t(source.width)*source.height*4)throw std::runtime_error("Filter source dimensions");
  if(const auto separator=name.find('\\');separator!=name.npos)
@@ -100,10 +107,11 @@ Image filterImage(const Image&source,const std::string&name){
  if(name=="blur20")return boxBlur<10>(source);
  Image out{source.width,source.height,source.pixels};
  if(name=="none"||name.empty())return out;
- if(name=="mono"||name=="sepia"){
-  constexpr unsigned color[3]={17,34,68};
-  for(size_t i=0;i<out.pixels.size();i+=4){unsigned gray=(unsigned(source.pixels[i])+source.pixels[i+1]+source.pixels[i+2])*85>>8;
-   for(unsigned c=0;c<3;c++)out.pixels[i+c]=uint8_t(name=="mono"?gray:gray+color[c]-gray*color[c]/255);
+ if(name=="sepia"){applySepia(out.pixels);return out;}
+ if(name=="mono"){
+  for(size_t i=0;i<out.pixels.size();i+=4){
+   const auto gray=uint8_t((unsigned(source.pixels[i])+source.pixels[i+1]+source.pixels[i+2])*85>>8);
+   std::fill_n(out.pixels.begin()+i,3,gray);
   }
   return out;
  }

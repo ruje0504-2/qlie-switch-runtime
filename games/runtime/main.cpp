@@ -204,7 +204,11 @@ struct Frontend {
  struct ExtrasExit {ExtrasDestination destination;unsigned entry;bool alternateBackdrop=false;};
  std::optional<ExtrasExit> extrasExit;
  double extrasElapsed=PanelZoomMs;
+#ifdef QLIE_PROFILE_WHJ5
+ whj2::Settings settings{assets,true};
+#else
  whj2::Settings settings{assets};
+#endif
  whj2::GameMenu gameMenu{assets,settings};
  enum class MenuFadeKind {Page,Load,Title,Quit};
  struct MenuFade {
@@ -250,6 +254,26 @@ struct Frontend {
  std::array<unsigned,5>audioTimes{{defaultMusicFadeMs,0,0,0,0}};
  std::array<unsigned,5>audioTypes{{0,2,2,2,1}};
  bool bgvMode=false,bgvDucked=false;
+ std::string voiceActor;
+ float bgvUserGain=1,voiceUserGain=1;
+ void updateVoiceGains(){
+  if(!settings.voiceActorCount())return;
+  const auto found=story.state.vars.find("__bgv_actor");
+  const float bgvGain=bgvMode&&found!=story.state.vars.end()?settings.characterVoiceGain(found->second):1;
+  const float speechGain=settings.characterVoiceGain(voiceActor);
+  if(bgvGain!=bgvUserGain){audio->setChannelUserGain(whj2::Audio::StoryBgvChannel,bgvGain);bgvUserGain=bgvGain;}
+  if(speechGain!=voiceUserGain){audio->setChannelUserGain(3,speechGain);voiceUserGain=speechGain;}
+ }
+ void clearBackgroundVoice(){
+  bgvMode=bgvDucked=false;
+  story.state.vars.erase("__bgv_actor");
+  updateVoiceGains();
+ }
+ static std::string dialogueVoiceActor(const std::string&speaker){
+  std::string_view name=speaker;
+  if(name.rfind("【",0)==0){name.remove_prefix(3);name=name.substr(0,name.find("】"));}
+  return std::string(name.substr(0,name.find("＠")));
+ }
  static int audioTrack(const std::string&command){
   constexpr const char* names[]={"music01","se01","se02","se03","sebgv"};
   for(unsigned i=0;i<game_profile::storyAudioTracks;++i)if(command==names[i])return int(i);
@@ -563,7 +587,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  void showTitle(){cancelPendingScene();story.state.vars.erase("__scene_skip_active");sceneSkipOverlay.reset();historyCheckpoints.clear();menuFade.reset();titleStarting=false;titleStartElapsed=0;transition->reset();normalSkip=false;currentPageKey.clear();extrasExit.reset();cgScreen->close();replayActive=false;replayScreen->close();if(musicScreen->visible())musicScreen->close();opening=0;images->clear();syncProgress();prepareExtras();menu=true;hidden=false;focus=0;upperMenu->close();gameMenu.close();
   const bool alternate=preparedTitleAlternate?*preparedTitleAlternate:title->rollAlternate();
   preparedTitleAlternate.reset();
-  title->reset(alternate,progress.extras());audio->stopAll();bgvMode=bgvDucked=false;audio->playFile(assets,0,game_profile::titleMusic,true,255.f/256,0,0);warmNextScene(true);
+  title->reset(alternate,progress.extras());audio->stopAll();clearBackgroundVoice();audio->playFile(assets,0,game_profile::titleMusic,true,255.f/256,0,0);warmNextScene(true);
  }
  void invalidateHistoryRows(){historyRows={};historyViewOffset=-1;}
  void replaceHistory(std::vector<whj2::HistoryEntry> entries={}){
@@ -622,7 +646,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   return std::move(writer.bytes);
  }
  void applySettings(bool persist=true){
- audio->setUserGains(settings.gains());images->setWindowAlpha(unsigned(settings.get("WindowAlpha")));messageText->setSpeed(settings.get("TextSpeed"));if(!text.empty())refreshMessage();if(persist)qlie::write_file(saveDir+"/settings.cfg",settings.save());gameMenu.settingsDirty=false;}
+ audio->setUserGains(settings.gains());updateVoiceGains();images->setWindowAlpha(unsigned(settings.get("WindowAlpha")));messageText->setSpeed(settings.get("TextSpeed"));if(!text.empty())refreshMessage();if(persist)qlie::write_file(saveDir+"/settings.cfg",settings.save());gameMenu.settingsDirty=false;}
  void drawDialogueSpeaker(){
   if(images->messageVisible()){
    const auto style=images->speakerStyle();
@@ -713,13 +737,18 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   if(attrs.count("clear"))audioTypes[ch]=cmd=="sebgv"?1:2;
  }
  if(attrs.count("clear")){audio->volume(output,0,0,true);if(ch==0)audio->volume(whj2::Audio::MusicPreviousChannel,0,0,true);
- if(ch==4){bgvMode=false;bgvDucked=false;}
+ if(ch==4)clearBackgroundVoice();
  return true;
  }if(attrs.count("loop"))loops[ch]=attrs["loop"]=="true"||attrs["loop"]=="infinity";
  if(attrs.count("vol"))volumes[ch]=std::stof(attrs["vol"])/100.f*(ch==0?game_profile::storyMusicGain:1.f);
  if(attrs.count("time"))audioTimes[ch]=unsigned(std::stoul(attrs["time"]));
  if(attrs.count("voltype")){auto type=attrs["voltype"];if(type=="bgm")audioTypes[ch]=0;else if(type=="voice")audioTypes[ch]=1;else if(type=="se")audioTypes[ch]=2;else QLIE_LOG_LINE(<<"PENDING audio volume type "<<type<<"\n");}
- if(ch==4&&attrs.count("mode"))bgvMode=attrs["mode"]=="bgv";
+ if(ch==4){
+  if(attrs.count("mode"))bgvMode=attrs["mode"]=="bgv";
+  if(settings.voiceActorCount()&&attrs.count("id"))
+   story.state.vars["__bgv_actor"]=attrs["id"];
+  updateVoiceGains();
+ }
  const unsigned ms=attrs.count("oncetime")?unsigned(std::stoul(attrs["oncetime"])):audioTimes[ch];
  const float gain=ch==4&&bgvMode&&audio->playing(3)?0:volumes[ch];
  if(attrs.count("file")){auto f=attrs["file"];
@@ -743,11 +772,15 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   else audio->play(event.channel,std::move(event.bytes),event.loop,event.gain,0,event.source,event.category);
  }
  }
- void playVoice(const std::string&id,bool historyReplay=false){
+ void playVoice(const std::string&id,const std::string&speaker,bool historyReplay=false){
  if(!historyReplay&&!voices->forcePlay&&normalSkip){audio->stop(3);return;}
  if(id.empty())return;
  auto match=voices->resolve(id);
  if(!match){if constexpr (qlie::diagnostics){QLIE_LOG_LINE(<<"VOICE unresolved id="<<id);for(auto&candidate:voices->candidates(id))QLIE_LOG_LINE(<<" candidate="<<candidate);QLIE_LOG_LINE(<<"\n");}if(voices->fileErrors)throw std::runtime_error("Voice file not found: "+id);return;}
+ if(settings.voiceActorCount()){
+  voiceActor=dialogueVoiceActor(speaker);
+  updateVoiceGains();
+ }
  audio->playFile(assets,3,match->request,false,voices->gain,0,1);
  QLIE_LOGF("VOICE requested id=%s path=%s source=%s offset=%llu stored_bytes=%llu loose=%d\n",
               id.c_str(),match->request.c_str(),match->source.path.c_str(),
@@ -876,7 +909,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   sceneSkipSteps=0;sceneSkipFirstFrame=true;
   normalSkip=false;autoPlay.enabled=false;hidden=false;
   upperMenu->close();transition->reset();sentenceWait.cancel();
-  audio->stopAll();bgvMode=bgvDucked=false;
+  audio->stopAll();clearBackgroundVoice();
   readAhead->retain({});
   currentPageKey.clear();
   text.clear();name.clear();messageText->start("");
@@ -988,7 +1021,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  name=speaker;
  story.state.vars.erase("__history_continue");
  if(continuesHistory){history.back().text+=text;invalidateHistoryRows();}
- else {history.push_back({name,text,voiceId});playVoice(voiceId);}
+ else {history.push_back({name,text,voiceId});playVoice(voiceId,name);}
  sentenceWait.page(true,audio->playing(3));
  recordHistoryCheckpoint();
  advances++;warmNextScene();
@@ -1080,7 +1113,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   if(!section.empty()&&progress.markSceneComplete(section))persistProgress();
   section=std::move(key);
  }
- story.state.vars.erase("__history_continue");audio->stopAll();bgvMode=bgvDucked=false;
+ story.state.vars.erase("__history_continue");audio->stopAll();clearBackgroundVoice();
  images->setAlternateMessageWindow(story.state.vars.count("__avg2_active")!=0);
  images->clear();
  syncScenePan();
@@ -1369,8 +1402,10 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   transition=std::move(preparedScene->transition);
   images->setReadAhead(readAhead.get());
   transition->setReadAhead(readAhead.get());
-  audio->applyRestore(std::move(preparedAudio),assets);
   bgvMode=saved.bgvMode;
+  if(settings.voiceActorCount())voiceActor=dialogueVoiceActor(name);
+  updateVoiceGains();
+  audio->applyRestore(std::move(preparedAudio),assets);
   bgvDucked=bgvMode&&audio->playing(3);
   volumes=saved.volumes;
   loops=saved.loops;
@@ -1452,7 +1487,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    if(offset+size_t(row)>=history.size())continue;
    auto&entry=history[history.size()-1-offset-size_t(row)];
    if(entry.voice.empty()||!voices->resolve(entry.voice))continue;
-   playVoice(entry.voice,true);historyVoicePlayed=true;return;
+   playVoice(entry.voice,entry.speaker,true);historyVoicePlayed=true;return;
   }
   return;
  }
@@ -1594,7 +1629,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   case ExtrasDestination::Replay:openReplay();break;
   case ExtrasDestination::Playback:
    transition->reset();replayPage=replayScreen->pageIndex();
-   audio->stopAll();story.startReplay(replayScreen->entry(exit.entry).script);
+   audio->stopAll();story.startReplay(replayScreen->entry(exit.entry).script);clearBackgroundVoice();
    progress.apply(story);replayActive=true;menu=false;hidden=false;autoPlay.enabled=false;focus=0;warmNextScene();next();
    break;
   }
@@ -2231,7 +2266,7 @@ controllerKey(e.cbutton.button);
  if(frames==27){SDL_Event ev{};ev.type=SDL_FINGERMOTION;ev.tfinger.x=1125.f/1280;ev.tfinger.y=222.f/720;SDL_PushEvent(&ev);}
  if(frames==28){if(settings.get("BGMVolume")!=100||!fingerUiDrag)throw std::runtime_error("Continuous slider drag");SDL_Event ev{};ev.type=SDL_FINGERMOTION;ev.tfinger.x=0;ev.tfinger.y=.8f;SDL_PushEvent(&ev);}
  if(frames==29){if(settings.get("BGMVolume")!=0)throw std::runtime_error("Slider clamp outside track");SDL_Event ev{};ev.type=SDL_FINGERUP;ev.tfinger.x=0;ev.tfinger.y=.8f;SDL_PushEvent(&ev);}
- if(frames==30){if(fingerUiDrag||!gameMenu.visible())throw std::runtime_error("Drag release activated another action");whj2::Settings saved(assets);saved.restore(qlie::file(saveDir+"/settings.cfg"));if(saved.get("BGMVolume")!=0)throw std::runtime_error("Drag release not saved");settings.reset();applySettings();}
+ if(frames==30){if(fingerUiDrag||!gameMenu.visible())throw std::runtime_error("Drag release activated another action");whj2::Settings saved(assets,settings.voiceActorCount()!=0);saved.restore(qlie::file(saveDir+"/settings.cfg"));if(saved.get("BGMVolume")!=0)throw std::runtime_error("Drag release not saved");settings.reset();applySettings();}
  if(frames==31)openPanel(whj2::GameMenu::History);
  if(frames==32){if(panelDraws!=1)throw std::runtime_error("History rendered twice");snapshot("history-once.bmp");}
  if(frames==33)controllerKey(SDL_CONTROLLER_BUTTON_B);

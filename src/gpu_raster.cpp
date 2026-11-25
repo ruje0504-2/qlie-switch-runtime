@@ -105,7 +105,7 @@ Scene::Span Scene::allocateSpan(size_t size){
  }
 uint32_t Scene::texture(const Image&i,uint64_t&uploadId,bool*opaque){
   if(i.videoSurface){
-   if(auto address=videoTexture(i.videoSurface->surface,uploadId)){
+   if(auto address=videoTexture(i.videoSurface->surface,uploadId,i.videoSurface->sepia)){
     if(opaque)*opaque=true;
     return *address;
    }

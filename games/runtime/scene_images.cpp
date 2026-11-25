@@ -509,10 +509,15 @@ struct Composite {
   if(!clip)clip=std::make_unique<EmbeddedVideo>(element.video,standaloneVideo?path:path+"#"+element.name);
   return *clip;
  }
+ std::shared_ptr<const Image> standaloneFrame(double ms,bool live,bool nativeVideo,AssetReadAhead*worker,bool async)const{
+  auto&clip=videoClip(0,members.front(),worker);
+  auto frame=clip.at(ms,live,nativeVideo,true,worker,async);
+  if(frame&&clip.audible)warn("video nonzero audio requires mixer binding");
+  return frame;
+ }
  std::pair<unsigned,unsigned> dimensions(AssetReadAhead*worker=nullptr,double ms=0,bool live=false,bool nativeVideo=false,bool async=true)const{
   if(standaloneVideo){
-   auto&clip=videoClip(0,members.front(),worker);
-   const auto frame=clip.at(ms,live,nativeVideo,true,worker,async);
+   const auto frame=standaloneFrame(ms,live,nativeVideo,worker,async);
    return frame?std::make_pair(frame->width,frame->height):std::make_pair(0u,0u);
   }
   return {unsigned(definition.bounds[0]),unsigned(definition.bounds[1])};
@@ -520,11 +525,9 @@ struct Composite {
  void enqueue(RenderQueue&queue,double ms,const std::string&motionName,const Affine2D&parent,float depth,float opacity,uint32_t parentAdd,uint32_t parentMul,unsigned parentBlend=0,const Image*replacement=nullptr,std::optional<const Image*>messageSurface=std::nullopt,unsigned windowAlpha=255,const std::map<unsigned,const Image*>*uiSlots=nullptr,const AnimationContext*external=nullptr,const Matrix3D*parent3D=nullptr,unsigned filterOverride=0,bool liveVideo=false,AssetReadAhead*worker=nullptr,bool asyncVideo=true,const Composite*replacementMedia=nullptr)const{
   if(standaloneVideo){
    if(opacity<=0)return;
-   auto&clip=videoClip(0,members.front(),worker);
-   auto image=clip.at(ms,liveVideo,queue.supportsVideoSurfaces(),true,worker,asyncVideo);
+   auto image=standaloneFrame(ms,liveVideo,queue.supportsVideoSurfaces(),worker,asyncVideo);
    if(!image)return;
    const auto&frame=queue.retainImage(std::move(image));
-   if(clip.audible)warn("video nonzero audio requires mixer binding");
    if(parent3D){
     AnimationSample sample;sample.alpha=opacity;sample.addColor=parentAdd;sample.mulColor=parentMul;sample.flags=parentBlend;sample.textureFilter=filterOverride;
     quad(queue,frame,*parent3D,sample,depth);
@@ -1284,7 +1287,7 @@ bool SceneImages::cameraCommand(const std::string&arguments){
  const auto resetCamera=[](Layer&layer){
   layer=Layer{};
   layer.params={{"show","false"},{"x","0"},{"y","0"},{"z","0"},{"scalex","100"},{"scaley","100"},
-   {"rotz","0"},{"pri1","-100"},{"pri2","999"},{"move","linear"},{"time","0"}};
+   {"rotz","0"},{"pri1","-100"},{"pri2","999"},{"move","linear"},{"time","0"},{"texfilter","pass"}};
  };
  auto&camera=layers["camera"];
  if(camera.params.empty())resetCamera(camera);
@@ -1307,7 +1310,7 @@ bool SceneImages::cameraCommand(const std::string&arguments){
   if(key=="genfilter"){setWave(camera,value);continue;}
   if(key=="time")camera.params[key]=duration=value;
   if(key=="movetime")duration=value;
-  if(key=="pri1"||key=="pri2"||key=="move"||key=="movepow")camera.params[key]=value;
+  if(key=="pri1"||key=="pri2"||key=="move"||key=="movepow"||key=="texfilter")camera.params[key]=value;
   for(unsigned i=0;i<6;++i){
    if(key==sourceKeys[i]){camera.params[transformKeys[i]]=value;moved=true;}
    if(key=="b"+std::string(sourceKeys[i])){before.params[transformKeys[i]]=value;before.tweens.erase(transformKeys[i]);moved=true;}
@@ -1673,6 +1676,7 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
  const auto camera=layers.find("camera");
  Affine2D view;
  float nearPriority=1,farPriority=0,viewZ=0;
+ unsigned cameraFilter=0;
  if(camera!=layers.end()){
   const auto&layer=camera->second;
   float x=value(layer,"x",0),y=value(layer,"y",0);
@@ -1686,6 +1690,7 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
   }
   view=imagePlacement(640+x,360+y,zoomX/100,zoomY/100,value(layer,"rotz",0),.5f,.5f,1280,720);
   nearPriority=value(layer,"pri1",-100);farPriority=value(layer,"pri2",999);
+  cameraFilter=unsigned(value(layer,"texfilter",0));
  }
  std::vector<const Layer*>sorted;
  for(auto&x:layers){auto&layer=x.second;bool face=x.first=="face",message=x.first=="message";
@@ -1713,8 +1718,13 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
  // Keep those ordered on the caller, and queue ordinary single-owner playback.
  const bool asyncVideo=l->composite&&l->composite.use_count()<=2&&
   (!l->replacementVideo||l->replacementVideo.use_count()<=2);
- const auto [w,h]=l->composite?l->composite->dimensions(readAhead,l->milliseconds,liveVideo,queue.supportsVideoSurfaces(),asyncVideo):std::make_pair(l->pixels->width,l->pixels->height);
- if(l->composite&&l->composite->standaloneVideo&&(!w||!h))continue;
+ const bool filmLayer=l->composite&&l->composite->standaloneVideo;
+ const auto alpha=get(l,"alpha",255);
+ if(filmLayer&&alpha<=0)continue;
+ auto film=filmLayer?l->composite->standaloneFrame(l->milliseconds,liveVideo,queue.supportsVideoSurfaces(),readAhead,asyncVideo):nullptr;
+ if(filmLayer&&!film)continue;
+ const auto*bitmap=film?film.get():l->pixels.get();
+ const auto [w,h]=l->composite&&!filmLayer?l->composite->dimensions():std::make_pair(bitmap->width,bitmap->height);
  const auto blend=l->params.find("blend");
  const unsigned blendMode=blend==l->params.end()?0:imageBlend(blend->second);
  float layerX=get(l,"x",640),layerY=get(l,"y",360);
@@ -1733,6 +1743,7 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
  AnimationSample transform;transform.x=layerX;transform.y=layerY;transform.z=layerZ;transform.scaleX=scaleX;transform.scaleY=scaleY;transform.scaleZ=scaleZ;transform.rotationX=get(l,"rotx",0);transform.rotationY=get(l,"roty",0);transform.rotationZ=get(l,"rotz",0);transform.anchorX=ax*100;transform.anchorY=ay*100;
  const auto depth=priority(*l);
  const bool cameraAffects=depth>=nearPriority&&depth<=farPriority;
+ const unsigned textureFilter=cameraAffects&&cameraFilter?cameraFilter:unsigned(get(l,"texfilter",0));
  if(cameraAffects){
   placement=affine(view,placement);
   transform.z+=viewZ;
@@ -1750,7 +1761,31 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
  };
  const Image*plain=l->pixels.get();
  const bool messageLayer=layers.count("message")&&l==&layers.at("message");
- if(l->composite){for(unsigned i=0;i<4;i++){
+ if(filmLayer){
+  const auto name=filterName(l->params,0);
+  auto&cached=l->filtered[0];
+  if(name=="sepia"){
+   if(cached.source!=film||cached.name!=name){
+    std::shared_ptr<const Image> result;
+    if(auto&native=film->videoSurface){
+     Image tinted{film->width,film->height,{}};
+     auto surface=std::make_shared<VideoSurfaceImage>();
+     surface->surface=native->surface;
+     surface->frame=native->frame;
+     surface->readFrame=native->readFrame;
+     surface->source=native->source;
+     surface->sepia=true;
+     tinted.version.publish();
+     surface->surface.version=tinted.version.get();
+     tinted.videoSurface=std::move(surface);
+     result=std::make_shared<const Image>(std::move(tinted));
+    }else result=sceneBitmap(filterImage(*film,name));
+    cached={std::move(film),std::move(result),name};
+   }
+   film=cached.result;
+  }else{cached={};if(!name.empty())l->composite->warn("image-filter-nonbitmap-slot=0");}
+  plain=&queue.retainImage(std::move(film));
+ }else if(l->composite){for(unsigned i=0;i<4;i++){
   const auto filter=filterName(l->params,i);
   if(filter.empty()){l->filtered[i]={};continue;}
   std::shared_ptr<const Image> source=i<l->composite->members.size()?l->composite->members[i].image:nullptr;
@@ -1762,13 +1797,13 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
   else if(i<l->composite->members.size()){auto&e=l->composite->members[i];if(e.nested||e.mesh||e.video)l->composite->warn("image-filter-nonbitmap-slot="+std::to_string(i));}
  }}else if(l->pixels)plain=filtered(0,l->pixels,filterName(l->params,0));
  AnimationContext external;external.randomCursor=&waveformCursor;external.external=l->external;external.externalMask=l->externalMask;
- if(l->composite){auto m=l->params.find("motion");
+ if(l->composite&&!filmLayer){auto m=l->params.find("motion");
   std::optional<const Image*> messageSurface;
   if(messageLayer)messageSurface=l->pixels.get();
-  l->composite->enqueue(queue,l->milliseconds,m==l->params.end()?"":m->second,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),blendMode,l->params.count("@portrait")?l->pixels.get():nullptr,messageSurface,windowAlpha,uiSlots.empty()?nullptr:&uiSlots,&external,spatial?&matrix:nullptr,unsigned(get(l,"texfilter",0)),liveVideo,readAhead,asyncVideo,l->replacementVideo.get());
+  l->composite->enqueue(queue,l->milliseconds,m==l->params.end()?"":m->second,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),blendMode,l->params.count("@portrait")?l->pixels.get():nullptr,messageSurface,windowAlpha,uiSlots.empty()?nullptr:&uiSlots,&external,spatial?&matrix:nullptr,textureFilter,liveVideo,readAhead,asyncVideo,l->replacementVideo.get());
  }
- else if(spatial){transform.alpha=get(l,"alpha",255);transform.addColor=uint32_t(get(l,"addcolor",0));transform.mulColor=uint32_t(get(l,"mulcolor",0xffffff));transform.flags=blendMode;transform.textureFilter=unsigned(get(l,"texfilter",0));quad(queue,*plain,matrix,transform,get(l,"pri",0));}
- else queue.image(*plain,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),blendMode,unsigned(get(l,"texfilter",0)));
+ else if(spatial){transform.alpha=get(l,"alpha",255);transform.addColor=uint32_t(get(l,"addcolor",0));transform.mulColor=uint32_t(get(l,"mulcolor",0xffffff));transform.flags=blendMode;transform.textureFilter=textureFilter;quad(queue,*plain,matrix,transform,get(l,"pri",0));}
+ else queue.image(*plain,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),blendMode,textureFilter);
  if(l->extension){
   const auto&motion=l->params.at("extmotion");
   if(motion!="def"){
@@ -1800,7 +1835,7 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
    }
    if(cameraAffects)fx=affine(view,fx);
    l->extension->enqueue(queue,l->extensionMilliseconds,motion,fx,depth+10,255,0,0xffffff,0,
-       nullptr,std::nullopt,255,nullptr,nullptr,z!=0?&extended:nullptr,0,liveVideo,readAhead,false);
+       nullptr,std::nullopt,255,nullptr,nullptr,z!=0?&extended:nullptr,cameraAffects?cameraFilter:0,liveVideo,readAhead,false);
   }
  }
  if(queue.imageCount()>beforeImages){if(qlie::canonical(l->path).rfind("image/ev/",0)==0)shownFiles.insert(qlie::canonical(l->path));auto replacement=l->params.find("@replacement");if(replacement!=l->params.end()&&qlie::canonical(replacement->second).rfind("image/ev/",0)==0)shownFiles.insert(qlie::canonical(replacement->second));}

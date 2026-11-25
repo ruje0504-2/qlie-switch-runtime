@@ -19,6 +19,19 @@ namespace whj2 {
 namespace {
 qlie::Bytes audioSource(qlie::Assets&,const std::string&);
 
+struct PcmDecode {
+ std::shared_ptr<int16_t> samples;
+ size_t count=0;
+ DecodedPcm publish()&&{return {std::move(samples),count};}
+};
+PcmDecode decodeSamples(const qlie::Bytes&bytes,bool allowMissing=false){
+ uint8_t*raw=nullptr;size_t n=0;
+ const auto result=kaudio_decode(bytes.data(),bytes.size(),&raw,&n);
+ if(result==KAUDIO_NO_STREAM&&allowMissing)return {};
+ if(result)throw std::runtime_error("PCM decode failed");
+ return {std::shared_ptr<int16_t>(reinterpret_cast<int16_t*>(raw),std::free),n/2};
+}
+
 DecodedPcm decodeSource(qlie::Assets& assets,const std::string& path){
  constexpr std::string_view left="@pan-left:",right="@pan-right:";
  if(path.rfind(left,0)==0||path.rfind(right,0)==0){
@@ -33,8 +46,9 @@ DecodedPcm decodeSource(qlie::Assets& assets,const std::string& path){
  }
  constexpr std::string_view bathroom="@bathroom2:";
  if(path.rfind(bathroom,0)!=0)return Audio::decodePcm(audioSource(assets,path));
- const auto pcm=Audio::decodePcm(assets.read(path.substr(bathroom.size())));
- const size_t frames=pcm.size()/2;
+ auto pcm=decodeSamples(assets.read(path.substr(bathroom.size())));
+ const size_t frames=pcm.count/2;
+ auto* samples=pcm.samples.get();
  // QLIE uses 8.8 gains, with a truncated low-pass sample for both
  // feedback and wet mix. The delay is in 44100 Hz stereo sample frames.
  constexpr size_t delay=(44100*50+500)/1000;
@@ -43,20 +57,19 @@ DecodedPcm decodeSource(qlie::Assets& assets,const std::string& path){
  std::array<std::array<int,2>,delay> echoes{};
  std::array<float,2> lowPass{};
  size_t tap=0;
- auto output=std::shared_ptr<int16_t>(new int16_t[pcm.size()],std::default_delete<int16_t[]>());
  for(size_t frame=0;frame<frames;++frame){
   auto& echo=echoes[tap];
   for(unsigned side=0;side<2;++side){
    const size_t index=frame*2+side;
-   const int dry=pcm[index];
+   const int dry=samples[index];
    lowPass[side]=float((double(echo[side])-lowPass[side])*cutoff+lowPass[side]);
    const int filtered=int(lowPass[side]);
    echo[side]=dry+filtered*feedback/256;
-   output.get()[index]=int16_t(std::clamp((dry*dryGain+filtered*wet)/256,-32768,32767));
+   samples[index]=int16_t(std::clamp((dry*dryGain+filtered*wet)/256,-32768,32767));
   }
   if(++tap==delay)tap=0;
  }
- return {std::move(output),pcm.size()};
+ return std::move(pcm).publish();
 }
 WarmAsset prepareSource(qlie::Assets& assets,const std::string& path){
  WarmAsset ready;
@@ -138,11 +151,7 @@ void Audio::reportMixerBinding(){
 }
 #endif
 DecodedPcm Audio::decodePcm(const qlie::Bytes&bytes,bool allowMissing){
- uint8_t*raw=nullptr;size_t n=0;
- const auto result=kaudio_decode(bytes.data(),bytes.size(),&raw,&n);
- if(result==KAUDIO_NO_STREAM&&allowMissing)return {};
- if(result)throw std::runtime_error("PCM decode failed");
- return {std::shared_ptr<const int16_t>(reinterpret_cast<const int16_t*>(raw),[](const int16_t*p){std::free(const_cast<int16_t*>(p));}),n/2};
+ return decodeSamples(bytes,allowMissing).publish();
 }
 void Audio::warmFile(qlie::Assets&assets,const std::string&path){
  if(readAhead)readAhead->request(qlie::canonical(path),[&assets,path]{return prepareSource(assets,path);});

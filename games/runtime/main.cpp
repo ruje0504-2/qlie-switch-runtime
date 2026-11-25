@@ -1148,6 +1148,10 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   // has not already captured the scene. It never adds a script wait.
   if(characterFade&&(normalSkip||transition->awaitingPresentation()))continue;
   game_profile::applySentenceTiming(e);
+  const char* captureBitmap=nullptr;
+#if defined(QLIE_PROFILE_WHJ1)
+  captureBitmap=game_profile::transitionCaptureBitmap(e);
+#endif
   if(!normalSkip){
    std::vector<std::string> transitionAssets;
    for(const auto&asset:transition->resources(e.value)){
@@ -1159,12 +1163,16 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
      transitionAssets.push_back(whj2::SceneTransition::ruleKey(asset.path));
     }
    }
+   if(captureBitmap&&images->warmFile(captureBitmap,true,false))transitionAssets.push_back(captureBitmap);
    if(deferSceneUntil(e,std::move(transitionAssets)))return;
   }
   qlie::Bytes snapshot;
   if(!normalSkip&&transition->needsCapture(e.value)){
    const auto start=qlie::diagnostics?LoadClock::now():LoadClock::time_point{};
-   if(!outgoingScene.empty())snapshot=std::move(outgoingScene);
+   if(captureBitmap){
+    snapshot=images->captureBitmap(captureBitmap);
+    outgoingScene.clear();
+   }else if(!outgoingScene.empty())snapshot=std::move(outgoingScene);
    else{
     auto captured=captureScene();
     if(!captured){pendingScene=std::move(e);return;}

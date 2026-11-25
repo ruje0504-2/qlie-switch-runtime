@@ -50,6 +50,12 @@ inline const whj2::StoryProfile story{
  "",{},"",false,"","","",0,false,"",false,{},&legacyLayout
 };
 inline void applySentenceTiming(whj2::Event&){}
+inline const char* transitionCaptureBitmap(const whj2::Event& event){
+ if(event.file=="scenario/ks_01/kk_main_01.s"&&event.line==508&&
+    event.value=="^sentence,fade:anime:1000:Zoom,wait:click:1000:0")
+  return "image/n17_1_01.png";
+ return nullptr;
+}
 inline constexpr char gameName[]="美少女万華鏡 -呪われし伝說の少女-";
 inline constexpr char gameEnv[]="WHJ1_GAME",saveEnv[]="WHJ1_SAVES",
  rendererEnv[]="WHJ1_RENDERER",logEnv[]="WHJ1_LOG",hostSaves[]="local/whj1-saves";

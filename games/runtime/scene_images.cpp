@@ -1206,6 +1206,12 @@ void SceneImages::loadReplacement(Layer&layer,const std::string&path){
  layer.scriptReplacement=at->second;
 }
 void SceneImages::prepareUiBitmap(const std::string&path){if(!cache.count(path))cache.emplace(path,loadBitmap(path));}
+qlie::Bytes SceneImages::captureBitmap(const std::string& path){
+ prepareUiBitmap(path);
+ const auto& bitmap=*cache.at(path);
+ if(bitmap.width!=1280||bitmap.height!=720)throw std::runtime_error("Transition bitmap dimensions "+path);
+ return bitmap.pixels;
+}
 bool SceneImages::warmUiBitmaps(const std::string&key,std::vector<std::string> paths,bool required){
  if(!readAhead)return false;
  paths.erase(std::remove_if(paths.begin(),paths.end(),[&](const auto&path){return cache.count(path)>0;}),paths.end());

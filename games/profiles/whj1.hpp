@@ -35,6 +35,7 @@ inline constexpr whj2::LegacyAvgLayout legacyLayout{
  0,720,
  285,567,24,0xff5555,
  "^face,x:200,y:720,align:center:bottom,mode:auto,pri:1015",
+ "charaface/","library/avg/window/faceanimation.b",200,
  "5",0x00b6,0x01f7,
  {{{"#1_route_a_f","#game_aclearflag"},{"#1_route_b_f","#game_bclearflag"}}},
  "movie/logo.ogv",{"movie/万華鏡.ogv","movie/kaleidoscope.ogv"},

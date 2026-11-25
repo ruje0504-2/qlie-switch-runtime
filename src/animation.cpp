@@ -72,6 +72,31 @@ static void normalizeLayer15(qlie::Bytes& key){
  key[0x96]=100;
  std::fill(key.begin()+0x98,key.begin()+0xa0,0xff);
 }
+// WHJ1 PE 0x4f2224/0x4f22d4 expands a 0x91 key and converts the
+// original byte alpha and mask amount. A 0xa2 layer-17 key uses the same fields.
+static void normalizeLayer16Or17(qlie::Bytes& key){
+ if(key.size()==0x91){
+  key.resize(0xa2);
+  key[0x96]=100;
+  std::fill(key.begin()+0x98,key.begin()+0xa0,0xff);
+ }
+ key[0x35]=key[0x2c];key[0x36]=0;
+ key[0x37]=key[0x39];key[0x38]=0;
+ constexpr std::pair<unsigned,unsigned> fields[]{
+  {0x08,2},{0x0a,2},{0x0c,2},{0x0e,2},{0x10,4},{0x14,4},
+  {0x18,2},{0x1a,2},{0x1c,2},{0x1e,2},{0x22,2},{0x48,2},
+  {0x4a,2},{0x4d,4},{0x96,2}
+ };
+ for(auto [offset,width]:fields){
+  unsigned value=0;
+  for(unsigned i=0;i<width;++i)value|=unsigned(key[offset+i])<<(8*i);
+  if(value>=30000&&value<30100){
+   value=value-30000+32700;
+   for(unsigned i=0;i<width;++i)key[offset+i]=uint8_t(value>>(8*i));
+  }
+ }
+ if(key[4]==18){key[7]=0xff;key[0x3e]=0;key[0x3f]=100;}
+}
 Animation animation(const std::string&type,const qlie::Bytes&b){AnimReader r{b};
  Animation a;
  const bool modern=type=="abdata15";
@@ -114,6 +139,7 @@ Animation animation(const std::string&type,const qlie::Bytes&b){AnimReader r{b};
  for(unsigned i=0;i<count;i++){
   auto key=r.data(keyBytes);
   if(l.version==15)normalizeLayer15(key);
+  if(l.version==16||l.version==17)normalizeLayer16Or17(key);
   l.keys.push_back(std::move(key));
  }m.layers.push_back(std::move(l));
  }a.motions.push_back(std::move(m));

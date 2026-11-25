@@ -194,17 +194,24 @@ bool Story::legacyCaret(const Op&o,const std::vector<std::string>& a){
   auto& base=state.vars[storage+"base"];
   auto& face=state.vars[storage+"face"];
   auto& shown=state.vars[storage+"show"];
+  const auto actionKey=storage+"action";
   if(distance.empty())distance="中";
   if(shown.empty())shown="true";
   if(cmd=="^cadd")return true;
   if(cmd=="^cdel"||cmd=="^cinit"){
    emit("^"+layer+",file:none,show:false");
    if(cmd=="^cdel")state.vars.erase(found);
-   for(const auto* fieldName:{"distance","base","face","show"})state.vars.erase(storage+fieldName);
+   for(const auto* fieldName:{"distance","base","face","show","action"})state.vars.erase(storage+fieldName);
    return true;
   }
+  const auto catchCharacterFade=[&]{
+   if(const auto duration=profile.legacyAvg->characterFadeMs)
+    state.pending.push_back(event("legacy-character-fade","^sentence,fade:overlap:"+std::to_string(duration),o.line));
+  };
   if(cmd=="^ce"||cmd=="^cd"){
-   shown=cmd=="^ce"?"true":"false";
+   const std::string next=cmd=="^ce"?"true":"false";
+   if(shown!=next&&!face.empty()&&face!="@")catchCharacterFade();
+   shown=next;
    emit("^"+layer+",show:"+shown);
    return true;
   }
@@ -213,20 +220,35 @@ bool Story::legacyCaret(const Op&o,const std::vector<std::string>& a){
    if(!field(3).empty())base=field(3);
    return true;
   }
-  if(!field(2).empty())face=field(2);
-  if(face.empty()||face=="@"){
-   emit("^"+layer+",file:none");
-   return true;
+  const auto expression=field(2);
+  const auto action=field(3);
+  if(!expression.empty()){
+   if((action.empty()||action=="@")&&shown=="true"&&face!=expression)catchCharacterFade();
+   face=expression;
   }
   const auto actor=characterId(id);
-  std::string basename=actor+"_"+distance+"_";
-  if(!base.empty()&&base!="@"){
-   auto costume=base;
-   std::replace(costume.begin(),costume.end(),';','_');
-   basename+=costume+"_";
+  const auto sprite=face.empty()||face=="@"?std::string{}:[&]{
+   std::string basename=actor+"_"+distance+"_";
+   if(!base.empty()&&base!="@"){
+    auto costume=base;
+    std::replace(costume.begin(),costume.end(),';','_');
+    basename+=costume+"_";
+   }
+   return legacyPortrait(assets,actor,basename+face);
+  }();
+  auto text="^"+layer+",id:"+actor+",show:"+shown;
+  if(!action.empty()){
+   const auto filename=(action=="@"?"default":action)+std::string(".b");
+   const auto path=legacyPortrait(assets,actor,filename);
+   state.vars[actionKey]=path;
+   text+=",file:"+path+",motion:0";
   }
-  auto path=legacyPortrait(assets,actor,basename+face);
-  emit("^"+layer+",file:"+path+",id:"+actor+",show:"+shown);
+  if(state.vars.count(actionKey)){
+   text+=",rep0:"+(sprite.empty()?"none":sprite);
+  }else{
+   text+=",file:"+(sprite.empty()?"none":sprite);
+  }
+  emit(std::move(text));
   return true;
  }
  return false;
@@ -256,12 +278,25 @@ bool Story::legacyNative(const Op&o,const std::vector<std::string>& a){
   state.vars["resultint[0]"]=at->second;
   return true;
  }
- if(cmd=="\\del"&&(field(1)=="th"||field(1)=="th2"||field(1)=="op_image")){
-  const auto name=field(1);
-  emit("^ui_avg1_"+std::string(name=="op_image"?"op_image":"video_"+name)+",file:none");
+ const auto clearVideo=[&](const std::string&name){
+  emit("^ui_avg1_video_"+name+",file:none");
   state.vars.erase("__avg1_file_"+name);
-  return true;
+ };
+ if(cmd=="\\del"){
+  const auto name=qlie::canonical(arg(a,1));
+  if(name=="op_image"){
+   emit("^ui_avg1_op_image,file:none");
+   state.vars.erase(name);
+   return true;
+  }
+  if(name=="th"||name=="th2"){
+   clearVideo(name);
+   state.vars.erase(name);
+   state.vars.erase("__avg1_layer_ui_avg1_video_"+name);
+   return true;
+  }
  }
+ if(isVideo&&cmd=="\\i"){clearVideo(state.scope);return true;}
  if(isVideo&&cmd=="\\l"){
   auto path=qlie::canonical(field(1));
   if(path.find('/')==path.npos)path="movie/"+path;
@@ -282,7 +317,7 @@ bool Story::legacyNative(const Op&o,const std::vector<std::string>& a){
   }else emit("^"+layer+",file:"+path+state.vars["__avg1_layer_"+layer]);
   return true;
  }
- if(isVideo&&(cmd=="\\ss"||cmd=="\\vtn"||cmd=="\\v"||cmd=="\\i"))return true;
+ if(isVideo&&(cmd=="\\ss"||cmd=="\\vtn"||cmd=="\\v"))return true;
  if(state.vars.count("__avg1_credits_clock")){
   // The next waits run concurrently with the source film. Movie already
   // holds story execution and applies the profile's skip guard.
@@ -328,7 +363,11 @@ bool Story::legacyNative(const Op&o,const std::vector<std::string>& a){
    emit("^"+layer+",motion:"+field(1));
    return true;
   }
-  if(cmd=="\\mm")return true; // The authored mode is the modern linear move.
+  if(cmd=="\\mm"){
+   if(field(1)!="3")return false;
+   emit("^"+layer+",move:square,movepow:"+field(2));
+   return true;
+  }
   if(cmd=="\\p"||cmd=="\\p2"){
    std::string text="^"+layer+",x:"+field(1)+",y:"+field(2)+",pri:"+field(3);
    if(cmd=="\\p2"){

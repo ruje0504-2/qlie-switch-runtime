@@ -56,6 +56,7 @@ class SceneImages {
  void enqueue(RenderQueue&,unsigned pass,float maxPriority,bool liveVideo)const;
  std::string mappedFace(std::string)const;
  std::string faceResource(const std::string&,bool packedOnly)const;
+ std::string legacyFaceResource(const std::string& body,bool packedOnly)const;
  std::string expand(std::string,const std::string&)const;
 public:
  explicit SceneImages(qlie::Assets&);

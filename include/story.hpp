@@ -21,6 +21,9 @@ struct LegacyAvgLayout {
  unsigned frameX,frameY;
  unsigned speakerX,speakerY,speakerSize,speakerColor;
  const char* faceWindow;
+ const char* faceDirectory;
+ const char* faceAnimation;
+ unsigned characterFadeMs;
  const char* externalFontSlot;
  unsigned externalCodepoint,externalTileIndex;
  std::array<std::pair<const char*,const char*>,2> routeFlags;

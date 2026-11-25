@@ -1127,7 +1127,12 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  text="";
  name="";
  return;
- }if(e.type=="command"&&e.value.rfind("^sentence",0)==0){
+ }
+ const bool characterFade=e.type=="legacy-character-fade";
+ if(characterFade||(e.type=="command"&&e.value.rfind("^sentence",0)==0)){
+  // AVG reserves the automatic portrait dissolve only when an explicit fade
+  // has not already captured the scene. It never adds a script wait.
+  if(characterFade&&(normalSkip||transition->awaitingPresentation()))continue;
   game_profile::applySentenceTiming(e);
   if(!normalSkip){
    std::vector<std::string> rules;
@@ -1148,7 +1153,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    }
    if(qlie::diagnostics)timing.capture+=std::chrono::duration<double,std::milli>(LoadClock::now()-start).count();
   }
-  transition->commandWithCapture(e.value,[&snapshot]{return std::move(snapshot);},&sentenceWait,!normalSkip);continue;
+  transition->commandWithCapture(e.value,[&snapshot]{return std::move(snapshot);},
+                                 characterFade?nullptr:&sentenceWait,!normalSkip);continue;
  }if(e.type=="wait"||e.type=="click-wait"){
   const bool clickable=e.type=="click-wait";
   std::optional<double> timeout=e.value.empty()?0.:std::stod(e.value);
@@ -1501,6 +1507,12 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   transition=std::move(preparedScene->transition);
   images->setReadAhead(readAhead.get());
   transition->setReadAhead(readAhead.get());
+  if(game_profile::story.legacyAvg){
+   // Older saves could retain a media layer after its script object was deleted.
+   for(const auto* object:{"th","th2"})if(!story.state.vars.count(object))
+    images->removeUiLayer(std::string("ui_avg1_video_")+object);
+   if(!story.state.vars.count("op_image"))images->removeUiLayer("ui_avg1_op_image");
+  }
   bgvMode=saved.bgvMode;
   if(settings.voiceActorCount())voiceActor=dialogueVoiceActor(name);
   updateVoiceGains();

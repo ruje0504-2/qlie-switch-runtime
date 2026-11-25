@@ -1024,7 +1024,7 @@ std::vector<std::string> SceneImages::warmPaths(const std::string&line,Character
   std::string prefix="image/";
   if(!replacement){
    if(chara){prefix="chara/";name=characterImageName(name,stem);}
-   else if(face)prefix="face/";else if(message)prefix=alternateMessageWindow?"avg2/window/":"avg/window/";
+   else if(face)prefix=game_profile::story.legacyAvg?game_profile::story.legacyAvg->faceDirectory:"face/";else if(message)prefix=alternateMessageWindow?"avg2/window/":"avg/window/";
    else if(legacyLayer)prefix.clear();
   }
   const bool portraitFile=predictPortrait&&key=="file";
@@ -1033,13 +1033,18 @@ std::vector<std::string> SceneImages::warmPaths(const std::string&line,Character
   if(path.empty())continue;
   if(portraitFile)portrait.path=path;
   if(needsWarmFile(path,future!=nullptr))result.push_back(path);
-  if(predictedFaces&&chara&&!replacement){
-   const auto portrait=faceResource(mappedFace(path),true);
-   if(!portrait.empty()&&!cache.count(portrait)&&!composites.count(portrait))predictedFaces->push_back(portrait);
+  if(predictedFaces){
+   auto portrait=chara&&!replacement?faceResource(mappedFace(path),true):
+     legacyLayer&&cmd.rfind("ui_avg1_chara",0)==0?legacyFaceResource(path,true):std::string{};
+   if(!portrait.empty()&&!cache.count(portrait)&&!composites.count(portrait))predictedFaces->push_back(std::move(portrait));
   }
  }
+ if(face&&game_profile::story.legacyAvg&&std::find(args.begin(),args.end(),"show:true")!=args.end()){
+  const std::string path=game_profile::story.legacyAvg->faceAnimation;
+  if(needsWarmFile(path,future!=nullptr))result.push_back(path);
+ }
  if(!base.empty()&&base!="none"&&base.find('$')==base.npos){
-  auto path=(face?"face/":"chara/")+base;
+  auto path=(face?(game_profile::story.legacyAvg?"":"face/"):"chara/")+base;
   if(!assets.inPack(path))path+=".b";
   if(assets.inPack(path)&&needsWarmFile(path,future!=nullptr))result.push_back(std::move(path));
  }
@@ -1723,7 +1728,7 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
   }
  }
  auto loadBase=[&](){auto base=l.params.find("base");if((!chara&&!face)||base==l.params.end()||base->second=="none"||base->second.empty())return false;
-  std::string path=(face?"face/":"chara/")+base->second;if(!assets.exists(path)&&assets.exists(path+".b"))path+=".b";
+  std::string path=(face?(game_profile::story.legacyAvg?"":"face/"):"chara/")+base->second;if(!assets.exists(path)&&assets.exists(path+".b"))path+=".b";
   if(!assets.exists(path))throw std::runtime_error("Missing character base "+path);
   auto loaded=sceneComposite(path);
   // Multipart file changes replace slot zero without restarting the base motion.
@@ -1740,7 +1745,7 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  l.composite.reset();
  return true;
  }if(chara)f=characterImageName(f,l.prefix);
- const std::string requested=(ui?"":chara?"chara/":face?"face/":message?(alternateMessageWindow?"avg2/window/":"avg/window/"):"image/")+f;
+ const std::string requested=(ui?"":chara?"chara/":face?(game_profile::story.legacyAvg?game_profile::story.legacyAvg->faceDirectory:"face/"):message?(alternateMessageWindow?"avg2/window/":"avg/window/"):"image/")+f;
  auto path=sceneResource(assets,requested,false);
  if(path.empty())throw std::runtime_error("Missing image "+requested);
  l.path=path;
@@ -1786,6 +1791,19 @@ std::string SceneImages::faceResource(const std::string&name,bool packedOnly)con
  }
  return {};
 }
+std::string SceneImages::legacyFaceResource(const std::string&body,bool packedOnly)const{
+ if(body.rfind("charaimage/",0)!=0)return {};
+ auto filename=body.substr(body.rfind('/')+1);
+ const auto actorEnd=filename.find('_');
+ if(actorEnd==std::string::npos)return {};
+ const auto distanceEnd=filename.find('_',actorEnd+1);
+ if(distanceEnd==std::string::npos)return {};
+ const auto actor=filename.substr(0,actorEnd);
+ const std::string root=std::string(game_profile::story.legacyAvg->faceDirectory)+actor+"/";
+ auto path=sceneResource(assets,root+actor+"_中"+filename.substr(distanceEnd),packedOnly);
+ if(path.empty())path=sceneResource(assets,root+"default.png",packedOnly);
+ return path;
+}
 std::optional<std::string> SceneImages::selectFace(const std::string&speaker,const std::string&voice,bool deferCold){
  auto face=layers.find("face");if(face==layers.end())return {};auto&params=face->second.params;
  if(params.at("mode")!="auto"||params.at("show")!="true"||params.at("@face-active")=="true")return {};
@@ -1793,22 +1811,34 @@ std::optional<std::string> SceneImages::selectFace(const std::string&speaker,con
  if(id.rfind("【",0)==0){id.erase(0,std::string("【").size());auto end=id.find("】");if(end!=id.npos)id.resize(end);}
  if(id.rfind("％",0)==0)id.erase(0,std::string("％").size());
  for(auto&entry:faceRepId)if(id.find(entry.first)!=id.npos){id=entry.second;break;}
- auto suffix=id.find("＠");if(suffix!=id.npos)id.resize(suffix);if(id.empty())return {};
- if(game_profile::story.legacyAvg){
-  const auto prefix="charaimage/"+id+"/"+id+"_";
-  for(const auto&[layerName,layer]:layers){
-   if(layerName.rfind("ui_avg1_chara",0)!=0||layer.path.rfind(prefix,0)!=0)continue;
-   const auto pose=layer.path.find('_',prefix.size());
-   if(pose==std::string::npos)continue;
-   auto resolved=faceResource(id+"/"+id+"_中"+layer.path.substr(pose),false);
-   if(resolved.empty())resolved=faceResource(id+"/Default",false);
-   if(resolved.empty())return {};
-   if(deferCold&&readAhead&&!cache.count(resolved)&&!composites.count(resolved)&&!readAhead->ready(qlie::canonical(resolved)))return resolved;
-   command("^face,file:"+resolved.substr(5));
+ auto suffix=id.find("＠");if(suffix!=id.npos)id.resize(suffix);
+ if(const auto*legacy=game_profile::story.legacyAvg){
+  std::string resolved;
+  if(!id.empty())for(const auto&[layerName,layer]:layers){
+   if(layerName.rfind("ui_avg1_chara",0)!=0)continue;
+   auto actor=layer.params.find("id");
+   if(actor==layer.params.end()||actor->second!=id)continue;
+   auto sprite=layer.params.find("@replacement");
+   resolved=legacyFaceResource(sprite==layer.params.end()?layer.path:sprite->second,false);
+   break;
+  }
+  if(resolved.empty()){
+   if(face->second.pixels)command("^face,file:none,id:none");
    return {};
   }
+  if(deferCold&&readAhead&&!cache.count(resolved)&&!readAhead->ready(qlie::canonical(resolved)))return resolved;
+  const auto previous=params.find("@portrait");
+  const bool sameFile=previous!=params.end()&&previous->second==resolved;
+  const auto previousId=params.find("id");
+  const bool sameActor=previousId!=params.end()&&previousId->second==id;
+  std::string text="^face,id:"+id+",motion:"+(sameActor?(sameFile?"FaceContinue":"FaceChange"):"CharaChange");
+  if(!face->second.composite)text+=",base:"+std::string(legacy->faceAnimation);
+  if(!sameFile||!face->second.composite)
+   text+=",file:"+resolved.substr(std::string_view(legacy->faceDirectory).size());
+  command(std::move(text));
   return {};
  }
+ if(id.empty())return {};
  std::string file;
  for(auto&entry:layers)if(entry.first.rfind("chara",0)==0&&entry.second.params.count("id")&&entry.second.params.at("id")==id&&entry.second.params.count("@portrait")){file=entry.second.params.at("@portrait");break;}
  if(file.empty())for(auto&entry:layers)if(entry.first.rfind("chara",0)==0&&entry.second.params.count("@portrait")&&entry.second.params.at("@portrait").find(id)!=id.npos){file=entry.second.params.at("@portrait");break;}
@@ -1915,6 +1945,7 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
  std::vector<const Layer*>sorted;
  for(auto&x:layers){auto&layer=x.second;bool face=x.first=="face",message=x.first=="message";
  if((pass==1&&(face||message))||(pass==2&&!face)||(pass==3&&!message)||(pass==4&&priority(layer)>maxPriority))continue;
+ if(face&&game_profile::story.legacyAvg&&(!layer.pixels||!messageVisible()))continue;
  if(face&&layer.params.at("disp")!="keep"&&layer.params.at("@face-active")!="true"){
  if(layer.params.at("show")=="true"&&layer.params.at("mode")=="auto"&&!faceWarning){QLIE_LOG_LINE(<<"PENDING-FACE automatic portrait selection\n");faceWarning=true;}continue;
  }

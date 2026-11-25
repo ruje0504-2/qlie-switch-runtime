@@ -1,16 +1,25 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #version 430
-layout(local_size_x=16,local_size_y=16) in;
+layout(local_size_x=16,local_size_y=8) in;
 layout(r8ui,binding=0) uniform readonly uimage2D lumaPlane;
 layout(rg8ui,binding=1) uniform readonly uimage2D chromaPlane;
 layout(std140,binding=0) uniform Target { uint firstWord; };
 layout(std430,binding=0) writeonly buffer Texels { uint texels[]; };
 
-void main(){
- ivec2 q=ivec2(gl_GlobalInvocationID.xy);
+void convert(ivec2 q,ivec3 chromaBias){
  int y=(int(imageLoad(lumaPlane,q).r)-16)*298;
- ivec2 c=ivec2(imageLoad(chromaPlane,q/2).rg)-128;
- // Match the limited-range BT.601 conversion used by the BGRA movie path.
- ivec3 rgb=clamp((ivec3(y)+ivec3(409*c.y,-100*c.x-208*c.y,516*c.x)+128)>>8,0,255);
+ ivec3 rgb=clamp((ivec3(y)+chromaBias)>>8,0,255);
  texels[firstWord+uint(q.y)*1280u+uint(q.x)]=0xff000000u|uint(rgb.r)<<16|uint(rgb.g)<<8|uint(rgb.b);
+}
+
+void main(){
+ // One NV12 chroma sample supplies the four luma pixels in this block.
+ ivec2 chroma=ivec2(gl_GlobalInvocationID.xy);
+ ivec2 c=ivec2(imageLoad(chromaPlane,chroma).rg)-128;
+ ivec3 bias=ivec3(409*c.y,-100*c.x-208*c.y,516*c.x)+128;
+ ivec2 q=chroma*2;
+ convert(q,bias);
+ convert(q+ivec2(1,0),bias);
+ convert(q+ivec2(0,1),bias);
+ convert(q+ivec2(1,1),bias);
 }

@@ -289,7 +289,9 @@ class DekoScene final : public Scene {
    cmd.bindImageDescriptorSet(videoDescriptors.getGpuAddr()+descriptors,2);
    const std::array<DkResHandle,2> handles{{dkMakeImageHandle(0),dkMakeImageHandle(1)}};
    cmd.bindImages(DkStage_Compute,0,handles);
-   cmd.dispatchCompute(Width/16,Height/16,1);
+   // The video kernel uses 16x8 threads, each converting a 2x2 NV12 block.
+   static_assert(Width%32==0&&Height%16==0);
+   cmd.dispatchCompute(Width/32,Height/16,1);
    texture.converted=true;
    if constexpr (qlie::diagnostics) ++dispatches;
    ++slot;

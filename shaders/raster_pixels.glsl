@@ -93,6 +93,17 @@ uvec4 tint(Draw p,uvec4 s){
 uvec4 composite(uint mode,uvec4 s,uvec4 d){
  uint a=s.a;
 #ifdef DEKO_RASTER
+ if(mode==2u){
+  uvec4 w=(s*(a+(a>>7u)))>>8u;
+  return min(uvec4(255u),w+d-((w*d)>>8u));
+ }
+ if(mode==13u){
+  // Invert the inputs and result above the hard-light midpoint.
+  uvec4 invert=uvec4(greaterThanEqual(s,uvec4(128u)))*255u;
+  uvec4 target=(2u*(s^invert)*(d^invert)/255u)^invert;
+  if(a==255u)return target;
+  return uvec4(ivec4(d)+((ivec4(target)-ivec4(d))*int((a+(a>>7u))>>1u)>>7));
+ }
  if(mode==8u){
   uvec4 contribution=(s*(a+(a>>7u)))>>8u;
   return d-min(d,contribution);

@@ -44,7 +44,8 @@ def main():
         if control + code != len(data) or count != 1 or offset + 64 > control:
             raise ValueError("unexpected DKSH sections")
         stage, _, _, _, _, scratch, x, y, z = struct.unpack_from("<9I", data, offset)
-        if (stage, x, y, z) != (5, 16, 16, 1):
+        expected_y = 8 if args.video else 16
+        if (stage, x, y, z) != (5, 16, expected_y, 1):
             raise ValueError("unexpected DKSH compute workgroup")
         # Store the control header and code as one module. ShaderMaker accepts both together.
         rows = [",".join(str(b) for b in data[i:i + 24]) for i in range(0, len(data), 24)]

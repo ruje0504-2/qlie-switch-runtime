@@ -381,7 +381,11 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
    case 1:out.resource=unsigned(std::clamp(int(out.resource)+int(std::round(value)),0,255));break;
    case 13:out.x+=value;break;case 14:out.y+=value;break;
    case 15:out.scaleX+=value;break;case 16:out.scaleY+=value;break;
+   // WHJ1 PE 4f0949/4f096c/4f098f add the waveform to the Z/X/Y angles.
+   // The native fields store turns. AnimationSample stores degrees.
    case 17:out.rotationZ+=value;break;
+   case 18:out.rotationX+=value;break;
+   case 19:out.rotationY+=value;break;
    case 21:out.priority+=value;break;
    case 24:out.alpha=std::clamp(out.alpha+std::round(value),0.f,255.f);break;
    case 28:out.scaleX*=value/100;break;case 29:out.scaleY*=value/100;break;

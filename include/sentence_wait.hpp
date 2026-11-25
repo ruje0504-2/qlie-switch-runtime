@@ -1,5 +1,6 @@
 #pragma once
 #include "qlie.hpp"
+#include <optional>
 namespace whj2 {
 class SentenceWait {
  enum class Stage {Idle,Delay,Message,Ready};
@@ -12,7 +13,7 @@ public:
  enum Action {None=0,Next=1,Resume=2};
  bool property(const std::vector<std::string>&);
  void resetProperties();
- void fromFade(double);void page(bool hasText=true,bool voicePlaying=false);void native(bool clickable,double milliseconds);
+ void fromFade(double);void page(bool hasText=true,bool voicePlaying=false);void native(bool clickable,std::optional<double> milliseconds);
  Action tick(double milliseconds,bool voicePlaying=false);Action confirm();Action force();void cancel();
  void elapseSkip(double milliseconds);
  Action skip();

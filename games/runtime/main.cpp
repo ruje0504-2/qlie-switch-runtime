@@ -1149,7 +1149,11 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    if(qlie::diagnostics)timing.capture+=std::chrono::duration<double,std::milli>(LoadClock::now()-start).count();
   }
   transition->commandWithCapture(e.value,[&snapshot]{return std::move(snapshot);},&sentenceWait,!normalSkip);continue;
- }if(e.type=="wait"||e.type=="click-wait"){sentenceWait.native(e.type=="click-wait",e.value.empty()?0:std::stod(e.value));resetOutgoingScene();transition->present();
+ }if(e.type=="wait"||e.type=="click-wait"){
+  const bool clickable=e.type=="click-wait";
+  std::optional<double> timeout=e.value.empty()?0.:std::stod(e.value);
+  if(game_profile::story.legacyAvg&&clickable&&(e.value.empty()||*timeout<0))timeout.reset();
+  sentenceWait.native(clickable,timeout);resetOutgoingScene();transition->present();
   warmNextScene(false,e.type=="wait"&&e.file==game_profile::story.endingMovieScript);return;
  }if(e.type=="command"&&e.value.rfind("^savefilter",0)==0){auto fields=whj2::split(e.value,',');if(fields.size()!=2||fields[1]!="0")throw std::runtime_error("Unsupported save thumbnail filter");continue;
  }if(e.type=="audio-volume"){

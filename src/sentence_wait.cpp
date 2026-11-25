@@ -33,9 +33,14 @@ void SentenceWait::page(bool hasText,bool voicePlaying){cancel();
  mode="message";
  duration=0;
 }
-void SentenceWait::native(bool clickable,double ms){cancel();continuation=true;interruptible=clickable;remaining=std::max(0.,ms);stage=remaining>0?Stage::Delay:Stage::Ready;}
+void SentenceWait::native(bool clickable,std::optional<double> ms){
+ cancel();continuation=true;interruptible=clickable;
+ // Native click-only waits use a negative timer in the existing saved state.
+ remaining=ms?std::max(0.,*ms):-1.;
+ stage=remaining==0?Stage::Ready:Stage::Delay;
+}
 int SentenceWait::finishDelay(){if(message){stage=Stage::Message;return None;}auto action=continuation?Resume:Next;cancel();return action;}
-SentenceWait::Action SentenceWait::tick(double ms,bool voicePlaying){if(stage==Stage::Ready)return Action(finishDelay());if(stage!=Stage::Delay)return None;
+SentenceWait::Action SentenceWait::tick(double ms,bool voicePlaying){if(stage==Stage::Ready)return Action(finishDelay());if(stage!=Stage::Delay||remaining<0)return None;
  remaining=std::max(0.,remaining-std::max(0.,ms));if(voiceBound&&!voicePlaying)remaining=0;if(remaining==0)return Action(finishDelay());return None;
 }
 SentenceWait::Action SentenceWait::confirm(){if(stage==Stage::Delay){if(!interruptible)return None;remaining=0;return Action(finishDelay());}if(stage==Stage::Message){cancel();return Next;}if(stage==Stage::Ready)return Action(finishDelay());return None;}

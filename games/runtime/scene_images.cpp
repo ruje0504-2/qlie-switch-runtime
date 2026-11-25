@@ -829,7 +829,59 @@ void SceneImages::installBackgroundBlur(const BackgroundBlur&blur){
  if(auto ready=readAhead->takeReady(blur.key()))
   layers.at(blur.layer).filtered[0]={blur.source,std::move(ready->bitmap),blur.name};
 }
-std::vector<std::string> SceneImages::warmPaths(const std::string&line,CharacterPrefixes* future)const{
+static bool portraitFilterProperty(const std::string&name){
+ return name=="imgfilter"||name=="imgfilterbase"||name=="imgfilter0";
+}
+static bool portraitGradientFilter(const std::string&name){
+ return name.find("\"goverlay,")!=name.npos;
+}
+std::string SceneImages::PortraitGradient::key()const{
+ return "@portrait-filter/"+qlie::canonical(path)+"/"+name;
+}
+void SceneImages::warmPortraitGradient(const PortraitGradient&gradient,bool required){
+ readAhead->request(gradient.key(),[&sourceAssets=assets,path=gradient.path,name=gradient.name,source=gradient.source]{
+  WarmAsset ready;
+  ready.bitmap=source?source:sceneBitmap(image(sourceAssets.read(path)));
+  ready.filteredBitmap=sceneBitmap(filterImage(*ready.bitmap,name));
+  ready.bytes=ready.filteredBitmap->pixels.size()+(source?0:ready.bitmap->pixels.size());
+  return ready;
+ },required);
+}
+void SceneImages::takePortraitGradient(PortraitGradient&gradient){
+ if(gradient.result)return;
+ if(auto ready=readAhead->takeReady(gradient.key())){
+  const auto&source=cache.try_emplace(gradient.path,ready->bitmap).first->second;
+  // A predicted portrait can also be loaded by an earlier command.
+  if(source!=ready->bitmap&&(source->width!=ready->bitmap->width||
+     source->height!=ready->bitmap->height||source->pixels!=ready->bitmap->pixels))return;
+  gradient.source=source;
+  gradient.result=std::move(ready->filteredBitmap);
+ }
+}
+void SceneImages::installPortraitGradient(const PortraitGradient&gradient){
+ if(!gradient.result)return;
+ auto it=layers.find(gradient.layer);
+ if(it==layers.end())return;
+ auto&layer=it->second;
+ const auto path=layer.params.find("@portrait");
+ if(path!=layer.params.end()&&path->second==gradient.path&&layer.pixels==gradient.source&&
+    !layer.scriptReplacement&&!layer.uiSlots.count(0)&&filterName(layer.params,0)==gradient.name)
+  layer.filtered[0]={gradient.source,gradient.result,gradient.name};
+}
+void SceneImages::prepareRestoredPortraitGradients(){
+ for(auto&[name,layer]:layers){
+  if(!splitCharacters.count(name)||!layer.pixels||!layer.params.count("@portrait")||
+     layer.params.at("show")=="false"||layer.scriptReplacement||layer.uiSlots.count(0))continue;
+  const auto hide=layer.params.find("hide");
+  if(hide!=layer.params.end()&&hide->second=="true")continue;
+  auto filter=filterName(layer.params,0);
+  if(portraitGradientFilter(filter))
+   layer.filtered[0]={layer.pixels,sceneBitmap(filterImage(*layer.pixels,filter)),std::move(filter)};
+ }
+}
+std::vector<std::string> SceneImages::warmPaths(const std::string&line,CharacterPrefixes* future,
+                                              std::optional<PortraitGradient>* gradient)const{
+ if(gradient)gradient->reset();
  std::vector<std::string> result;auto comma=line.find(',');if(comma==line.npos)return result;
  auto cmd=line.substr(1,comma-1);
  bool chara=cmd.rfind("chara",0)==0,face=cmd=="face",message=cmd=="message";
@@ -852,10 +904,38 @@ std::vector<std::string> SceneImages::warmPaths(const std::string&line,Character
   if(collectCharacterParts(args,parts))args.push_back("file:"+characterPartsName(parts));
   if(future)future->parts.insert_or_assign(cmd,std::move(parts));
  }
+ const bool predictPortrait=multipart&&gradient&&readAhead;
+ CharacterPrefixes::Portrait portrait;
+ std::string portraitRequest;
+ if(predictPortrait){
+  if(future&&future->portraits.count(cmd))portrait=future->portraits.at(cmd);
+  else if(layer!=layers.end()){
+   const auto&current=layer->second;
+   const auto param=[&](const char*key){auto i=current.params.find(key);return i==current.params.end()?std::string{}:i->second;};
+   portrait.path=param("@portrait");
+   portrait.visible=param("show")!="false";
+   portrait.hidden=param("hide")=="true";
+   portrait.replaced=bool(current.scriptReplacement)||current.uiSlots.count(0);
+   for(const char*key:{"imgfilter","imgfilter0","imgfilterbase"})
+    if(auto i=current.params.find(key);i!=current.params.end())portrait.filters.insert(*i);
+  }
+  // An incoming file clears existing script replacements before fields run.
+  if(std::any_of(args.begin(),args.end(),[](const auto&field){return field.rfind("file:",0)==0;}))
+   portrait.replaced=layer!=layers.end()&&layer->second.uiSlots.count(0);
+ }
  for(auto&field:args){
   if(field=="clear:def"){base.clear();if(chara)stem.clear();}
   auto sep=field.find(':');if(sep==field.npos)continue;
   auto key=field.substr(0,sep),name=field.substr(sep+1);
+  if(predictPortrait){
+   if(field=="clear:def"){portrait={};portraitRequest.clear();}
+   else if(key=="clear"){portrait.path.clear();portraitRequest.clear();portrait.visible=false;portrait.replaced=false;}
+   else if(key=="show")portrait.visible=name!="false";
+   else if(key=="hide")portrait.hidden=name=="true";
+   else if(key=="file"){portrait.path.clear();portraitRequest.clear();}
+   else if(key.size()==4&&key.rfind("rep",0)==0&&key.back()>='0'&&key.back()<='3')portrait.replaced=true;
+   else if(portraitFilterProperty(key))portrait.filters.insert_or_assign(key,name);
+  }
   if(key=="file"&&!chara)name=split(name,':').front();
   if((chara||face)&&key=="base"){base=std::move(name);continue;}
   if(name.empty()||name=="none"||name=="none:none"||name.find('$')!=name.npos)continue;
@@ -866,8 +946,11 @@ std::vector<std::string> SceneImages::warmPaths(const std::string&line,Character
    if(chara){prefix="chara/";name=characterImageName(name,stem);}
    else if(face)prefix="face/";else if(message)prefix=alternateMessageWindow?"avg2/window/":"avg/window/";
   }
+  const bool portraitFile=predictPortrait&&key=="file";
+  if(portraitFile&&!future)portraitRequest=prefix+name;
   auto path=sceneResource(assets,prefix+name,true);
   if(path.empty())continue;
+  if(portraitFile)portrait.path=path;
   if(needsWarmFile(path,future!=nullptr))result.push_back(path);
   if(future&&chara&&!replacement){
    const auto portrait=faceResource(mappedFace(path),true);
@@ -886,6 +969,25 @@ std::vector<std::string> SceneImages::warmPaths(const std::string&line,Character
    auto path=sceneResource(assets,"chara/"+extension,true);
    if(!path.empty()&&needsWarmFile(path,future!=nullptr))result.push_back(std::move(path));
   }
+ }
+ if(predictPortrait){
+  if(portrait.visible&&!portrait.hidden&&!portrait.replaced&&!portrait.filters.empty()){
+   auto filter=filterName(portrait.filters,0);
+   const bool gradientFilter=portraitGradientFilter(filter);
+   if(gradientFilter&&!portraitRequest.empty())
+    portrait.path=sceneResource(assets,portraitRequest,false);
+   if(gradientFilter&&!portrait.path.empty()&&!sceneCompositePath(portrait.path)){
+    PortraitGradient plan{cmd,portrait.path,std::move(filter),{},{}};
+    if(auto cached=cache.find(plan.path);cached!=cache.end())plan.source=cached->second;
+    if(layer!=layers.end()){
+     const auto&existing=layer->second.filtered[0];
+     if(existing.source==plan.source&&existing.name==plan.name)plan.result=existing.result;
+    }
+    result.erase(std::remove(result.begin(),result.end(),plan.path),result.end());
+    *gradient=std::move(plan);
+   }
+  }
+  if(future)future->portraits.insert_or_assign(cmd,std::move(portrait));
  }
  if(chara&&future)future->simple.insert_or_assign(cmd,std::move(stem));
  return result;

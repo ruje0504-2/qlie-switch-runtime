@@ -24,7 +24,7 @@ struct DecodedPcm {
  int16_t operator[](size_t i)const{return samples.get()[i];}
 };
 struct WarmAsset {
- std::shared_ptr<const Image> bitmap;
+ std::shared_ptr<const Image> bitmap,filteredBitmap;
  std::map<std::string,std::shared_ptr<const Image>> uiBitmaps;
  std::shared_ptr<Composite> composite;
  std::shared_ptr<PreparedEmbeddedOpening> embeddedOpening;

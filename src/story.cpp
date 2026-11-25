@@ -178,13 +178,15 @@ std::vector<std::string> Story::upcomingAssetCommands(bool opening){
    if(media!=state.vars.end()&&!media->second.empty())out.push_back(endingMovieCommand(media->second));
    return;
   }
-  const bool clearsCharacter=text.rfind("^chara",0)==0&&text.find("clear:def")!=text.npos;
+  const bool updatesPortrait=text.rfind("^chara",0)==0&&
+    (text.find(",clear:")!=text.npos||text.find(",imgfilter")!=text.npos||
+     text.find(",show:")!=text.npos||text.find(",hide:")!=text.npos||text.find(",rep")!=text.npos);
   const bool filtersBackground=text.rfind("^bg",0)==0&&text.find(",imgfilter")!=text.npos&&text.find("blur")!=text.npos;
   const bool resourceCommand=!text.empty()&&text.front()=='^'&&
     (text.find(",file")!=text.npos||text.find(",$")!=text.npos||text.find(",base:")!=text.npos);
   const bool rule=text.rfind("^sentence,",0)==0&&
     (text.find("fade:rule:")!=text.npos||text.find("fademode:rule")!=text.npos);
-  if(text.rfind("^movie,",0)==0||clearsCharacter||filtersBackground||resourceCommand||rule||text.rfind("％",0)==0)
+  if(text.rfind("^movie,",0)==0||updatesPortrait||filtersBackground||resourceCommand||rule||text.rfind("％",0)==0)
    out.push_back(text);
  };
  size_t end=std::min(source->ops.size(),pc+96);

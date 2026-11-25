@@ -61,6 +61,12 @@ public:
  void setReadAhead(AssetReadAhead*loader){readAhead=loader;}
  void setNativeVideoSurfaces(bool enable){prefetchNativeVideo=enable;}
  struct CharacterPrefixes {
+  struct Portrait {
+   std::string path;
+   std::map<std::string,std::string> filters;
+   bool visible=true,hidden=false,replaced=false;
+  };
+  std::map<std::string,Portrait> portraits;
   std::map<std::string,std::string> simple;
   std::map<std::string,std::map<std::string,std::string>> parts;
  };
@@ -72,7 +78,17 @@ public:
  std::optional<BackgroundBlur> backgroundBlur(const std::string&)const;
  void warmBackgroundBlur(const BackgroundBlur&,bool required=false);
  void installBackgroundBlur(const BackgroundBlur&);
- std::vector<std::string> warmPaths(const std::string&,CharacterPrefixes* future=nullptr)const;
+ struct PortraitGradient {
+  std::string layer,path,name;
+  std::shared_ptr<const Image> source,result;
+  std::string key()const;
+ };
+ std::vector<std::string> warmPaths(const std::string&,CharacterPrefixes* future=nullptr,
+                                   std::optional<PortraitGradient>* gradient=nullptr)const;
+ void warmPortraitGradient(const PortraitGradient&,bool required=false);
+ void takePortraitGradient(PortraitGradient&);
+ void installPortraitGradient(const PortraitGradient&);
+ void prepareRestoredPortraitGradients();
  bool warmFile(const std::string&,bool required=false,bool prepareVideo=true);
  void draw(RenderTarget&,bool liveVideo=false,const Affine2D* view=nullptr)const;
  void drawScene(RenderTarget&,bool liveVideo=false)const;void drawFaces(RenderTarget&)const;void drawMessages(RenderTarget&)const;

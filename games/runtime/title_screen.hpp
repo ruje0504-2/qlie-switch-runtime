@@ -24,6 +24,10 @@ public:
  explicit TitleScreen(qlie::Assets&,TitleLayout={},std::array<unsigned,2> sceneSize={1280,720});
  bool rollAlternate();
  bool prepareOpening(AssetReadAhead*loader,bool unlocked=false);
+#ifdef QLIE_PROFILE_WHJ6
+ bool openingAssetsReady(AssetReadAhead&,bool alternate)const;
+ const Image* openingBackdrop()const{return scene.uiMemberBitmap("ui_back","bg");}
+#endif
  void setNativeVideoSurfaces(bool enabled){scene.setNativeVideoSurfaces(layout.asyncBackdropVideo&&enabled);}
  void beginExit();
  void leave(){scene.clear(true);}

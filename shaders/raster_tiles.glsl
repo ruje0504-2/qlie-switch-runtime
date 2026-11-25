@@ -38,6 +38,10 @@ void applyDraw(Draw p,ivec2 q,uint index,inout uvec4 color
 #ifdef DEKO_MOTION_KERNEL
   if(coordMode==AxisAligned)uv=vec2(tileCoords[gl_LocalInvocationID.x].x,tileCoords[gl_LocalInvocationID.y].y);
   else
+#ifdef DEKO_WHJ6_MOTION
+  if(coordMode==SecondAxisAligned)uv=vec2(secondTileCoords[gl_LocalInvocationID.x].x,secondTileCoords[gl_LocalInvocationID.y].y);
+  else
+#endif
 #endif
   {precise vec2 d=vec2(q)+.5-p.p1.xy;uv=vec2(divide(p.p0.w*d.x-p.p0.y*d.y,p.p1.z),divide(-p.p0.z*d.x+p.p0.x*d.y,p.p1.z));}
   if(any(lessThan(uv,vec2(0)))||any(greaterThanEqual(uv,vec2(p.meta.xy))))return;
@@ -81,7 +85,7 @@ void main(){
  uint saveAfter=control&0x7fffffffu;
 #ifdef DEKO_MOTION_KERNEL
  // Every invocation in this workgroup sees the same first draw and origin.
- // The only shared write happens before the loop, including for prefix replays.
+ // Shared coordinates are prepared before the loop, including for prefix replays.
  ivec2 tileOrigin=ivec2(origin&65535u,origin>>16);
  uint coordMode=0u;
  if(count!=0u){
@@ -89,11 +93,32 @@ void main(){
   coordMode=tileCoordMode(base,tileOrigin);
   if(coordMode!=0u&&gl_LocalInvocationID.y==0u)prepareTileCoord(base,tileOrigin,coordMode);
  }
+#ifdef DEKO_WHJ6_MOTION
+ // The moving panorama and the video snow layer both cover the canvas.
+ uint secondCoordMode=0u;
+ if(count>1u){
+  Draw second=draws[tiles[first+1u]];
+  if(tileCoordMode(second,tileOrigin)==AxisAligned){
+   secondCoordMode=SecondAxisAligned;
+   if(gl_LocalInvocationID.y==0u){
+    uint lane=gl_LocalInvocationID.x;
+    precise vec2 point=vec2(tileOrigin+ivec2(int(lane)))+0.5;
+    secondTileCoords[lane]=axisTileCoord(second,point);
+   }
+  }
+ }
+ if(coordMode!=0u||secondCoordMode!=0u)barrier();
+#else
  if(coordMode!=0u)barrier();
+#endif
 #endif
  for(uint item=0;item<count;++item){
 #ifdef DEKO_MOTION_KERNEL
+#ifdef DEKO_WHJ6_MOTION
+  applyDraw(draws[tiles[first+item]],q,index,color,item==0u?coordMode:item==1u?secondCoordMode:0u);
+#else
   applyDraw(draws[tiles[first+item]],q,index,color,item==0u?coordMode:0u);
+#endif
 #else
   applyDraw(draws[tiles[first+item]],q,index,color);
 #endif

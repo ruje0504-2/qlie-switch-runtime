@@ -4,6 +4,10 @@
 // are constant down a column. Keep the same precision and division order.
 const uint AxisAligned=1u,EdgeBC=2u,EdgeCA=3u,EdgeAB=4u;
 shared vec2 tileCoords[16];
+#ifdef DEKO_WHJ6_MOTION
+const uint SecondAxisAligned=5u;
+shared vec2 secondTileCoords[16];
+#endif
 
 uint tileCoordMode(Draw p,ivec2 origin){
  if((p.meta.z>>20)!=0u||(p.meta.z&524288u)!=0u)return 0u;
@@ -15,12 +19,16 @@ uint tileCoordMode(Draw p,ivec2 origin){
  return 0u;
 }
 
+vec2 axisTileCoord(Draw p,vec2 point){
+ precise vec2 delta=point-p.p1.xy;
+ return vec2(divide(p.p0.w*delta.x,p.p1.z),divide(p.p0.x*delta.y,p.p1.z));
+}
+
 void prepareTileCoord(Draw p,ivec2 origin,uint mode){
  uint lane=gl_LocalInvocationID.x;
  precise vec2 point=vec2(origin+ivec2(int(lane)))+0.5;
  if(mode==AxisAligned){
-  precise vec2 delta=point-p.p1.xy;
-  tileCoords[lane]=vec2(divide(p.p0.w*delta.x,p.p1.z),divide(p.p0.x*delta.y,p.p1.z));
+  tileCoords[lane]=axisTileCoord(p,point);
  }else{
   vec2 a=mode==EdgeBC?p.p1.xy:mode==EdgeCA?p.p2.xy:p.p0.xy;
   vec2 b=mode==EdgeBC?p.p2.xy:mode==EdgeCA?p.p0.xy:p.p1.xy;

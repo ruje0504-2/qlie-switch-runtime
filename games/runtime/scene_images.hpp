@@ -111,6 +111,9 @@ public:
  void takeUiBitmaps(const std::string&key);
  void setUiMotion(const std::string&layer,const char*motion);
  const Animation& uiAnimation(const std::string& layer)const;
+#ifdef QLIE_PROFILE_WHJ6
+ const Image* uiMemberBitmap(const std::string&layer,std::string_view name)const;
+#endif
  void removeUiLayer(const std::string&layer,bool releaseAsset=false);
  void resetUiAnimations();
  void seekUiLayer(const std::string& layer,double milliseconds);

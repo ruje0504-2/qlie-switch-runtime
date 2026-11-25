@@ -23,8 +23,8 @@ struct SettingToggle{const char*key;const char*yes;const char*no;float y;bool le
 constexpr SettingToggle toggles[]={
 #ifdef QLIE_PROFILE_WHJ6
  {"ClickVoiceStop","on","off",whj6::ui::to720(500),false},
- {"AutoPlayVoiceWait","on","off",whj6::ui::to720(963),true},
- {"SkipMode","既読のみ","全て",whj6::ui::to720(700),true}
+ {"AutoPlayVoiceWait","on","off",whj6::ui::to720(whj6::profile::settingsVoiceWaitY),true},
+ {"SkipMode","既読のみ","全て",whj6::ui::to720(700+whj6::profile::settingsTextShift),true}
 #else
  {"ClickVoiceStop","する","しない",353,!gameSettingsLayout.classic},
  {"AutoPlayVoiceWait","待つ","待たない",412,true},
@@ -180,6 +180,9 @@ void GameMenu::update(double ms){
 }
 const Image& GameMenu::resource(const std::string&path){auto it=cache.find(path);if(it==cache.end()){auto hash=path.find('#');Image decoded;
  if(hash==path.npos)decoded=image(assets.read(path));else {unsigned wanted=unsigned(std::stoul(path.substr(hash+1))),index=0;bool found=false;for(auto&member:abmp(assets.read(path.substr(0,hash))))if(member.type.rfind("abimg",0)==0){if(index++==wanted){decoded=image(member.data);found=true;break;}}if(!found)throw std::runtime_error("UI image member missing "+path);}
+#ifdef QLIE_PROFILE_WHJ6
+ if(path=="script/config/bg1.png")whj6::ui::layoutSettingsBackground(decoded);
+#endif
  if(gameSettingsLayout.classic&&path=="script/config/設定_フレーム_0.png"&&decoded.width==1008&&decoded.height==544){
   // These printed labels describe Windows controls. Keep the original gradient.
   const unsigned left=18,width=200;
@@ -454,20 +457,13 @@ void GameMenu::drawWhj6Panel(RenderQueue& q){
  if(panel==Settings){
   const std::string dir="script/config/";
   art(dir+"bg1.png",0,0);
-  const char* display[3][2]={{"ウィンドウ","フルスクリーン"},{"高画質","低画質"},{"on","off"}};
-  for(int row=0;row<3;++row)for(int column=0;column<2;++column){
-   const bool active=column==(row==0);
-   art(dir+display[row][column]+(active?"_hold.png":"_off.png"),585+column*240,220+row*40,true,180);
-  }
-  art(dir+"hscroll_bar.b#2",480,330,false,180);
-  art(dir+"scroll_button.b#2",480,340,true,180);
   constexpr const char* prompts[]={"クイックロード","データロード","データ上書き","データ入替え",
    "データ削除","ログジャンプ","設定初期化","タイトルへ戻る","ゲーム終了"};
   for(int i=0;i<9;++i)
-   art(dir+"表示_"+prompts[i]+std::string(i==0||i==3?"_off.png":"_hold.png"),585+(i%2)*240,380+(i/2)*40,true,180);
-  art(dir+"変更する_off.png",585,740,true,180);
-  art(dir+"priview_windowalpha.b#1",482,812,false,unsigned(settings.get("WindowAlpha")));
-  if(!windowPreview.pixels.empty())bitmap(q,windowPreview,to720(496),to720(826),270,38);
+   art(dir+"表示_"+prompts[i]+std::string(i==0||i==3?"_off.png":"_hold.png"),585+(i%2)*240,380+whj6::profile::settingsPromptShift+(i/2)*40,true,180);
+  art(dir+"変更する_off.png",585,740+whj6::profile::settingsTextShift,true,180);
+  art(dir+"priview_windowalpha.b#1",482,812+whj6::profile::settingsTextShift,false,unsigned(settings.get("WindowAlpha")));
+  if(!windowPreview.pixels.empty())bitmap(q,windowPreview,to720(496),to720(826+whj6::profile::settingsTextShift),270,38);
   for(int i=0;i<9;++i){
    const auto&slider=sliders[i];
    const auto state=focus==3+i?"1":"0";

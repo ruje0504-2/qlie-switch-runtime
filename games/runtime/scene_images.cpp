@@ -1289,6 +1289,15 @@ const Animation& SceneImages::uiAnimation(const std::string&name)const{
  if(!object||object->standaloneVideo)throw std::runtime_error("Missing UI animation metadata "+name);
  return object->definition;
 }
+#ifdef QLIE_PROFILE_WHJ6
+const Image* SceneImages::uiMemberBitmap(const std::string&layer,std::string_view name)const{
+ const auto found=layers.find(layer);
+ if(found==layers.end()||!found->second.composite)return nullptr;
+ const auto& members=found->second.composite->members;
+ const auto member=std::find_if(members.begin(),members.end(),[name](const auto&item){return item.name==name;});
+ return member==members.end()?nullptr:member->image.get();
+}
+#endif
 void SceneImages::removeUiLayer(const std::string&name,bool releaseAsset){
  if(name.rfind("ui_",0)!=0)throw std::runtime_error("UI layer owner");
  auto layer=layers.find(name);

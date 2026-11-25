@@ -24,6 +24,7 @@ public:
  bool beginVideoSurface(const KVideoSurface&);
  void finishPresentation();
  std::optional<uint64_t> present(bool refreshUnchanged=true);std::optional<uint64_t> presentPixels(const qlie::Bytes&);
+ void warmBitmap(const Image&);
  void beginBatch()override;void endBatch()override;
  bool supportsMasks()const override{return true;}
  void maskedImage(const Image&,const Image&,const AnimationSample::Mask&,const Affine2D&,float,uint32_t,uint32_t,unsigned,unsigned)override;

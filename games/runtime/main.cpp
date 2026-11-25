@@ -202,6 +202,9 @@ struct Frontend {
  bool sceneSkipFirstFrame=false;
  std::unique_ptr<whj2::TitleScreen>title;
  std::optional<bool> preparedTitleAlternate;
+#ifdef QLIE_PROFILE_WHJ6
+ bool openingTitleReady=false,openingStoryWarmed=false;
+#endif
  std::unique_ptr<whj2::ChoiceScreen>choiceScreen;
  std::unique_ptr<whj2::MusicScreen>musicScreen;
  std::unique_ptr<whj2::CgScreen>cgScreen;
@@ -632,6 +635,23 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    else images->warmFile(h.path);
   }
  }
+#ifdef QLIE_PROFILE_WHJ6
+ void prepareTitleDuringOpening(){
+  if(!opening||!preparedTitleAlternate)return;
+  if(!openingTitleReady){
+   if(!title->openingAssetsReady(*readAhead,*preparedTitleAlternate))return;
+   title->reset(*preparedTitleAlternate,progress.extras());
+   openingTitleReady=true;
+   QLIE_LOG_LINE(<<"OPENING prepared snow scene during stage="<<opening<<"\n");
+  }
+  // Once the last logo has consumed its preload, use the idle time for the
+  // first story resources. warmNextScene can discard unneeded hints then.
+  if(opening==3&&movie->hasFrame()&&!openingStoryWarmed){
+   warmNextScene(true);
+   openingStoryWarmed=true;
+  }
+ }
+#endif
  void prepareExtras(){
   if(!progress.extras())return;
   musicScreen->prepare();
@@ -659,7 +679,11 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  void showTitle(){cancelPendingScene();story.state.vars.erase("__scene_skip_active");sceneSkipOverlay.reset();historyCheckpoints.clear();menuFade.reset();titleStarting=false;titleStartElapsed=0;transition->reset();normalSkip=false;currentPageKey.clear();extrasExit.reset();cgScreen->close();replayActive=false;replayScreen->close();if(musicScreen->visible())musicScreen->close();opening=0;images->clear();syncProgress();prepareExtras();menu=true;hidden=false;focus=0;upperMenu->close();gameMenu.close();
   const bool alternate=preparedTitleAlternate?*preparedTitleAlternate:title->rollAlternate();
   preparedTitleAlternate.reset();
-  title->reset(alternate,progress.extras());audio->stopAll();clearBackgroundVoice();
+#ifdef QLIE_PROFILE_WHJ6
+  if(!std::exchange(openingTitleReady,false))
+#endif
+   title->reset(alternate,progress.extras());
+  audio->stopAll();clearBackgroundVoice();
   titleAudioElapsed=0;
   constexpr auto intro=game_profile::title.audio;
   if(intro.opening){
@@ -667,7 +691,10 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    audio->warmFile(assets,intro.middle);
    if(game_profile::titleMusic[0])audio->warmFile(assets,game_profile::titleMusic);
   }else playTitleTheme();
-  warmNextScene(true);
+#ifdef QLIE_PROFILE_WHJ6
+  if(!std::exchange(openingStoryWarmed,false))
+#endif
+   warmNextScene(true);
  }
  void invalidateHistoryRows(){historyRows={};historyViewOffset=-1;}
  void replaceHistory(std::vector<whj2::HistoryEntry> entries={}){
@@ -1971,7 +1998,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    if(gameMenu.requested==UI::SectionSkip)line("このシーンをスキップしますか？",475,317,24,0xffffff,&queue);
    return;
   }
-  if(gameMenu.panel==UI::Settings)line("等待语音",217,632,19,0xffffff,&queue);
+  if(gameMenu.panel==UI::Settings)line("等待语音",205*2/3,
+   (game_profile::settingsVoiceWaitY-15)*2/3,19,0xffffff,&queue);
   if(gameMenu.panel==UI::Load&&gameMenu.choiceBackupAvailable)
    line("上一个选项",37,679,20,gameMenu.focus==UI::ChoiceBackupFocus?0xffea99:0xffffff,&queue);
 #else
@@ -2080,6 +2108,10 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }else{
   frameTarget=gpu.get();composeNative(scene,true);
  }
+#ifdef QLIE_PROFILE_WHJ6
+ if(opening&&openingTitleReady)
+  if(const auto* backdrop=title->openingBackdrop())gpu->warmBitmap(*backdrop);
+#endif
  drawMenuFade(*frameTarget);
  recordShown();if(fpsVisible)fpsDisplay.draw(*frameTarget);frameTarget=nullptr;
  // FIFO presentation supplies the native 60 Hz limit. A second software sleep
@@ -2416,6 +2448,9 @@ controllerKey(e.cbutton.button);
  if(normalSkip&&!menuFadeLocksInput()&&!resumedScene&&!pendingScene&&!menu&&!gameMenu.visible()&&!upperMenu->visible()&&!movie->playing()&&!story.state.awaiting){hidden=false;if(messageText->reveal())refreshMessage();auto action=sentenceWait.skip();if(action!=whj2::SentenceWait::None){transition->reset();next(action==whj2::SentenceWait::Resume);}}
  if(!menuFadeLocksInput())updateMessageCursor(double(now-lastUpdate));
  lastUpdate=now;
+#ifdef QLIE_PROFILE_WHJ6
+ prepareTitleDuringOpening();
+#endif
  const auto beforeDraw=qlie::diagnostics?SDL_GetTicks64():0;
  draw();
  finishMenuFade();
@@ -2588,8 +2623,24 @@ controllerKey(e.cbutton.button);
  if(frames==72){if(fpsVisible)throw std::runtime_error("Minus did not hide FPS");snapshot("fps-hidden-again.bmp");}
  if(++frames>=smoke){QLIE_LOG_LINE(<<"FPS PASS default hidden / Minus show-hide / actual sample="<<fpsDisplay.fps()<<"\n");done=true;}continue;
  }if(autoTest){
+#ifdef QLIE_PROFILE_WHJ6
+ if(frames==1)activate();
+ if(autoPhase==0&&frames>1&&!pendingScene&&!menu){
+  if(!images->messageVisible()||!sentenceWait.waitingForMessage()){
+   if(frames%30==0)activate();
+  }else{
+   settings.set("AutoTextWait",0);settings.set("AutoClickWait",0);settings.set("TextSpeed",0);
+   settings.set("AutoPlayVoiceWait",0);applySettings();autoPlay.page(0);
+   SDL_Event zl{};zl.type=SDL_CONTROLLERAXISMOTION;
+   zl.caxis.axis=SDL_CONTROLLER_AXIS_TRIGGERLEFT;zl.caxis.value=32767;
+   if(SDL_PushEvent(&zl)<0)throw std::runtime_error(SDL_GetError());
+   skipStart=advances;autoPhase=1;autoPhaseFrame=frames;
+  }
+ }
+#else
  if(frames==1){activate();settings.set("AutoTextWait",0);settings.set("AutoClickWait",0);settings.set("TextSpeed",0);applySettings();autoPlay.page(0);pointer(1170,700);skipStart=advances;autoPhase=1;}
- if(autoPhase==1&&frames>1){if(!autoPlay.enabled)throw std::runtime_error("Original auto toggle");if(advances>skipStart){openPanel(whj2::GameMenu::Settings);skipStart=advances;autoPhase=2;autoPhaseFrame=frames;}else if(frames>240)throw std::runtime_error("Auto did not advance after native wait");}
+#endif
+ if(autoPhase==1&&frames>autoPhaseFrame&&frames>1){if(!autoPlay.enabled)throw std::runtime_error("Original auto toggle");if(advances>skipStart){openPanel(whj2::GameMenu::Settings);skipStart=advances;autoPhase=2;autoPhaseFrame=frames;}else if(frames-autoPhaseFrame>240)throw std::runtime_error("Auto did not advance after native wait");}
  if(autoPhase==2&&frames>=autoPhaseFrame+8&&!gameMenu.panelTransitioning()){if(advances!=skipStart)throw std::runtime_error("Auto advanced beneath settings");controllerKey(SDL_CONTROLLER_BUTTON_B);autoPhase=3;}
  if(autoPhase==3&&!gameMenu.visible()){pointer(1170,700);skipStart=advances;autoPhase=4;autoPhaseFrame=frames;}
  if(autoPhase==4&&frames>=autoPhaseFrame+8){if(autoPlay.enabled||advances!=skipStart)throw std::runtime_error("Auto toggle did not stop");save();auto before=autoPlay.save();load();if(autoPlay.save()!=before)throw std::runtime_error("Auto state restore");draw();snapshot("auto.bmp");QLIE_LOG_LINE(<<"AUTO PASS original toggle / native wait / progression / panel pause / cancel / save-load\n");done=true;}
@@ -2777,7 +2828,20 @@ Frontend f(game,saves);
  f.movie->openBytes(qlie::file(argv[4]),"local-test");
  }
  }
+#if defined(__SWITCH__) && defined(QLIE_PROFILE_WHJ6)
+ try{return f.run(smoke);}
+ catch(const std::exception& error){
+  // Release builds otherwise exit to hbmenu without the exception message.
+  if(auto*log=std::fopen("sdmc:/switch/whj6/runtime-error.log","w")){
+   std::fprintf(log,"build=%s auto=%d stage=%d page=%s\n%s\n",qlie_build_revision,
+                int(f.autoPlay.enabled),int(f.opening),f.currentPageKey.c_str(),error.what());
+   std::fclose(log);
+  }
+  throw;
+ }
+#else
  return f.run(smoke);
+#endif
  }catch(const std::exception&e){QLIE_LOG_LINE(<<"FAIL "<<e.what()<<"\n");
  return 1;
  }}

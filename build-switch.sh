@@ -47,13 +47,15 @@ case "${QLIE_SWITCH_VULKAN:-$qlie_switch_vulkan_default}" in
 *) echo "QLIE_SWITCH_VULKAN must be 0 or 1" >&2; exit 2 ;;
 esac
 python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --output build-switch/deko_raster.inc
-python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --motion --output build-switch/deko_motion.inc
+deko_motion_profile=
+if [ "$qlie_game" = whj6 ]; then deko_motion_profile=--whj6; fi
+python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --motion $deko_motion_profile --output build-switch/deko_motion.inc
 python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --restore --output build-switch/deko_restore.inc
 python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --field --output build-switch/deko_field.inc
 python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --base --output build-switch/deko_base.inc
 python3 tools/build_deko_shader.py --uam "$dkp/tools/bin/uam" --video --output build-switch/deko_video.inc
 $cxx -std=c++17 $flags -ffp-contract=off -Wno-misleading-indentation -c src/gpu_raster.cpp -o build-switch/gpu_raster.o
-$cxx -std=c++17 $flags $codec_flags -ffp-contract=off -Ibuild-switch -c src/deko3d_raster.cpp -o build-switch/deko3d_raster.o
+$cxx -std=c++17 $flags $qlie_profile_flags $codec_flags -ffp-contract=off -Ibuild-switch -c src/deko3d_raster.cpp -o build-switch/deko3d_raster.o
 $cc -std=c11 $flags -c src/switch_stdio.c -o build-switch/switch_stdio.o
 flags="$flags -ffp-contract=off -DWHJ2_WITH_DEKO3D $vulkan_flags"
 

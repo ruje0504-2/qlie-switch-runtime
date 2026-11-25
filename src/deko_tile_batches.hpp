@@ -4,12 +4,16 @@
 
 namespace whj2::gpu {
 // The motion shader implements unmasked normal/subtractive sprites, projected
-// triangles, and the original two transition operations. The general shader
-// covers other blend modes, glyphs, dimming and transformed masks.
+// triangles, and the original two transition operations. WHJ6 also uses it for
+// the title snow's screen blend and the additive entrance fade.
 inline bool motionDraw(const DrawData& draw){
  const uint32_t flags=draw.image.meta[2];
  const unsigned op=flags>>20,blend=(flags>>8)&255u;
- return op==3||op==4||(op==0&&!(flags&262144u)&&(blend<2||blend==8));
+ bool supportedBlend=blend<2||blend==8;
+#ifdef QLIE_PROFILE_WHJ6
+ supportedBlend|=blend==2||blend==7;
+#endif
+ return op==3||op==4||(op==0&&!(flags&262144u)&&supportedBlend);
 }
 
 // A lone opaque draw proven to cover the whole tile can start with its packed

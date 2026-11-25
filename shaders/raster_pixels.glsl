@@ -93,11 +93,19 @@ uvec4 tint(Draw p,uvec4 s){
 uvec4 composite(uint mode,uvec4 s,uvec4 d){
  uint a=s.a;
 #ifdef DEKO_RASTER
-#ifndef DEKO_MOTION_KERNEL
+#if !defined(DEKO_MOTION_KERNEL) || defined(DEKO_WHJ6_MOTION)
  if(mode==2u){
   uvec4 w=(s*(a+(a>>7u)))>>8u;
   return min(uvec4(255u),w+d-((w*d)>>8u));
  }
+#endif
+#ifdef DEKO_WHJ6_MOTION
+ if(mode==7u){
+  uvec4 w=(s*(a+(a>>7u)))>>8u;
+  return min(uvec4(255u),w+d);
+ }
+#endif
+#ifndef DEKO_MOTION_KERNEL
  if(mode==13u){
   // Invert the inputs and result above the hard-light midpoint.
   uvec4 invert=uvec4(greaterThanEqual(s,uvec4(128u)))*255u;

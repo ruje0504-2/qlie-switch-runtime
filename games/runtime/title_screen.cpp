@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "title_screen.hpp"
+#include "asset_read_ahead.hpp"
 #include "render_queue.hpp"
 #include <algorithm>
 #include <cmath>
@@ -42,6 +43,13 @@ bool TitleScreen::prepareOpening(AssetReadAhead*loader,bool unlocked){
  scene.warmUiBitmaps(titleBitmaps,std::move(paths));
  return alternate;
 }
+#ifdef QLIE_PROFILE_WHJ6
+bool TitleScreen::openingAssetsReady(AssetReadAhead&worker,bool alternate)const{
+ return worker.ready(qlie::canonical(layout.back[alternate]))&&
+        worker.ready(qlie::canonical(layout.frame[alternate]))&&
+        worker.ready(qlie::canonical(layout.buttonArt[0]))&&worker.ready(titleBitmaps);
+}
+#endif
 void TitleScreen::setBackdrop(bool alternate){
  viewX=0;viewTarget=640;
  scene.command(std::string("^ui_back,file:")+layout.back[alternate]+",x:0,y:0,pri:0");

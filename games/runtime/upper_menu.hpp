@@ -5,10 +5,10 @@ namespace whj2 {
 class RenderTarget;
 class UpperMenu {
 #ifdef QLIE_PROFILE_WHJ6
- Image frame;std::array<Image,5> off,on;
+ Image frame;std::array<Image,4> off,on;
  std::array<Image,2> saveLoadLocked;
- bool saveLoadEnabled=true,screenMode=false;
- bool enabled(int index)const{return index==2?screenMode:index<3||saveLoadEnabled;}
+ bool saveLoadEnabled=true;
+ bool enabled(int index)const{return index<2||saveLoadEnabled;}
 #else
  Image frame;std::array<Image,3> off,on;
 #endif

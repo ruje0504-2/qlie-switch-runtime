@@ -8,18 +8,18 @@
 namespace whj2 {
 #ifdef QLIE_PROFILE_WHJ6
 namespace {
-constexpr int buttonX[]={770,990,1210,1450,1670};
-constexpr UpperMenu::Action actions[]={UpperMenu::Quit,UpperMenu::Title,UpperMenu::Screen,UpperMenu::Save,UpperMenu::Load};
+constexpr int buttonX[]={770,990,1450,1670};
+constexpr UpperMenu::Action actions[]={UpperMenu::Quit,UpperMenu::Title,UpperMenu::Save,UpperMenu::Load};
 }
-UpperMenu::UpperMenu(qlie::Assets&assets,bool showScreen)
- :frame(image(assets.read("avg/uppermenu/メニューバー.png"))),screenMode(showScreen),buttonCount(5){
+UpperMenu::UpperMenu(qlie::Assets&assets,bool)
+ :frame(image(assets.read("avg/uppermenu/メニューバー.png"))),buttonCount(4){
  frame.version.publish();
- constexpr const char*names[]={"ゲームの終了","タイトルへ戻る","画面の切り替え","データのセーブ","データのロード"};
+ constexpr const char*names[]={"ゲームの終了","タイトルへ戻る","データのセーブ","データのロード"};
  for(int i=0;i<buttonCount;++i){
   const auto prefix=std::string("avg/uppermenu/")+names[i];
   off[i]=image(assets.read(prefix+"_off.png"));off[i].version.publish();
   on[i]=image(assets.read(prefix+"_on.png"));on[i].version.publish();
-  if(i>=3){saveLoadLocked[i-3]=image(assets.read(prefix+"_lock.png"));saveLoadLocked[i-3].version.publish();}
+  if(i>=2){saveLoadLocked[i-2]=image(assets.read(prefix+"_lock.png"));saveLoadLocked[i-2].version.publish();}
  }
 }
 void UpperMenu::move(int direction){
@@ -61,9 +61,9 @@ void UpperMenu::render(qlie::Bytes*pixels,RenderTarget*target)const{if(!shown)re
  using whj6::ui::to720;
  queue.image(frame,imagePlacement(0,0,2.f/3,2.f/3,0,0,0,frame.width,frame.height),3000,255,0,0xffffff);
  for(int i=0;i<buttonCount;++i){
-  const auto& button=i>=3&&!enabled(i)?saveLoadLocked[i-3]:i==selected?on[i]:off[i];
+  const auto& button=!enabled(i)?saveLoadLocked[i-2]:i==selected?on[i]:off[i];
   queue.image(button,imagePlacement(to720(buttonX[i]),to720(21),2.f/3,2.f/3,0,.5,.5,button.width,button.height),
-              3010,i==2&&!screenMode?127:255,0,0xffffff);
+              3010,255,0,0xffffff);
  }
  if(target)queue.draw(*target,1280,720);else queue.draw(*pixels,1280,720);
 #else

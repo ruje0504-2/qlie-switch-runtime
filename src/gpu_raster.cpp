@@ -477,6 +477,11 @@ void GpuRaster::image(const Image&i,const Affine2D&m,float alpha,uint32_t add,ui
  }
  drawImage(i,m,alpha,add,mul,blend,filter);
 }
+void GpuRaster::warmBitmap(const Image&image){
+ uint64_t identity;
+ bool opaque;
+ impl->texture(image,identity,&opaque);
+}
 void GpuRaster::drawImage(const Image&i,const Affine2D&m,float alpha,uint32_t add,uint32_t mul,unsigned blend,unsigned filter){
  const bool unit=m.a==1&&m.d==1&&m.b==0&&m.c==0;
  float det=m.a*m.d-m.b*m.c;if(std::abs(det)<1e-12f)return;Push p;p.p[0][0]=m.a;p.p[0][1]=m.b;p.p[0][2]=m.c;p.p[0][3]=m.d;p.p[1][0]=m.x;p.p[1][1]=m.y;p.p[1][2]=det;

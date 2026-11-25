@@ -9,11 +9,12 @@ namespace whj6::profile {
 inline constexpr unsigned sceneReadAheadBytes=52u*1024*1024;
 inline constexpr std::array<unsigned,2> sceneSize{1920,1080};
 inline constexpr int sceneVideoMaxHeight=2700;
+inline constexpr int settingsPromptShift=-75,settingsTextShift=-58,settingsVoiceWaitY=894;
 inline constexpr whj2::SettingsLayout settingsLayout{{{
- {320,520,300,0,-6,0},{320,413.33f,300,0,-6,0},
+ {320,(780+settingsTextShift)*2.f/3,300,0,-6,0},{320,(620+settingsTextShift)*2.f/3,300,0,-6,0},
  {820,146.67f,300,0,-6,0},{820,173.33f,300,0,-6,0},{820,200,300,0,-6,0},
  {820,226.67f,300,0,-6,0},{820,253.33f,300,0,-6,0},{820,280,300,0,-6,0},
- {320,440,300,0,-6,0}
+ {320,(660+settingsTextShift)*2.f/3,300,0,-6,0}
 }}, {176.67f,203.33f,230,256.67f,283.33f}};
 inline const qlie::ArchiveLayout archives{
  qlie::PackVersion::v31,8,"GameData/data","","","","ボイス/","patch.dat",

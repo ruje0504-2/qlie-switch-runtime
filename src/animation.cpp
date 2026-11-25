@@ -175,6 +175,18 @@ float animationSine(int phase){
  }();
  return sine[phase&1023];
 }
+// WHJ1 0x4a29f8 blends a four-key cubic B-spline with linear or Hermite interpolation.
+float sampleSpline(float previous,float a,float b,float following,float power,double t){
+ const double u=1-t,t2=t*t,t3=t2*t;
+ const double spline=(u*u*u*previous+(3*t3-6*t2+4)*a+
+                      (1+3*(t+t2-t3))*b+t3*following)/6;
+ if(power<=1)return float(spline*power+(a+(b-a)*t)*(1-power));
+ const double tangentScale=a==b?.25:1.;
+ const double hermite=a==b&&previous==following?a:
+  (1+2*t)*u*u*a+(3-2*t)*t2*b+t*u*u*(b-previous)*tangentScale-
+  t2*u*(following-a)*tangentScale;
+ return float((2-power)*spline+(power-1)*hermite);
+}
 // PE offsets efcb0/efcd2 select the position/scale mode at 0x30.
 // f0860/f0882 use 0x33 for color/alpha. a1bb0/a1c38 use the
 // exponent 1 + 1.4 * power; these are not fixed quartic easing curves.
@@ -275,7 +287,14 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
  };
  uint32_t localRandomCursor=context.randomSeed&1023;
  auto&randomCursor=context.randomCursor?*context.randomCursor:localRandomCursor;
- auto val=[&](size_t offset,unsigned mode,float power){return sampleValue(number(a,offset),number(b,offset),mode,power,t,out.unsupported,randomCursor);
+ const auto&previous=layer.keys[i?i-1:i];
+ const auto&following=layer.keys[std::min(i+2,layer.keys.size()-1)];
+ auto interpolate=[&](const auto& read,unsigned mode,float power){
+  if(mode==2)return sampleSpline(read(previous),read(a),read(b),read(following),power,t);
+  return sampleValue(read(a),read(b),mode,power,t,out.unsupported,randomCursor);
+ };
+ auto val=[&](size_t offset,unsigned mode,float power){
+  return interpolate([&](const qlie::Bytes& key){return number(key,offset);},mode,power);
  };
  out.x=val(0x18,keyCode(a,0x30),keyCode(a,0x31)/100.f);
  out.y=val(0x1a,keyCode(a,0x30),keyCode(a,0x31)/100.f);
@@ -290,9 +309,15 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
  out.rotationX=val(0x48,keyCode(a,0x30),keyCode(a,0x31)/100.f);
  out.rotationY=val(0x4a,keyCode(a,0x30),keyCode(a,0x31)/100.f);
  if(a.size()>=0x98&&b.size()>=0x98)out.scaleZ=val(0x96,keyCode(a,0x30),keyCode(a,0x31)/100.f);
- out.z=sampleValue(float(int32_t(keyU32(a,0x4d))),float(int32_t(keyU32(b,0x4d))),keyCode(a,0x30),keyCode(a,0x31)/100.f,t,out.unsupported,randomCursor);
+ auto signedField=[&](size_t offset,unsigned mode,float power){
+  return interpolate([&](const qlie::Bytes& key){return float(int32_t(keyU32(key,offset)));},mode,power);
+ };
+ out.z=signedField(0x4d,keyCode(a,0x30),keyCode(a,0x31)/100.f);
 
- out.alpha=val(0x35,keyCode(a,0x33),keyCode(a,0x3b)/100.f);
+ const auto colorMode=keyCode(a,0x33);
+ const float colorPower=keyCode(a,0x3b)/100.f;
+ out.alpha=val(0x35,colorMode,colorPower);
+ if(colorMode==2)out.alpha=std::clamp(std::round(out.alpha),0.f,255.f);
  if(out.kind==10){
   auto input=[&](size_t offset){return val(offset,keyCode(a,0x2d),keyCode(a,0x2e)/100.f);};
   out.mask.sourceX=input(8);out.mask.sourceY=input(0xa);out.mask.width=input(0xc);out.mask.height=input(0xe);
@@ -301,7 +326,7 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
   out.mask.mode=keyCode(a,0x3a);
  }
  if(out.kind==9||out.kind==10){
-  out.mask.amount=uint8_t(std::clamp(int(std::round(val(0x37,keyCode(a,0x33),keyCode(a,0x3b)/100.f))),0,255));
+  out.mask.amount=uint8_t(std::clamp(int(std::round(val(0x37,colorMode,colorPower))),0,255));
   out.mask.crossfade=out.kind==9;
   out.childMotion=keyCode(a,7);
  }
@@ -314,7 +339,7 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
    }
    return float(value);
   };
-  out.childTime=int32_t(sampleValue(timeValue(a,0x10),timeValue(b,0x10),keyCode(a,0x3c),keyCode(a,0x3d)/100.f,t,out.unsupported,randomCursor));
+  out.childTime=int32_t(interpolate([&](const qlie::Bytes& key){return timeValue(key,0x10);},keyCode(a,0x3c),keyCode(a,0x3d)/100.f));
   out.childMotion=keyCode(a,7);
  }
  if((out.kind==20||out.kind==21)&&a.size()<152)out.unsupported.push_back("particle-layout="+std::to_string(layer.version));
@@ -325,15 +350,15 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
   out.particles.divisions=particleValue(0xc);out.particles.scaleOffset=particleValue(0x46);
   for(unsigned axis=0;axis<3;axis++)out.particles.phase[axis]=particleValue(0x40+axis*2);
   out.particles.extent={out.scaleX,out.scaleY,val(0x96,keyCode(a,0x30),keyCode(a,0x31)/100.f)};
-  auto childTime=[&](size_t offset){return int32_t(sampleValue(float(int32_t(keyU32(a,offset))),float(int32_t(keyU32(b,offset))),keyCode(a,0x3c),keyCode(a,0x3d)/100.f,t,out.unsupported,randomCursor));};
+  auto childTime=[&](size_t offset){return int32_t(signedField(offset,keyCode(a,0x3c),keyCode(a,0x3d)/100.f));};
   out.particles.timeBegin=childTime(0x10);out.particles.timeEnd=childTime(0x14);
  }
  out.anchorX=number(a,0x85);
  out.anchorY=number(a,0x87);
  auto color=[&](size_t p){uint32_t z=0;
- auto ca=keyU32(a,p),cb=keyU32(b,p);
- for(int n=0;n<3;n++){auto v=sampleValue(float((ca>>(8*n))&255),float((cb>>(8*n))&255),keyCode(a,0x33),keyCode(a,0x3b)/100.f,t,out.unsupported,randomCursor);
- z|=uint32_t(std::clamp(std::lround(v),0l,255l))<<(8*n);
+ for(unsigned shift=0;shift<24;shift+=8){
+ auto v=interpolate([&](const qlie::Bytes& key){return float((keyU32(key,p)>>shift)&255);},colorMode,colorPower);
+ z|=uint32_t(std::clamp(std::lround(v),0l,255l))<<shift;
  }return z;
  };
  out.addColor=color(0x24);

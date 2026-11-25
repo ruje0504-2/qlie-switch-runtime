@@ -110,8 +110,9 @@ static Bytes decrypt(Bytes b,uint32_t arc,const std::string&name,const Bytes&k1,
 Bytes decompress(const Bytes&bytes){
  if(bytes.size()<12||std::memcmp(bytes.data(),"1PC\xff",4))
   throw std::runtime_error("Not QLIE compressed data");
+ const size_t expected=rd(bytes,8,4);
  Bytes output;
- output.reserve(rd(bytes,8,4));
+ output.reserve(expected);
  std::vector<uint8_t> stack;
  stack.reserve(32);
  const unsigned countBytes=(bytes[4]&1)?2:4;
@@ -141,7 +142,10 @@ Bytes decompress(const Bytes&bytes){
    while(!stack.empty()){
     const auto current=stack.back();
     stack.pop_back();
-    if(left[current]==current)output.push_back(current);
+    if(left[current]==current){
+     if(output.size()==expected)throw std::runtime_error("BPE overflow");
+     output.push_back(current);
+    }
     else {stack.push_back(right[current]);stack.push_back(left[current]);}
     if(++steps>256)throw std::runtime_error("Cyclic BPE");
    }

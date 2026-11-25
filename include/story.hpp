@@ -59,6 +59,8 @@ class Story {
  Script&script(const std::string&);
  const std::vector<std::string>& includeCommands(const std::string&);
  std::string value(std::string)const;
+ std::string legacyVideoPath(std::string)const;
+ std::string legacyAssetHint(const std::string&,std::string& scope)const;
  std::string substitutePlayerName(std::string)const;
  bool condition(const std::string&)const;
  void resetState();

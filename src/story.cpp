@@ -208,7 +208,11 @@ std::vector<std::string> Story::upcomingAssetCommands(bool opening){
   }
  }
  const bool ending=!profile.endingMovieScript.empty()&&file==profile.endingMovieScript;
+ std::string scope=profile.legacyAvg&&!opening?state.scope:std::string{};
  auto collect=[&](const std::string&text){
+  // AVG1 loads assets through its own command forms. Only produce lookup hints.
+  if(profile.legacyAvg)
+   if(auto hint=legacyAssetHint(text,scope);!hint.empty()){out.push_back(std::move(hint));return;}
   if(ending&&text.rfind("^movie,",0)==0){
    const auto media=state.vars.find("__ending_movie");
    if(media!=state.vars.end()&&!media->second.empty())out.push_back(endingMovieCommand(media->second));

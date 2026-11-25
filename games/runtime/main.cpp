@@ -542,6 +542,13 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   std::string imminentMovie;
   try{upcoming=story.upcomingAssetCommands(openingHint);}
   catch(const std::runtime_error&e){QLIE_LOGF("LOAD read-ahead script: %s\n",e.what());return;}
+  if(const auto*legacy=game_profile::story.legacyAvg;legacy&&!openingHint){
+   const auto command=std::string("^movie,")+legacy->creditsFile;
+   if(std::find(upcoming.begin(),upcoming.end(),command)!=upcoming.end()){
+    auto path=movie->assetPath(legacy->creditsFile);
+    if(assets.exists(path))imminentMovie=std::move(path);
+   }
+  }
   for(auto&line:upcoming){
    if(sceneKeys.size()==hintsPerWorker&&soundKeys.size()==hintsPerWorker)break;
    if(line.rfind("％",0)==0){
@@ -558,7 +565,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
     auto path=movie->assetPath(line.substr(comma+1));
     if(assets.exists(path)){
      if(endingWait&&imminentMovie.empty())imminentMovie=path;
-     else add(path,Kind::Movie);
+     else if(path!=imminentMovie)add(path,Kind::Movie);
     }
    }else if(cmd=="^sentence"){
     if(normalSkip)continue;

@@ -56,6 +56,57 @@ std::string audioLeaf(const std::string& name){
  const auto slash=canonical.rfind('/');
  return slash==canonical.npos?canonical:canonical.substr(slash+1);
 }
+void appendPictureReplacements(std::string& command,const std::string& files){
+ const auto replacements=split(files,';');
+ for(size_t i=0;i<std::min<size_t>(8,replacements.size());++i)if(!replacements[i].empty())
+  command+=",rep"+std::to_string(i)+":image/"+qlie::canonical(replacements[i]);
+}
+}
+
+std::string Story::legacyVideoPath(std::string path)const{
+ path=qlie::canonical(std::move(path));
+ if(path.find('/')==path.npos)path="movie/"+path;
+ const auto& renamed=profile.legacyAvg->renamedMovie;
+ if(path==renamed.first)return renamed.second;
+ return path;
+}
+
+std::string Story::legacyAssetHint(const std::string& text,std::string& scope)const{
+ const auto comma=text.find(',');
+ if(comma==text.npos)return {};
+ const auto cmd=std::string_view(text).substr(0,comma);
+ if(cmd=="\\scp"){scope=qlie::canonical(arg(split(text,','),1));return {};}
+ if(cmd=="\\l"&&(scope=="th"||scope=="th2")){
+  const auto filename=arg(split(text,','),1);
+  if(filename.size()<2||filename.front()!='"'||filename.back()!='"')return {};
+  const auto path=legacyVideoPath(filename.substr(1,filename.size()-2));
+  if(path==profile.legacyAvg->creditsFile)return "^movie,"+path;
+  return "^ui_avg1_video_"+scope+",file:"+path;
+ }
+ if(cmd!="^iload"&&cmd!="^mload"&&cmd!="^sload"&&cmd!="^ffade")return {};
+ const auto fields=split(text,',');
+ const auto id=qlie::canonical(arg(fields,1));
+ auto filename=arg(fields,2);
+ if(filename.size()>=2&&filename.front()=='"'&&filename.back()=='"')
+  filename=filename.substr(1,filename.size()-2);
+ if(cmd=="^ffade"&&id=="blind"){
+  auto duration=arg(fields,3);
+  if(duration.empty())duration="500";
+  return "^sentence,fade:rule:"+duration+":"+(filename.empty()?"blind":filename);
+ }
+ if(filename.empty()||filename=="@"||filename.find_first_of("#$+")!=filename.npos)return {};
+ if(cmd=="^iload"){
+  const auto layer=background(id);
+  if(layer.empty())return {};
+  auto command="^"+layer+",file:"+qlie::canonical(filename);
+  appendPictureReplacements(command,arg(fields,3));
+  return command;
+ }
+ if(cmd=="^mload"||cmd=="^sload"){
+  const auto channel=track(id);
+  if(!channel.empty())return "^"+channel+",file:"+audioLeaf(filename);
+ }
+ return {};
 }
 
 std::string legacyAvgMessageWindow(const LegacyAvgLayout&layout){
@@ -123,9 +174,7 @@ bool Story::legacyCaret(const Op&o,const std::vector<std::string>& a){
    text+=",x:640,y:360,scalex:100,scaley:100,pri:"+std::to_string(priority(layer))+",show:true";
    state.vars[key]="1";
   }
-  const auto replacements=split(field(3),';');
-  for(size_t i=0;i<std::min<size_t>(8,replacements.size());++i)if(!replacements[i].empty())
-   text+=",rep"+std::to_string(i)+":image/"+qlie::canonical(replacements[i]);
+  appendPictureReplacements(text,field(3));
   emit(std::move(text));
   return true;
  }
@@ -298,11 +347,7 @@ bool Story::legacyNative(const Op&o,const std::vector<std::string>& a){
  }
  if(isVideo&&cmd=="\\i"){clearVideo(state.scope);return true;}
  if(isVideo&&cmd=="\\l"){
-  auto path=qlie::canonical(field(1));
-  if(path.find('/')==path.npos)path="movie/"+path;
-  const auto& renamed=profile.legacyAvg->renamedMovie;
-  if(path==renamed.first)path=renamed.second;
-  state.vars["__avg1_file_"+state.scope]=std::move(path);
+  state.vars["__avg1_file_"+state.scope]=legacyVideoPath(field(1));
   return true;
  }
  if(isVideo&&cmd=="\\pp"){

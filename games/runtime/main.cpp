@@ -886,6 +886,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }
  bool resumeSceneCommand(){
   if(!pendingScene||gameMenu.visible()||upperMenu->visible())return false;
+  // An outgoing capture can be waiting for a frame rather than a file.
+  if(pendingSceneAssets.empty()){next(true);return !pendingScene;}
   if(normalSkip&&waitingOnFade()){
    for(const auto&key:pendingSceneAssets)readAhead->discard(key);
   }else if(!std::all_of(pendingSceneAssets.begin(),pendingSceneAssets.end(),
@@ -894,12 +896,18 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
                std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-pendingSceneSince).count());
   next(true);return true;
  }
- qlie::Bytes captureScene(){
+ std::optional<qlie::Bytes> captureScene(){
+   bool masks=false,surfaces=false;
+#ifdef WHJ2_WITH_GPU
+   const bool native=gpu&&gpu->nativePresentation()&&!transition->needsCanvas();
+   if(native){masks=gpu->supportsMasks();surfaces=gpu->supportsVideoSurfaces();}
+#endif
+   auto queue=images->captureQueue(masks,surfaces);
+   if(queue.waitingForVideoFrame()){images->takeShownFiles();return {};}
    qlie::Bytes scene(1280*720*4);
 #ifdef WHJ2_WITH_GPU
-   if(gpu&&gpu->nativePresentation()&&!transition->needsCanvas()){
+   if(native){
     constexpr uint32_t background=0xff141923u;
-    auto queue=images->captureQueue(gpu->supportsMasks(),gpu->supportsVideoSurfaces());
     if(transition->isActive()||!queue.captureAlignedBitmap(scene,1280,720,background)){
      gpu->begin(background);queue.draw(*gpu,1280,720);transition->blend(*gpu);gpu->end(scene);
     }
@@ -907,7 +915,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    }
 #endif
    for(size_t i=0;i<scene.size();i+=4){scene[i]=35;scene[i+1]=25;scene[i+2]=20;scene[i+3]=255;}
-   images->drawScene(scene,true);transition->blend(scene);
+   queue.draw(scene,1280,720);transition->blend(scene);
    return scene;
  }
  bool enterPlayerName(){
@@ -1114,12 +1122,18 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    }
    if(deferSceneUntil(e,std::move(rules)))return;
   }
-  transition->commandWithCapture(e.value,[this,&timing]{
+  qlie::Bytes snapshot;
+  if(!normalSkip&&transition->needsCapture(e.value)){
    const auto start=qlie::diagnostics?LoadClock::now():LoadClock::time_point{};
-   auto scene=game_profile::deferredSceneChanges&&!outgoingScene.empty()?std::move(outgoingScene):captureScene();
+   if(!outgoingScene.empty())snapshot=std::move(outgoingScene);
+   else{
+    auto captured=captureScene();
+    if(!captured){pendingScene=std::move(e);return;}
+    snapshot=std::move(*captured);
+   }
    if(qlie::diagnostics)timing.capture+=std::chrono::duration<double,std::milli>(LoadClock::now()-start).count();
-   return scene;
-  },&sentenceWait,!normalSkip);continue;
+  }
+  transition->commandWithCapture(e.value,[&snapshot]{return std::move(snapshot);},&sentenceWait,!normalSkip);continue;
  }if(e.type=="wait"||e.type=="click-wait"){sentenceWait.native(e.type=="click-wait",e.value.empty()?0:std::stod(e.value));resetOutgoingScene();transition->present();
   warmNextScene(false,e.type=="wait"&&e.file==game_profile::story.endingMovieScript);return;
  }if(e.type=="command"&&e.value.rfind("^savefilter",0)==0){auto fields=whj2::split(e.value,',');if(fields.size()!=2||fields[1]!="0")throw std::runtime_error("Unsupported save thumbnail filter");continue;
@@ -1147,15 +1161,17 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   if(gradient)images->takeBitmapFilter(*gradient);
   if constexpr(game_profile::deferredSceneChanges){
    if(!normalSkip&&!checkedOutgoingScene&&images->changesCapturedScene(e.value)){
-    checkedOutgoingScene=true;
     if(story.beforeNextPresentation(!body.empty(),[this](const auto&next){
         return next.value.rfind("^sentence,",0)==0&&transition->needsCapture(next.value);
        })){
      const auto start=qlie::diagnostics?LoadClock::now():LoadClock::time_point{};
-     outgoingScene=captureScene();
+     auto captured=captureScene();
+     if(!captured){pendingScene=std::move(e);return;}
+     outgoingScene=std::move(*captured);
      if(qlie::diagnostics)timing.capture+=std::chrono::duration<double,std::milli>(LoadClock::now()-start).count();
      QLIE_LOG_LINE(<<"FADE capture before "<<e.file<<":"<<e.line<<"\n");
     }
+    checkedOutgoingScene=true;
    }
   }
   const bool sceneCommand=images->command(e.value);

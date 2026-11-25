@@ -1639,13 +1639,13 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
 #ifdef QLIE_PROFILE_WHJ6
   gameMenu.choiceBackupAvailable=gameMenu.panel==UI::Load&&
    (choiceBackupWriting||std::filesystem::is_regular_file(slotPrefix(ChoiceBackupSlot)+".story"));
-#endif
+  if(!gameMenu.asking&&!gameMenu.choiceBackupAvailable&&gameMenu.focus==UI::ChoiceBackupFocus)gameMenu.focus=0;
+#else
   for(unsigned i=0;i<8;i++)gameMenu.populatedSlots[i]=slotPreview(displayedSlot(i)).exists;
-#ifdef QLIE_PROFILE_WHJ6
- if(gameMenu.choiceBackupAvailable&&gameMenu.focus==UI::ChoiceBackupFocus)return;
-#endif
   if(!gameMenu.asking&&gameMenu.focus>=8&&!gameMenu.populatedSlots[unsigned(gameMenu.focus)%8])gameMenu.focus%=8;
+#endif
  }
+#ifndef QLIE_PROFILE_WHJ6
  void deleteSlot(unsigned slot){
   if(!slot||slot>ManualSlotCount)throw std::runtime_error("Manual delete slot range");
   bool removed=false;
@@ -1657,6 +1657,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   try{whj2::commitSavePath(saveDir+"/");}catch(const std::exception&e){QLIE_LOG_LINE(<<"DELETE COMMIT FAIL "<<e.what()<<"\n");status=ui.text("削除結果を保存できませんでした。");}
   slotPreviews.erase(slot);if(latestManualSlot==slot)manualSlotsScanned=false;refreshSlotFlags();
  }
+#endif
  static constexpr auto loadAudioKey="@restore:slot";
  static constexpr auto loadSceneKey="@restore:scene";
  bool loadPending()const{return pendingLoadSlot||pendingHistoryLoad;}
@@ -2006,7 +2007,9 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   return;
  }
  if(action==UI::SectionSkip){beginSceneSkip();return;}
+#ifndef QLIE_PROFILE_WHJ6
  if(action==UI::DeleteSlot){deleteSlot(selectedSlot);return;}
+#endif
  if(action==UI::Slot){if(gameMenu.panel==UI::Load)startLoad(selectedSlot);else save(selectedSlot);return;}
  if(action==UI::ResetSettings){settings.reset();applySettings();return;}
  if(action==UI::Quit||action==UI::Title){
@@ -2023,10 +2026,22 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   gameMenu.beginClose();return;
  }
  if(action==UI::Quit||action==UI::Title||action==UI::ResetSettings){gameMenu.ask(action);return;}
+#ifndef QLIE_PROFILE_WHJ6
  if(action==UI::DeleteSlot){selectedSlot=unsigned(gameMenu.slot());if(std::filesystem::exists(slotPrefix(selectedSlot)+".story"))gameMenu.ask(UI::DeleteSlot);else status=ui.text("保存データがありません。");return;}
+#endif
  if(action==UI::Slot){selectedSlot=displayedSlot(unsigned(gameMenu.focus)%8);
  if(gameMenu.panel==UI::Save){if(std::filesystem::exists(slotPrefix(selectedSlot)+".story")){gameMenu.ask(UI::Slot);return;}save(selectedSlot);}
- else if(gameMenu.panel==UI::Load){auto&preview=slotPreview(selectedSlot);if(!preview.exists)status=ui.text("保存データがありません。");else if(preview.damaged)status=ui.text("保存データが不完全です。削除または上書きしてください。");else gameMenu.ask(UI::Slot);}
+ else if(gameMenu.panel==UI::Load){
+  const auto&preview=slotPreview(selectedSlot);
+  if(!preview.exists)status=ui.text("保存データがありません。");
+  else if(preview.damaged){
+#ifdef QLIE_PROFILE_WHJ6
+   status=ui.text("保存データが不完全です");
+#else
+   status=ui.text("保存データが不完全です。削除または上書きしてください。");
+#endif
+  }else gameMenu.ask(UI::Slot);
+ }
  }
  }
  void changeSlotPage(int page,int focus){

@@ -42,7 +42,9 @@ public:
  bool settingsDirty=false,allowSceneReturn=false;
  std::array<bool,4> historyVoices{},historyJumps{};
  std::array<int,4> historyTextOffset{},historyTextMax{};
+#ifndef QLIE_PROFILE_WHJ6
  std::array<bool,8> populatedSlots{};
+#endif
  int historyVoiceRow=-1,historyMaxOffset=0,historyRows=0;
 #ifdef QLIE_PROFILE_WHJ6
  static constexpr int ChoiceBackupFocus=16;
@@ -74,7 +76,9 @@ public:
  bool coversScene()const{return panel!=None&&panel!=History&&!panelTransitioning();}
  void ask(Action a){requested=a;promptFocus=focus;asking=true;focus=0;endDrag();}
  void dismissPrompt(){asking=false;focus=promptFocus;}
+#ifndef QLIE_PROFILE_WHJ6
  int slot()const{return page*8+focus%8+1;}
+#endif
  void move(int dx,int dy);
  Action confirm();
  Action jumpHistory()const;

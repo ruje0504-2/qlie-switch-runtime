@@ -216,14 +216,12 @@ void GameMenu::move(int dx,int dy){if(panelClosing||panelTransitioning())return;
    if(focus==ChoiceBackupFocus){if(dx||dy)focus=dy<0?3:0;return;}
    if((dy<0&&focus==0)||(dy>0&&focus==3)){focus=ChoiceBackupFocus;return;}
   }
-  if(automaticSavePage()){
-   if(dx)focus=(focus+4)%8;
-   if(dy)focus=(focus+dy+8)%8;
-   return;
-  }
-#endif
+  if(dx)focus=(focus+4)%8;
+  if(dy)focus=(focus+dy+8)%8;
+#else
   if(dx){int row=focus%4,column=(focus%8)/4*2+(focus>=8);for(int n=0;n<4;n++){column=(column+(dx<0?-1:1)+4)%4;int slot=column/2*4+row;focus=slot+(column%2)*8;if(focus<8||populatedSlots[slot])break;}}
   if(dy){int deletion=focus>=8?8:0;for(int n=0;n<8;n++){focus=(focus%8+dy+8)%8+deletion;if(!deletion||populatedSlots[focus%8])break;}}
+#endif
  }
  else if(panel==History){
   if(dx&&focus<historyRows)historyTextOffset[focus]=std::clamp(historyTextOffset[focus]+dx*4,0,historyTextMax[focus]);
@@ -258,8 +256,10 @@ GameMenu::Action GameMenu::confirm(){
  if(asking)return focus==0?Yes:No;
 #ifdef QLIE_PROFILE_WHJ6
  if(panel==Load&&choiceBackupAvailable&&focus==ChoiceBackupFocus)return LoadChoiceBackup;
-#endif
+ if(panel==Save||panel==Load)return Slot;
+#else
  if(panel==Save||panel==Load)return focus>=8?DeleteSlot:Slot;
+#endif
  if(panel==History){
   historyVoiceRow=focus;
   if(focus<historyRows&&historyVoices[focus])return ReplayVoice;
@@ -380,10 +380,7 @@ GameMenu::Action GameMenu::tap(float x,float y){
   for(int i=0;i<15;++i)if(contains(x,y,1139+50*i,119,42,52)){
    requestedPage=i;return PageChange;
   }
-  for(int i=0;i<8;++i){
-   if(!automaticSavePage()&&populatedSlots[i]&&contains(x,y,slotX(i)+816,slotY(i)-12,66,42)){focus=8+i;return DeleteSlot;}
-   if(contains(x,y,slotX(i),slotY(i),910,160)){focus=i;return Slot;}
-  }
+  for(int i=0;i<8;++i)if(contains(x,y,slotX(i),slotY(i),910,160)){focus=i;return Slot;}
  }
 #else
  if(panel==Save||panel==Load){for(int i=0;i<8;i++)if(populatedSlots[i]&&std::abs(x-deleteButtonX[i])<=15&&std::abs(y-(148+(i%4)*135))<=15){focus=8+i;return DeleteSlot;}if(y>=72&&y<=108&&x>=674){requestedPage=std::clamp(int((x-674)/40),0,14);return PageChange;}if(y>=128&&y<=651){int col=x>=645?1:0;int row=int((y-128)/135);if(row<4){focus=col*4+row;return Slot;}}}
@@ -492,7 +489,6 @@ void GameMenu::drawWhj6Panel(RenderQueue& q){
    const auto number=std::to_string(automaticSavePage()?i+1:page*8+i+1);
    for(unsigned digit=0;digit<number.size();++digit)
     art(dir+"num_"+number[digit]+".png",slotX(i)+360+int(digit)*18,slotY(i)+24);
-   if(!automaticSavePage()&&populatedSlots[i])button(dir+"file_del",slotX(i)+849,slotY(i)+9,focus==8+i);
   }
   button(dir+"ゲームの終了",975,1035);
   button(dir+"タイトルへ戻る",1205,1035);
@@ -590,7 +586,6 @@ void GameMenu::drawWhj6Prompt(RenderQueue&q){
  case Title:message="タイトルへ戻る";break;
  case ResetSettings:message="設定初期化";break;
  case JumpHistory:message="ログジャンプ";break;
- case DeleteSlot:message="データ削除";break;
  case Slot:message=panel==Load?"データロード":"データ上書き";break;
  default:break;
  }

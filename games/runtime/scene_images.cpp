@@ -21,6 +21,7 @@ extern "C" {
 #include <cmath>
 #include <cstring>
 #include <mutex>
+#include <optional>
 namespace whj2 {
 namespace {
 float numeric(const std::string&s){return !s.empty()&&s[0]=='$'?float(std::stoul(s.substr(1),nullptr,16)):std::stof(s);
@@ -339,6 +340,7 @@ struct Composite {
  bool hasVideo=false,standaloneVideo=false;
  uint32_t identity=0;std::vector<uint32_t>motionIdentities;
  std::vector<Element>members;
+ std::optional<size_t> messagePlaceholder;
  qlie::Bytes eyecatchFallback;
  std::vector<qlie::Bytes>sounds;
  std::string path;
@@ -363,6 +365,7 @@ struct Composite {
  metadata=true;
  }
    else if(m.type.rfind("abimg",0)==0){Element e;e.name=m.name;
+ if(e.name=="*MesSurface")messagePlaceholder=members.size();
  if(!m.data.empty()){
     if(m.data.size()>=5&&std::equal(m.data.begin(),m.data.begin()+5,"abmp1"))e.nested=std::make_shared<Composite>(std::move(m.data),name+"#"+m.name,randomState,deferred,film);
     else if(kvideo_is_container(m.data.data(),m.data.size())){e.video=std::make_shared<const qlie::Bytes>(std::move(m.data));
@@ -474,7 +477,7 @@ struct Composite {
   }
   return {unsigned(definition.bounds[0]),unsigned(definition.bounds[1])};
  }
- void enqueue(RenderQueue&queue,double ms,const std::string&motionName,const Affine2D&parent,float depth,float opacity,uint32_t parentAdd,uint32_t parentMul,unsigned parentBlend=0,const Image*replacement=nullptr,const Image*messageSurface=nullptr,unsigned windowAlpha=255,const std::map<unsigned,const Image*>*uiSlots=nullptr,const AnimationContext*external=nullptr,const Matrix3D*parent3D=nullptr,unsigned filterOverride=0,bool liveVideo=false,AssetReadAhead*worker=nullptr,bool asyncVideo=true)const{
+ void enqueue(RenderQueue&queue,double ms,const std::string&motionName,const Affine2D&parent,float depth,float opacity,uint32_t parentAdd,uint32_t parentMul,unsigned parentBlend=0,const Image*replacement=nullptr,std::optional<const Image*>messageSurface=std::nullopt,unsigned windowAlpha=255,const std::map<unsigned,const Image*>*uiSlots=nullptr,const AnimationContext*external=nullptr,const Matrix3D*parent3D=nullptr,unsigned filterOverride=0,bool liveVideo=false,AssetReadAhead*worker=nullptr,bool asyncVideo=true)const{
   if(standaloneVideo){
    if(opacity<=0)return;
    auto&clip=videoClip(0,members.front(),worker);
@@ -501,12 +504,13 @@ struct Composite {
    context.externalMask|=external->externalMask;context.randomCursor=external->randomCursor;
   }
   auto samples=sampleMotion(*motion,ms,1280,720,false,context);
+  const size_t messageSlot=messagePlaceholder.value_or(1);
   for(size_t index=0;index<samples.size();index++){
  auto&k=samples[index];if(filterOverride)k.textureFilter=filterOverride;
  if(parentBlend)k.flags=parentBlend;
  for(auto&w:k.unsupported)if(w!="primitive=20"&&!(w=="3d-rotation"&&(k.kind==18||k.kind==3||k.kind==4)))warn(w);
  if(!motion->layers[index].flags||!k.kind)continue;
- k.alpha=int(k.alpha)*int(opacity)/255;if(messageSurface&&k.kind==4&&k.resource==0)k.alpha=int(k.alpha)*int(windowAlpha)/255;k.addColor=colorAdd(k.addColor,parentAdd);k.mulColor=colorMultiply(k.mulColor,parentMul);
+ k.alpha=int(k.alpha)*int(opacity)/255;if(messageSurface.value_or(nullptr)&&messageSlot!=0&&k.kind==4&&k.resource==0)k.alpha=int(k.alpha)*int(windowAlpha)/255;k.addColor=colorAdd(k.addColor,parentAdd);k.mulColor=colorMultiply(k.mulColor,parentMul);
  if(k.kind==15||k.kind==16||k.kind==17){queue.control(k,depth+k.priority);continue;}
  if(k.kind==1){
   if((k.flags&0x7f)>8){warn("rectangle-blend="+std::to_string(k.flags));continue;}
@@ -519,8 +523,11 @@ struct Composite {
  }
  if(k.kind==10){
   if(k.resource>=members.size()||k.childMotion>=members.size())throw std::runtime_error("Mask image index "+path);
-  const Image*source=members[k.resource].image.get();const Image*mask=members[k.childMotion].image.get();
+  const bool textSource=messageSurface&&messagePlaceholder&&k.resource==messageSlot;
+  const Image*source=textSource?*messageSurface:members[k.resource].image.get();
+  const Image*mask=members[k.childMotion].image.get();
    if(uiSlots){auto src=uiSlots->find(k.resource);if(src!=uiSlots->end())source=src->second;auto msk=uiSlots->find(k.childMotion);if(msk!=uiSlots->end())mask=msk->second;}
+  if(textSource&&!source)continue;
   if(!source||!mask){warn("mask-nonbitmap-resource");continue;}
    if(!source->width||!source->height||!mask->width||!mask->height)continue;
   bool rotated=false;for(auto&w:k.unsupported)if(w=="3d-rotation")rotated=true;
@@ -555,7 +562,7 @@ struct Composite {
     Matrix3D child;child.m[0][0]=child.m[1][1]=child.m[2][2]=point.scale;
     child.m[0][3]=point.x-e.nested->definition.bounds[0]*.5f;child.m[1][3]=point.y-e.nested->definition.bounds[1]*.5f;child.m[2][3]=point.z;
     child=combine(base,child);
-    e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,point.milliseconds),e.nested->definition.motions.at(point.motion).name,{},depth+k.priority,k.alpha*point.alpha/255,k.addColor,k.mulColor,k.flags&0x7f,nullptr,nullptr,255,nullptr,nullptr,&child,filterOverride,liveVideo,worker,false);
+    e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,point.milliseconds),e.nested->definition.motions.at(point.motion).name,{},depth+k.priority,k.alpha*point.alpha/255,k.addColor,k.mulColor,k.flags&0x7f,nullptr,std::nullopt,255,nullptr,nullptr,&child,filterOverride,liveVideo,worker,false);
    }
    continue;
   }
@@ -596,8 +603,12 @@ struct Composite {
  if(k.kind!=3&&k.kind!=4)continue;
  if(k.resource>=members.size())throw std::runtime_error("Composite image index "+path);
    auto&e=members[k.resource];
- const Image*slot=k.resource==0?replacement:k.resource==1?messageSurface:nullptr;
+ const bool textSlot=messageSurface&&k.resource==messageSlot;
+ const Image*slot=textSlot?*messageSurface:k.resource==0?replacement:nullptr;
  if(uiSlots){auto override=uiSlots->find(k.resource);if(override!=uiSlots->end())slot=override->second;}
+ // A message window's authored text placeholder is never displayed while
+ // its live text surface is pending. Keep actual animation images available.
+ if(textSlot&&messagePlaceholder&&!slot)continue;
  const Image*source=slot?slot:e.image.get();
    if(slot&&k.kind==4){
     if(parent3D||k.rotationX||k.rotationY||k.z){auto matrix=combine(parent3D?*parent3D:from2D(parent),placement3D(k,source->width,source->height));quad(queue,*source,matrix,k,depth+k.priority);continue;}
@@ -609,10 +620,10 @@ struct Composite {
  AnimationContext nestedContext;nestedContext.randomCursor=context.randomCursor;
  if(parent3D||k.rotationX||k.rotationY||k.z){
   auto matrix=combine(parent3D?*parent3D:from2D(parent),placement3D(k,unsigned(e.nested->definition.bounds[0]),unsigned(e.nested->definition.bounds[1])));
-  e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,k.childTime),e.nested->definition.motions[k.childMotion].name,{},depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,nullptr,nullptr,255,nullptr,&nestedContext,&matrix,filterOverride,liveVideo,worker,asyncVideo);continue;
+  e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,k.childTime),e.nested->definition.motions[k.childMotion].name,{},depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,nullptr,std::nullopt,255,nullptr,&nestedContext,&matrix,filterOverride,liveVideo,worker,asyncVideo);continue;
  }
  auto local=imagePlacement(k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,unsigned(e.nested->definition.bounds[0]),unsigned(e.nested->definition.bounds[1]));
- e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,k.childTime),e.nested->definition.motions[k.childMotion].name,affine(parent,local),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,nullptr,nullptr,255,nullptr,&nestedContext,nullptr,filterOverride,liveVideo,worker,asyncVideo);
+ e.nested->enqueue(queue,nestedAnimationTime(e.nested->definition,k.childTime),e.nested->definition.motions[k.childMotion].name,affine(parent,local),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,nullptr,std::nullopt,255,nullptr,&nestedContext,nullptr,filterOverride,liveVideo,worker,asyncVideo);
  continue;
  }
    else if(!slot&&e.video){
@@ -1393,19 +1404,24 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
   return cached.result.get();
  };
  const Image*plain=l->pixels.get();
+ const bool messageLayer=layers.count("message")&&l==&layers.at("message");
  if(l->composite){for(unsigned i=0;i<4;i++){
   const auto filter=filterFor(i);
   if(filter==l->params.end()||filter->second.empty()||filter->second=="none"){l->filtered[i]={};continue;}
   std::shared_ptr<const Image> source=i<l->composite->members.size()?l->composite->members[i].image:nullptr;
   if(i==0&&l->params.count("@portrait"))source=l->pixels;
-  if(i==1&&layers.count("message")&&l==&layers.at("message"))source=l->pixels;
+  if(messageLayer&&i==l->composite->messagePlaceholder.value_or(1))source=l->pixels;
   auto slot=l->uiSlots.find(i);if(slot!=l->uiSlots.end())source=slot->second;
   if(i==0&&l->scriptReplacement)source=l->scriptReplacement;
   if(source)uiSlots[i]=filtered(i,source);
   else if(i<l->composite->members.size()){auto&e=l->composite->members[i];if(e.nested||e.mesh||e.video)l->composite->warn("image-filter-nonbitmap-slot="+std::to_string(i));}
  }}else if(l->pixels)plain=filtered(0,l->pixels);
  AnimationContext external;external.randomCursor=&waveformCursor;external.external=l->external;external.externalMask=l->externalMask;
- if(l->composite){auto m=l->params.find("motion");l->composite->enqueue(queue,l->milliseconds,m==l->params.end()?"":m->second,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),blendMode,l->params.count("@portrait")?l->pixels.get():nullptr,layers.count("message")&&l==(&layers.at("message"))?l->pixels.get():nullptr,windowAlpha,uiSlots.empty()?nullptr:&uiSlots,&external,spatial?&matrix:nullptr,unsigned(get(l,"texfilter",0)),liveVideo,readAhead,asyncVideo);}
+ if(l->composite){auto m=l->params.find("motion");
+  std::optional<const Image*> messageSurface;
+  if(messageLayer)messageSurface=l->pixels.get();
+  l->composite->enqueue(queue,l->milliseconds,m==l->params.end()?"":m->second,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),blendMode,l->params.count("@portrait")?l->pixels.get():nullptr,messageSurface,windowAlpha,uiSlots.empty()?nullptr:&uiSlots,&external,spatial?&matrix:nullptr,unsigned(get(l,"texfilter",0)),liveVideo,readAhead,asyncVideo);
+ }
  else if(spatial){transform.alpha=get(l,"alpha",255);transform.addColor=uint32_t(get(l,"addcolor",0));transform.mulColor=uint32_t(get(l,"mulcolor",0xffffff));transform.flags=blendMode;transform.textureFilter=unsigned(get(l,"texfilter",0));quad(queue,*plain,matrix,transform,get(l,"pri",0));}
  else queue.image(*plain,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),blendMode,unsigned(get(l,"texfilter",0)));
  if(queue.imageCount()>beforeImages){if(qlie::canonical(l->path).rfind("image/ev/",0)==0)shownFiles.insert(qlie::canonical(l->path));auto replacement=l->params.find("@replacement");if(replacement!=l->params.end()&&qlie::canonical(replacement->second).rfind("image/ev/",0)==0)shownFiles.insert(qlie::canonical(replacement->second));}

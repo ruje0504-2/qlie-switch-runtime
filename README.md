@@ -4,7 +4,9 @@
 
 QLIE 引擎的 Switch 端口，同时提供 macOS 构建。
 
-项目维护者已在 Switch 实机测试 WHJ1、WHJ2、WHJ2.5、WHJ3、WHJ4 和 WHJ5。
+主线支持 WHJ1、WHJ2、WHJ2.5、WHJ3、WHJ4、WHJ5 和 WHJ6，均由 `QLIE_GAME` 选择构建。WHJ6 对应《美少女万華鏡異聞 雪女》。
+
+项目维护者已在 Switch 实机测试上述各作；雪女的最新优化及其验证范围见[雪女优化说明](docs/optimization/whj6.md)。
 
 [优化手册](docs/optimization/README.md)记录 deko3d 渲染、影片硬解、资源预读、音频和界面的实现及测量范围。
 
@@ -12,7 +14,7 @@ QLIE 引擎的 Switch 端口，同时提供 macOS 构建。
 
 `libqlie-runtime.a` 包含 FilePackVer3.0 与 FilePackVer3.1 资源读取、剧本解析、图像、音频和影片。`games/runtime/` 是共用前端，`games/profiles/` 保存各作的资源路径、剧本规则和打包配置。
 
-Switch 默认使用 deko3d，帧率上限为 60 FPS。据项目维护者反馈，已验收的 WHJ2 版本在 Switch 默频下基本稳定在 60 FPS。各作共用 Joy-Con 和触摸、资源预读以及音视频实现。
+Switch 默认使用 deko3d，以 1280×720 渲染，帧率上限为 60 FPS。据项目维护者反馈，已验收的 WHJ2 版本在 Switch 默频下基本稳定在 60 FPS。各作共用 Joy-Con 和触摸、资源预读以及音视频实现。
 
 ## 构建
 
@@ -66,7 +68,7 @@ QLIE_GAME=whj6 ./build-switch.sh
 | WHJ3 | 十个 3.0 分卷、上述两份 DLL 目录密钥，可选 `patch.dat` | 双标题背景、序章马车与风声、指定图层的影片及运行时截图替换 |
 | WHJ4 | 九个 3.1 分卷、`reskey.fkey` | 日文原版和可选中文更新，保留本作 OGV/IMOAVI 媒体配置 |
 | WHJ5 | 十个 3.1 分卷、`reskey.fkey`、`patch.dat` | 简体中文与日文语音、姓名输入、历史回跳、长幅动态 CG |
-| WHJ6 | `GameData/data0.pack` 至 `data7.pack` | 3.1 分卷内嵌密钥、1920×1080 场景、独立存档与鉴赏列表 |
+| WHJ6 | `GameData/data0.pack` 至 `data7.pack` | 3.1 分卷内嵌密钥、1920×1080 逻辑坐标映射到 1280×720、独立存档与鉴赏列表 |
 
 各目标在自己的 `saves/` 下写入存档。两平台均支持 `--engine-only`。`QLIE_SWITCH_VULKAN=0` 可省略 Vulkan 备用后端及其 SDK。
 
@@ -79,7 +81,13 @@ python3 tools/extract_reskey.py /absolute/path/to/original.exe /absolute/path/to
 
 WHJ5 读取 `data0.pack` 至 `data9.pack`，按编号升序叠加同名资源。本地 `patch.dat` 提供简体中文界面词条、字体及其许可。
 
-WHJ6 对应《美少女万華鏡異聞 雪女》。Mac 可直接传入包含 `GameData/` 的本地游戏目录作为第一个参数。Switch 将 NRO 放在 `sdmc:/switch/whj6/`，八个分卷放在该目录的 `game/GameData/`，再从 hbmenu 的完整内存模式启动。各分卷自带解码所需数据。WHJ6 默认构建 deko3d 和 CPU 后端。可通过 `QLIE_NRO_ICON` 传入本地 256×256 JPEG 图标。读取画面中的「直前の選択肢」可以恢复最近一次选择，普通存档栏位单独保存。
+WHJ6 的 Mac 版本可直接传入包含 `GameData/` 的本地游戏目录作为第一个参数。Switch 将 NRO 放在 `sdmc:/switch/whj6/`，八个分卷放在该目录的 `game/GameData/`，再从 hbmenu 的完整内存模式启动。各分卷自带解码所需数据。WHJ6 默认构建 deko3d 和 CPU 后端。可通过 `QLIE_NRO_ICON` 传入本地 256×256 JPEG 图标。读取画面中的「直前の選択肢」可以恢复最近一次选择，普通存档栏位单独保存。
+
+雪女的剧本、动画和触摸由同一坐标变换映射到 720p，普通对白字号与 WHJ2 一致，为 26 像素。标题、设置、选择、存读档和鉴赏界面使用本作素材与布局。字形缓存、正文增量渲染、音视频解码和资源预读复用共用运行时；本作的字体槽位、界面规则及雾气、飘雪、暴风雪专用合成由 WHJ6 配置选择。
+
+开场标题资源在警告和 Logo 阶段预读，动态 CG 预读首帧与相邻差分；同类雾气和风雪按图层数据自动选择合成路径。老鹰雾气及暴风雪已完成实机排错和推进测试，后段放大灰度雪幕的新优化通过本地像素对照，实机帧率仍待复测。各场景的测量和限制见[雪女优化说明](docs/optimization/whj6.md)。
+
+`QLIE_GAME=whj6 ./build-switch.sh` 生成正式版 `build-switch/whj6-switch-runtime.nro`，默认关闭诊断采样。加入 `QLIE_SWITCH_DIAGNOSTICS=1` 生成独立的 `build-switch/whj6-switch-runtime-probe.nro`，日志位于 `sdmc:/switch/whj6/snow-probe.log`。
 
 WHJ6 支持将动态 CG 和两段厂商 Logo 回填到压缩后的分卷。H.264/Matroska 沿用无 B 帧的 Switch 播放格式，动态 CG 码率上限为 6 Mbit/s。`1920×1080` 影片输出 `1280×720`，长画面按比例缩小并保留镜头移动范围。运行时读取封包内记录的原始逻辑尺寸，剧本、动画和触摸共用同一场景坐标变换。
 
@@ -119,7 +127,15 @@ WHJ4 的构建和打包均选 `QLIE_GAME=whj4`。日文本体为 `01007F8E5C1400
 
 WHJ5 本地直装配置使用 Title ID `01007F8E5C150000`、版本 `1.0.0`，HOME 名称为「美少女万華鏡 -理與迷宮的少女-」。切换到 `QLIE_GAME=whj5` 使用上面的打包流程。
 
-WHJ6 本地直装配置使用 Title ID `01007F8E5C160000` 和版本 `1.0.1`，发行方为「ωstar」。构建和打包均选择 `QLIE_GAME=whj6`。
+WHJ6 本地直装配置使用 Title ID `01007F8E5C160000` 和版本 `1.0.1`，HOME 名称为「美少女万華鏡異聞 雪女」，发行方为「ωstar」。构建和打包均选择 `QLIE_GAME=whj6`。`--game` 指向包含八个 `GameData` 分卷的资源根目录；使用转码资源时指向补齐其余分卷后的目录。图标由本地 `icon.jpg` 提供，打包工具转换为 256×256 JPEG。
+
+```sh
+QLIE_GAME=whj6 ./build-switch.sh --elf-only
+QLIE_GAME=whj6 python3 tools/package_nsp.py \
+  --game /absolute/path/to/whj6-game \
+  --icon /absolute/path/to/whj6/icon.jpg \
+  --output /absolute/path/to/WHJ6-01007F8E5C160000-1.0.1.nsp
+```
 
 这组版本修复了剧情切换时短暂出现的文字占位图，覆盖普通对白、全屏字幕和遮罩字卡。该修复已通过 macOS 定点回归与本地 NSP 校验。
 

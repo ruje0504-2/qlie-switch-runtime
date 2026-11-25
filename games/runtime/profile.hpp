@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
-#if defined(QLIE_PROFILE_WHJ5)
+#if defined(QLIE_PROFILE_WHJ1)
+#include "profiles/whj1.hpp"
+namespace game_profile=whj1::profile;
+#elif defined(QLIE_PROFILE_WHJ5)
 #include "profiles/whj5.hpp"
 namespace game_profile=whj5::profile;
 #elif defined(QLIE_PROFILE_WHJ3)

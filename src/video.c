@@ -30,8 +30,10 @@ struct KVideo {
     enum AVPixelFormat hw_format;
     AVFrame *download,*surface;
     KVideoStats stats;
+    size_t pcm_limit;
     char error[160];
 };
+enum { PCM_TICK_LIMIT=64*1024*1024, PCM_CLIP_LIMIT=96*1024*1024 };
 #ifdef __SWITCH__
 static KVideoMode default_mode=KVIDEO_AUTO;
 static AVBufferRef *nvtegra_driver;
@@ -235,23 +237,24 @@ uint64_t kvideo_decoded_frames(KVideo *v){return v->decoded;}
 uint64_t kvideo_written_frames(const KVideo *v){return v->written;}
 /* Standalone clips grow geometrically. Video ticks return separately owned
    short PCM buffers to their caller, so their capacity is local to the tick. */
-static int reserve_pcm(uint8_t **pcm,size_t needed,size_t *capacity){
+static int reserve_pcm(uint8_t **pcm,size_t needed,size_t *capacity,size_t limit){
     size_t allocation=needed?needed:4;
     if(capacity){
         if(*capacity>=allocation)return 0;
         size_t next=*capacity?*capacity:16384;
         while(next<allocation)next*=2;
-        allocation=next;
+        allocation=next<limit?next:limit;
     }
     uint8_t *p=realloc(*pcm,allocation);
     if(!p)return -1;
     *pcm=p;if(capacity)*capacity=allocation;return 0;
 }
 static int audio_frames(KVideo *v,uint8_t **pcm,size_t *bytes,size_t *capacity){
+    const size_t limit=v->pcm_limit?v->pcm_limit:PCM_TICK_LIMIT;
     int rc;while((rc=avcodec_receive_frame(v->audio,v->sound))>=0){
         int samples=swr_get_out_samples(v->resample,v->sound->nb_samples);
-        if(samples<0||samples>1000000||*bytes>64*1024*1024-(size_t)samples*4)return fail(v,"video PCM limit");
-        if(reserve_pcm(pcm,*bytes+(size_t)samples*4,capacity))return fail(v,"video PCM allocation failed");
+        if(samples<0||samples>1000000||*bytes>limit-(size_t)samples*4)return fail(v,"audio PCM limit");
+        if(reserve_pcm(pcm,*bytes+(size_t)samples*4,capacity,limit))return fail(v,"audio PCM allocation failed");
         uint8_t *out=*pcm+*bytes;int count=swr_convert(v->resample,&out,samples,(const uint8_t **)v->sound->extended_data,v->sound->nb_samples);
         av_frame_unref(v->sound);if(count<0)return fail(v,"audio conversion failed");*bytes+=(size_t)count*4;
     }
@@ -259,10 +262,11 @@ static int audio_frames(KVideo *v,uint8_t **pcm,size_t *bytes,size_t *capacity){
 }
 /* Shared resampler tail for VSD audio and standalone voice streams. */
 static int audio_tail(KVideo *v,uint8_t **pcm,size_t *bytes,size_t *capacity){
+    const size_t limit=v->pcm_limit?v->pcm_limit:PCM_TICK_LIMIT;
     int samples=swr_get_out_samples(v->resample,0);
-    if(samples<0||samples>1000000||*bytes>64*1024*1024-(size_t)samples*4)return fail(v,"audio tail limit");
+    if(samples<0||samples>1000000||*bytes>limit-(size_t)samples*4)return fail(v,"audio tail limit");
     if(samples){
-        if(reserve_pcm(pcm,*bytes+(size_t)samples*4,capacity))return fail(v,"video PCM allocation failed");
+        if(reserve_pcm(pcm,*bytes+(size_t)samples*4,capacity,limit))return fail(v,"audio PCM allocation failed");
         uint8_t *out=*pcm+*bytes;int count=swr_convert(v->resample,&out,samples,NULL,0);
         if(count<0)return fail(v,"audio tail conversion failed");
         *bytes+=(size_t)count*4;
@@ -274,6 +278,7 @@ int kaudio_decode(const uint8_t *data,size_t size,uint8_t **pcm,size_t *bytes){
     *pcm=NULL;*bytes=0;if(!data||!size||size>256*1024*1024)return -1;
     KVideo *v=calloc(1,sizeof(*v));if(!v)return -1;
     size_t capacity=0;int result=-1;v->data=data;v->size=size;v->ai=v->vi=-1;
+    v->pcm_limit=PCM_CLIP_LIMIT;
     uint8_t *buffer=av_malloc(32768);if(!buffer)goto done;
     v->io=avio_alloc_context(buffer,32768,0,v,read_data,NULL,seek_data);if(!v->io){av_free(buffer);goto done;}
     v->format=avformat_alloc_context();if(!v->format)goto done;
@@ -285,6 +290,15 @@ int kaudio_decode(const uint8_t *data,size_t size,uint8_t **pcm,size_t *bytes){
     if(!v->audio||v->audio->sample_rate<8000||v->audio->sample_rate>192000||v->audio->ch_layout.nb_channels<1||v->audio->ch_layout.nb_channels>2)goto done;
     AVChannelLayout stereo=AV_CHANNEL_LAYOUT_STEREO;
     if(swr_alloc_set_opts2(&v->resample,&stereo,AV_SAMPLE_FMT_S16,44100,&v->audio->ch_layout,v->audio->sample_fmt,v->audio->sample_rate,0,NULL)<0||swr_init(v->resample)<0)goto done;
+    // Avoid reallocating the whole buffer when a long authored clip crosses 64 MiB.
+    const int64_t duration=v->format->duration;
+    if(duration>0&&duration<PCM_CLIP_LIMIT/(4*44100)*AV_TIME_BASE){
+        const size_t estimate=(size_t)av_rescale_rnd(duration,4*44100,AV_TIME_BASE,AV_ROUND_UP)+8192;
+        if(estimate>PCM_TICK_LIMIT&&estimate<=PCM_CLIP_LIMIT){
+            *pcm=malloc(estimate);if(!*pcm)goto done;
+            capacity=estimate;
+        }
+    }
     v->sound=av_frame_alloc();v->packet=av_packet_alloc();if(!v->sound||!v->packet)goto done;
     for(unsigned guard=0;guard<100000;guard++){
         int rc=av_read_frame(v->format,v->packet);

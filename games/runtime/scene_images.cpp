@@ -144,9 +144,15 @@ struct JpegAnimation {
    constexpr size_t header=28;
    if(data.size()-offset<header)throw std::runtime_error("Truncated IMOAVI frame header");
    const size_t jpeg=number(offset+20),step=number(offset);
-   if(jpeg<4||jpeg>data.size()-offset-header||(step!=header+jpeg&&!(step==0&&i+1==count)))
+   if(jpeg>data.size()-offset-header||(step!=header+jpeg&&!(step==0&&i+1==count)))
     throw std::runtime_error("Invalid IMOAVI frame length");
    offset+=header;
+   if(jpeg==0&&!frames.empty()){
+    // IMOAVI can hold the previous picture for another frame interval.
+    frames.push_back(frames.back());
+    continue;
+   }
+   if(jpeg<4)throw std::runtime_error("Invalid IMOAVI frame length");
    if(data[offset]!=0xff||data[offset+1]!=0xd8||data[offset+jpeg-2]!=0xff||data[offset+jpeg-1]!=0xd9)
     throw std::runtime_error("Invalid IMOAVI JPEG markers");
    frames.emplace_back(offset,jpeg);
@@ -155,7 +161,7 @@ struct JpegAnimation {
  }
  const std::shared_ptr<const Image>&at(double ms){
   const auto index=std::min(frames.size()-1,size_t(std::fmod(std::max(0.,ms),duration)*frames.size()/duration));
-  if(!decoded||index!=frameIndex){
+  if(!decoded||frames[index]!=frames[frameIndex]){
    const auto [start,length]=frames[index];
    decoded=sceneBitmap(image(qlie::Bytes(data.begin()+start,data.begin()+start+length)));
    frameIndex=index;
@@ -938,6 +944,11 @@ void SceneImages::prepareRestoredPortraitGradients(){
    layer.filtered[0]={layer.pixels,sceneBitmap(filterImage(*layer.pixels,filter)),std::move(filter)};
  }
 }
+static std::string imageReplacementRequest(const std::string& name){
+ if(game_profile::story.legacyAvg&&
+    (name.rfind("image/",0)==0||name.rfind("charaimage/",0)==0))return name;
+ return "image/"+name;
+}
 std::vector<std::string> SceneImages::warmPaths(const std::string&line,CharacterPrefixes* future,
                                               std::optional<BitmapFilter>* gradient,
                                               std::vector<std::string>* predictedFaces)const{
@@ -945,7 +956,8 @@ std::vector<std::string> SceneImages::warmPaths(const std::string&line,Character
  std::vector<std::string> result;auto comma=line.find(',');if(comma==line.npos)return result;
  auto cmd=line.substr(1,comma-1);
  bool chara=cmd.rfind("chara",0)==0,face=cmd=="face",message=cmd=="message";
- if(!chara&&!face&&!message&&cmd.rfind("bg",0)!=0&&cmd.rfind("effect",0)!=0&&!imageObjects.count(cmd))return result;
+ const bool legacyLayer=game_profile::story.legacyAvg&&cmd.rfind("ui_avg1_",0)==0;
+ if(!chara&&!face&&!message&&!legacyLayer&&cmd.rfind("bg",0)!=0&&cmd.rfind("effect",0)!=0&&!imageObjects.count(cmd))return result;
  auto layer=layers.find(cmd);
  const bool multipart=splitCharacters.count(cmd)!=0;
  std::string stem=chara&&layer!=layers.end()?layer->second.prefix:"";
@@ -1006,10 +1018,11 @@ std::vector<std::string> SceneImages::warmPaths(const std::string&line,Character
   if(!replacement){
    if(chara){prefix="chara/";name=characterImageName(name,stem);}
    else if(face)prefix="face/";else if(message)prefix=alternateMessageWindow?"avg2/window/":"avg/window/";
+   else if(legacyLayer)prefix.clear();
   }
   const bool portraitFile=predictPortrait&&key=="file";
   if(portraitFile&&!future)portraitRequest=prefix+name;
-  auto path=sceneResource(assets,prefix+name,true);
+  auto path=sceneResource(assets,replacement?imageReplacementRequest(name):prefix+name,!legacyLayer);
   if(path.empty())continue;
   if(portraitFile)portrait.path=path;
   if(needsWarmFile(path,future!=nullptr))result.push_back(path);
@@ -1082,6 +1095,8 @@ std::vector<std::string> SceneImages::warmPaths(const std::string&line,Character
  return result;
 }
 SceneImages::SceneImages(qlie::Assets&a):assets(a),eyecatchFilm(std::make_shared<EyecatchFilm>()){
+ // The original AVG uses per-object files instead of ImoScripter tables.
+ if(game_profile::story.legacyAvg)return;
  if(a.inPack("avg/projectobjects.txt")){
   std::istringstream objects(a.text("avg/projectobjects.txt"));
   std::string line;
@@ -1424,7 +1439,10 @@ bool SceneImages::cameraCommand(const std::string&arguments){
 }
 SpeakerStyle SceneImages::speakerStyle()const{
  const auto found=layers.find("name");
- if(found==layers.end())return {};
+ if(found==layers.end()){
+  if(game_profile::story.legacyAvg)return {285,567,24,0};
+  return {};
+ }
  const auto&layer=found->second;
  return {int(value(layer,"x",200)),int(value(layer,"y",570)),
          unsigned(value(layer,"fontsizeh",26)),unsigned(value(layer,"fontcolor",0xffffff))};
@@ -1510,14 +1528,18 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
    for(const auto&part:parts)args.push_back(part.first+":"+part.second);
   }
  }
- Layer before=l;bool file=false,baseChanged=false,position=false,color=false,messageShow=false;bool replacementChanged[4]={};
+ Layer before=l;bool file=false,baseChanged=false,position=false,color=false,messageShow=false;
+ const unsigned replacementSlots=game_profile::story.legacyAvg?8:4;
+ std::array<bool,8> replacementChanged{};
  bool startExtension=false;
  std::string colorTime,moveTime,onceTime;
  std::map<std::string,std::string> beginPosition;
  if(std::any_of(args.begin(),args.end(),[](const std::string&arg){return arg.rfind("file:",0)==0;})){
   // Imo_Image_Refresh_Main restores the default motion before merging file fields.
   if(!chara&&!face&&!message&&!ui)l.params["motion"]="0";
-  l.replacementVideo.reset();l.scriptReplacement.reset();l.params.erase("@replacement");for(unsigned i=0;i<4;i++)l.params.erase("rep"+std::to_string(i));
+  l.replacementVideo.reset();l.scriptReplacement.reset();l.params.erase("@replacement");
+  if(game_profile::story.legacyAvg&&cmd.rfind("ui_avg1_",0)==0)l.uiSlots.clear();
+  for(unsigned i=0;i<replacementSlots;i++)l.params.erase("rep"+std::to_string(i));
  }
  for(auto&s:args){if(s.empty())continue;
  auto c=s.find(58);
@@ -1535,13 +1557,13 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
   else l.params[key]=v;
   continue;
  }
- if(key.size()==4&&key.rfind("rep",0)==0&&key[3]>='0'&&key[3]<='3')replacementChanged[key[3]-'0']=true;
+ if(key.size()==4&&key.rfind("rep",0)==0&&key[3]>='0'&&unsigned(key[3]-'0')<replacementSlots)replacementChanged[key[3]-'0']=true;
  if(key=="clear"&&v=="def"&&!face&&!ui){
   l=Layer{};
   l.params=message?messageDefaults:chara?charaDefaults:imageDefaults;
   file=baseChanged=position=color=messageShow=false;
   colorTime.clear();moveTime.clear();onceTime.clear();beginPosition.clear();startExtension=false;
-  std::fill(std::begin(replacementChanged),std::end(replacementChanged),false);continue;
+  replacementChanged.fill(false);continue;
  }
  if(face&&key=="clear"&&v=="def"){l=Layer{};l.params=faceDefaults;continue;}
  if(key=="imgfilter"&&(!l.params.count(key)||l.params.at(key)!=v))l.filtered={};
@@ -1638,7 +1660,7 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
   }
  }
  // Imoscripter applies rep0..rep3 in order, each to member zero.
- for(unsigned i=0;i<4;i++)if(replacementChanged[i]){
+ for(unsigned i=0;i<replacementSlots;i++)if(replacementChanged[i]){
   auto replacement=l.params.at("rep"+std::to_string(i));std::string path;
   if(snapshot&&i==0&&isCaptureReplacement(replacement)){
    l.params["@replacement"]=captureReplacement;
@@ -1647,9 +1669,17 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
    continue;
   }
   if(!replacement.empty()&&replacement!="none"){
-   path=sceneResource(assets,"image/"+replacement,false);
+   path=sceneResource(assets,imageReplacementRequest(replacement),false);
    if(path.empty())throw std::runtime_error("Missing replacement image "+replacement);
-  }loadReplacement(l,path);
+  }
+  if(game_profile::story.legacyAvg&&i!=0){
+   if(path.empty())l.uiSlots.erase(i);
+   else {
+    prepareUiBitmap(path);
+    l.uiSlots[i]=cache.at(path);
+    l.params["rep"+std::to_string(i)]=path;
+   }
+  }else loadReplacement(l,path);
  }
  if(!beginPosition.empty()){
   for(const auto&[key,val]:beginPosition){
@@ -1755,6 +1785,21 @@ std::optional<std::string> SceneImages::selectFace(const std::string&speaker,con
  if(id.rfind("％",0)==0)id.erase(0,std::string("％").size());
  for(auto&entry:faceRepId)if(id.find(entry.first)!=id.npos){id=entry.second;break;}
  auto suffix=id.find("＠");if(suffix!=id.npos)id.resize(suffix);if(id.empty())return {};
+ if(game_profile::story.legacyAvg){
+  const auto prefix="charaimage/"+id+"/"+id+"_";
+  for(const auto&[layerName,layer]:layers){
+   if(layerName.rfind("ui_avg1_chara",0)!=0||layer.path.rfind(prefix,0)!=0)continue;
+   const auto pose=layer.path.find('_',prefix.size());
+   if(pose==std::string::npos)continue;
+   auto resolved=faceResource(id+"/"+id+"_中"+layer.path.substr(pose),false);
+   if(resolved.empty())resolved=faceResource(id+"/Default",false);
+   if(resolved.empty())return {};
+   if(deferCold&&readAhead&&!cache.count(resolved)&&!composites.count(resolved)&&!readAhead->ready(qlie::canonical(resolved)))return resolved;
+   command("^face,file:"+resolved.substr(5));
+   return {};
+  }
+  return {};
+ }
  std::string file;
  for(auto&entry:layers)if(entry.first.rfind("chara",0)==0&&entry.second.params.count("id")&&entry.second.params.at("id")==id&&entry.second.params.count("@portrait")){file=entry.second.params.at("@portrait");break;}
  if(file.empty())for(auto&entry:layers)if(entry.first.rfind("chara",0)==0&&entry.second.params.count("@portrait")&&entry.second.params.at("@portrait").find(id)!=id.npos){file=entry.second.params.at("@portrait");break;}
@@ -1793,7 +1838,10 @@ void SceneImages::pointViewPan(float x,float y){
  panX=std::clamp((x-640)/640,-1.f,1.f);
  panY=std::clamp((y-360)/360,-1.f,1.f);
 }
-MessageStyle SceneImages::messageStyle()const{MessageStyle style;auto it=layers.find("message");if(it==layers.end())return style;auto&params=it->second.params;
+MessageStyle SceneImages::messageStyle()const{MessageStyle style;auto it=layers.find("message");if(it==layers.end()){
+ if(game_profile::story.legacyAvg)return {824,120,24,24};
+ return style;
+ }auto&params=it->second.params;
  auto pair=[&](const std::string&key,unsigned&a,unsigned&b){auto found=params.find(key);if(found==params.end())return;auto values=split(found->second,':');a=unsigned(numeric(values[0]));b=values.size()>1?unsigned(numeric(values[1])):a;};
  pair("textarea",style.width,style.height);pair("fontsize",style.fontWidth,style.fontHeight);
  auto property=[&](const char*key,auto&value){auto found=params.find(key);if(found!=params.end())value=numeric(found->second);};
@@ -1806,7 +1854,7 @@ MessageStyle SceneImages::messageStyle()const{MessageStyle style;auto it=layers.
 bool SceneImages::messageVisible()const{auto it=layers.find("message");return it!=layers.end()&&it->second.params.at("show")=="true";}
 void SceneImages::setMessageImage(Image image,bool show){setMessageImage(sceneBitmap(std::move(image)),show);}
 void SceneImages::setMessageImage(std::shared_ptr<const Image>image,bool show){
- if(!layers.count("message"))command("^message,$window01");
+ if(!layers.count("message"))command(game_profile::story.legacyAvg?legacyAvgMessageWindow:"^message,$window01");
  auto&layer=layers.at("message");
  layer.pixels=std::move(image);
  layer.filtered[1]={};
@@ -2003,7 +2051,14 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
        nullptr,std::nullopt,255,nullptr,nullptr,z!=0?&extended:nullptr,cameraAffects?cameraFilter:0,liveVideo,readAhead,false);
   }
  }
- if(queue.imageCount()>beforeImages){if(qlie::canonical(l->path).rfind("image/ev/",0)==0)shownFiles.insert(qlie::canonical(l->path));auto replacement=l->params.find("@replacement");if(replacement!=l->params.end()&&qlie::canonical(replacement->second).rfind("image/ev/",0)==0)shownFiles.insert(qlie::canonical(replacement->second));}
+ if(queue.imageCount()>beforeImages){
+  const auto record=[&](const std::string&name){
+   auto path=qlie::canonical(name);
+   if(path.rfind(game_profile::story.legacyAvg?"image/":"image/ev/",0)==0)shownFiles.insert(std::move(path));
+  };
+  record(l->path);
+  if(auto replacement=l->params.find("@replacement");replacement!=l->params.end())record(replacement->second);
+ }
  }
 }
 
@@ -2107,6 +2162,12 @@ void SceneImages::restore(const qlie::Bytes&b){StateReader r{b};
  if((!game_profile::explicitCharacterExtensions||savedExtension)&&l.params.count("extfile")&&
     l.params.count("extmotion")&&l.params.at("extmotion")!="def")
   loadCharacterExtension(l,l.params.at("extfile"));
+ if(game_profile::story.legacyAvg)for(unsigned i=1;i<8;++i){
+  auto slot=l.params.find("rep"+std::to_string(i));
+  if(slot==l.params.end()||slot->second.empty()||slot->second=="none")continue;
+  prepareUiBitmap(slot->second);
+  l.uiSlots[i]=cache.at(slot->second);
+ }
  if(auto replacement=l.params.find("@replacement");replacement!=l.params.end()){
   if(!game_profile::captureReplacements||replacement->second!=captureReplacement)
    loadReplacement(l,replacement->second);

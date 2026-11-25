@@ -1,6 +1,12 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 qlie_game=${QLIE_GAME:-whj2}
 case "$qlie_game" in
+  whj1)
+    qlie_profile_flags=-DQLIE_PROFILE_WHJ1
+    qlie_binary=whj1-switch-runtime
+    qlie_nro_title="美少女万華鏡 -呪われし伝說の少女-"
+    qlie_nro_version=1.0.0
+    ;;
   whj2)
     qlie_profile_flags=
     qlie_binary=qlie-switch-runtime
@@ -33,7 +39,7 @@ case "$qlie_game" in
     qlie_nro_version=1.0.0
     ;;
   *)
-    echo "QLIE_GAME must be whj2, whj25, whj3, whj4, or whj5" >&2
+    echo "QLIE_GAME must be whj1, whj2, whj25, whj3, whj4, or whj5" >&2
     exit 2
     ;;
 esac

@@ -71,12 +71,17 @@ def main():
     game_profile = os.environ.get('QLIE_GAME') or 'whj2'
     if game_profile == 'whj2.5':
         game_profile = 'whj25'
-    if game_profile not in ('whj2', 'whj25', 'whj3', 'whj4', 'whj5'):
-        ap.error('QLIE_GAME must be whj2, whj25, whj3, whj4, or whj5')
+    if game_profile not in ('whj1', 'whj2', 'whj25', 'whj3', 'whj4', 'whj5'):
+        ap.error('QLIE_GAME must be whj1, whj2, whj25, whj3, whj4, or whj5')
     legacy = game_profile == 'whj2'
     whj4 = game_profile == 'whj4'
     binary = 'qlie-switch-runtime' if game_profile == 'whj2' else f'{game_profile}-switch-runtime'
-    if game_profile == 'whj3':
+    if game_profile == 'whj1':
+        resources = [f'GameData/data{i}.pack' for i in (0, 1, 7)] + [
+            'DLL/key.fkey', 'DLL/icon.key',
+            'movie/ロゴ.ogv', 'movie/万華鏡.ogv', 'movie/ndou99_1_01.ogv',
+        ]
+    elif game_profile == 'whj3':
         resources = [f'GameData/data{i}.pack' for i in range(10)] + ['DLL/key.fkey']
     elif game_profile == 'whj25':
         resources = [f'GameData/data{i}.pack' for i in range(9)] + ['DLL/key.fkey']

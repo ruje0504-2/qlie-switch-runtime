@@ -16,9 +16,10 @@ Switch 默认使用 deko3d，帧率上限为 60 FPS。据项目维护者反馈�
 
 Mac 需要 C/C++17、Python 3、SDL2、FreeType、libpng、libjpeg 和 FFmpeg 开发库。
 
-`QLIE_GAME` 选择 `whj2`、`whj25`、`whj3`、`whj4` 或 `whj5`，默认 `whj2`。
+`QLIE_GAME` 选择 `whj1`、`whj2`、`whj25`、`whj3`、`whj4` 或 `whj5`，默认 `whj2`。
 
 ```sh
+QLIE_GAME=whj1 ./build-host.sh --runtime-only
 QLIE_GAME=whj2 ./build-host.sh --runtime-only
 QLIE_GAME=whj25 ./build-host.sh --runtime-only
 QLIE_GAME=whj3 ./build-host.sh --runtime-only
@@ -31,6 +32,7 @@ Switch 需要 devkitPro、devkitA64、libnx 和 Switch portlibs。
 
 ```sh
 python3 tools/fetch_graphics_sdk.py
+QLIE_GAME=whj1 ./build-switch.sh
 QLIE_GAME=whj2 ./build-switch.sh
 QLIE_GAME=whj25 ./build-switch.sh
 QLIE_GAME=whj3 ./build-switch.sh
@@ -44,6 +46,7 @@ QLIE_GAME=whj5 QLIE_SWITCH_VULKAN=0 ./build-switch.sh
 
 | 构建目标 | NRO | Mac 资源 / 存档环境变量 | Switch 根目录 |
 | --- | --- | --- | --- |
+| `whj1` | `whj1-switch-runtime.nro` | `WHJ1_GAME` / `WHJ1_SAVES` | `sdmc:/switch/whj1` |
 | `whj2` | `qlie-switch-runtime.nro` | `WHJ2_GAME` / `WHJ2_SAVES` | `sdmc:/switch/whj2` |
 | `whj25` | `whj25-switch-runtime.nro` | `WHJ25_GAME` / `WHJ25_SAVES` | `sdmc:/switch/whj25` |
 | `whj3` | `whj3-switch-runtime.nro` | `WHJ3_GAME` / `WHJ3_SAVES` | `sdmc:/switch/whj3` |
@@ -52,6 +55,7 @@ QLIE_GAME=whj5 QLIE_SWITCH_VULKAN=0 ./build-switch.sh
 
 | 游戏 | `game/` 下的资源 | 各作配置 |
 | --- | --- | --- |
+| WHJ1 | 3.0 格式的 `GameData/data0.pack`、`data1.pack`、`data7.pack`，`DLL/key.fkey`、`DLL/icon.key`，以及 `movie/` 内原版日文名的三个影片。可选中文 `patch.dat` | 初代 AVG 剧本、双结局与额外章、日文本体和独立中文更新 |
 | WHJ2 | `GameData/`、`DLL/key.fkey`、`DLL/icon.key` | 原标题花海、按钮位置与剧本指定的幕间节拍 |
 | WHJ2.5 | 九个 3.0 分卷、上述两份 DLL 目录密钥，可选 `patch.dat` | 标题按钮依次出现、单页鉴赏、历史叠行与片尾镜头拉远 |
 | WHJ3 | 十个 3.0 分卷、上述两份 DLL 目录密钥，可选 `patch.dat` | 双标题背景、序章马车与风声、指定图层的影片及运行时截图替换 |
@@ -82,6 +86,8 @@ QLIE_GAME=whj2 python3 tools/package_nsp.py \
   --icon /absolute/path/to/icon.jpg \
   --output /absolute/path/to/whj2.nsp
 ```
+
+WHJ1 日文本体 `1.0.0` 的 Title ID 为 `01007F8E5C110000`，中文更新 `1.0.1` 为 `01007F8E5C110800`。汉化原包 `data8.pack` 的覆盖资源通过单独的 `patch.dat` 安装。WHJ1 是本地验证候选。
 
 WHJ2 直装配置为 Title ID `01007F8E5C120000`、版本 `1.0.1`。包内游戏数据通过 RomFS 读取，直装启动要求成功挂载系统 SaveData。
 

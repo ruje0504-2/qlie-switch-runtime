@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "diagnostics.h"
 #include "cg_catalog.hpp"
+#include "profile.hpp"
 #include <sstream>
 #include <iostream>
 namespace whj2 {
 CgCatalog::CgCatalog(qlie::Assets&assets,bool extendedRoots){std::istringstream input(assets.text("script/albummode/list.txt"));std::string line;
- const std::vector<const char*> prefixes=extendedRoots?
+ const std::vector<const char*> prefixes=game_profile::story.legacyAvg?std::vector<const char*>{"image/"}:extendedRoots?
   std::vector<const char*>{"image/ev/","image/movie/","image/cutin/"}:
   std::vector<const char*>{"image/ev/"};
  const std::vector<const char*> extensions=extendedRoots?

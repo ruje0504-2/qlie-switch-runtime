@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
-qlie_engine_sources="src/qlie.cpp src/story.cpp src/audio.cpp src/image.cpp src/animation.cpp src/particles.cpp src/model.cpp src/gradient_mask.cpp src/render_queue.cpp src/movie.cpp src/sentence_wait.cpp src/auto_play.cpp src/fps_overlay.cpp"
+qlie_engine_sources="src/qlie.cpp src/story.cpp src/story_legacy_avg.cpp src/audio.cpp src/image.cpp src/animation.cpp src/particles.cpp src/model.cpp src/gradient_mask.cpp src/render_queue.cpp src/movie.cpp src/sentence_wait.cpp src/auto_play.cpp src/fps_overlay.cpp"
 
 build_qlie_archive() (
     output=$1

@@ -73,7 +73,8 @@ DecodedPcm decodeSource(qlie::Assets& assets,const std::string& path){
 }
 WarmAsset prepareSource(qlie::Assets& assets,const std::string& path){
  WarmAsset ready;
- ready.pcm=decodeSource(assets,path);
+ try{ready.pcm=decodeSource(assets,path);}
+ catch(const std::exception& error){throw std::runtime_error(path+": "+error.what());}
  ready.bytes=ready.pcm.size()*sizeof(int16_t);
  return ready;
 }

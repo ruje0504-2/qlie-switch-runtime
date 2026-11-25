@@ -6,6 +6,8 @@
 namespace whj2 {
 std::string trim(std::string);
 std::vector<std::string> split(const std::string&,char delimiter);
+inline constexpr char legacyAvgMessageWindow[]=
+ "^message,file:windowframe_window.b,x:261,y:603,pri:1010,textarea:824:120,fontsize:24:24";
 struct Event {std::string type,value,file;unsigned line=0;};
 struct Frame {std::string file;uint32_t pc=0;};
 struct StoryState {
@@ -27,6 +29,7 @@ struct StoryProfile {
  std::string replayPrelude{};
  bool arithmeticFragments=false;
  std::set<std::string> ignoredCaretCommands{};
+ bool legacyAvg=false;
 };
 class Story {
  enum class After {None,Interlude,VisualWait};
@@ -45,11 +48,13 @@ class Story {
  void jump(std::string,std::string);
  void native(const Op&);
  void caret(const Op&);
+ bool legacyCaret(const Op&,const std::vector<std::string>&);
+ bool legacyNative(const Op&,const std::vector<std::string>&);
  Event event(std::string,std::string,unsigned=0)const;
 public:
  StoryState state;uint64_t operations=0;std::set<std::string> visited;
  Story(qlie::Assets&a,const StoryProfile&settings):assets(a),profile(settings){}
- void start();void startReplay(const std::string&script);
+ void start();void startReplay(const std::string&script,const std::string&label={});
  Event next();
  std::vector<std::string> upcomingAssetCommands(bool opening=false);
  bool beforeNextPresentation(bool hasBody,const std::function<bool(const Event&)>& match);

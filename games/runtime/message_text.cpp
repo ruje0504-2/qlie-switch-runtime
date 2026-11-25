@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "diagnostics.h"
 #include "message_text.hpp"
+#include "profile.hpp"
 #include "state_io.hpp"
 #include "story.hpp"
 extern "C" {
@@ -20,23 +21,31 @@ static std::vector<uint32_t> codepoints(const std::string&value){
 MessageText::MessageText(qlie::Assets&assets,bool useStoryLineBreaking):storyLineBreaking(useStoryLineBreaking){
  std::istringstream in(assets.text("script/config/default.txt"));std::string line;
  while(std::getline(in,line)){auto p=line.find('=');if(p!=line.npos&&trim(line.substr(0,p))=="TextSpeed")speed=std::stod(trim(line.substr(p+1)));}
+ std::vector<std::pair<uint32_t,unsigned>> externalGlyphs;
+ if(game_profile::story.legacyAvg){
+  // The original AVG script selects font 5 for its CP932 0x81f7 glyph.
+  externalGlyphs.emplace_back(0x00b6,0x01f7);
+ }else{
  // OF headers and atlas coordinates follow the original bitmap-font loader.
  std::istringstream replacementFile(assets.text("avg/imoscripter_reptextlist.txt"));
  while(std::getline(replacementFile,line)){auto p=line.find('=');if(p!=line.npos)replacements.push_back({trim(line.substr(0,p)),trim(line.substr(p+1))});}
- const auto needsAtlas=[](const auto&replacement){return replacement.second.rfind("[f,6]",0)==0;};
- if(std::any_of(replacements.begin(),replacements.end(),needsAtlas)){
+ for(const auto&replacement:replacements){
+  const auto& value=replacement.second;
+  if(value.rfind("[f,6]",0)!=0)continue;
+  if(value.size()<8||value.substr(value.size()-3)!="[f]")throw std::runtime_error("Unsupported external glyph mapping");
+  const auto characters=codepoints(value.substr(5,value.size()-8));
+  if(characters.size()!=1||characters[0]<0xff10||characters[0]>0xff19)throw std::runtime_error("Unsupported OF character");
+  externalGlyphs.emplace_back(characters[0],0x24f+characters[0]-0xff10);
+ }
+ }
+ if(!externalGlyphs.empty()){
  auto bitmap=assets.read("system/font/外字.of");
  auto word=[&](size_t at){if(at+2>bitmap.size())throw std::runtime_error("Truncated OF font");return unsigned(bitmap[at])|(unsigned(bitmap[at+1])<<8);};
  if(bitmap.size()<0x1044a)throw std::runtime_error("Truncated OF header");
  unsigned cellWidth=word(0x10440),cellHeight=word(0x10442),atlasWidth=word(0x10445),atlasHeight=word(0x10447),banks=bitmap[0x10444];
  if(!cellWidth||!cellHeight||cellWidth>256||cellHeight>256||!atlasWidth||!atlasHeight||size_t(banks)*atlasWidth*atlasHeight>bitmap.size()-0x1044a)throw std::runtime_error("Invalid OF atlas");
- for(const auto&replacement:replacements){
-  if(!needsAtlas(replacement))continue;
-  auto value=replacement.second;
-  if(value.size()<8||value.substr(value.size()-3)!="[f]")throw std::runtime_error("Unsupported external glyph mapping");
-  auto characters=codepoints(value.substr(5,value.size()-8));
-  if(characters.size()!=1||characters[0]<0xff10||characters[0]>0xff19)throw std::runtime_error("Unsupported OF character");
-  uint32_t cp=characters[0];unsigned index=0x24f+cp-0xff10,tile=word(0x40+index*2),bank=tile>>8,slot=tile&255;
+ for(const auto&[cp,index]:externalGlyphs){
+  unsigned tile=word(0x40+index*2),bank=tile>>8,slot=tile&255;
   unsigned sx=(slot&15)*cellWidth,sy=(slot>>4)*cellHeight;
   if(!tile||bank>=banks||sx+cellWidth>atlasWidth||sy+cellHeight>atlasHeight)throw std::runtime_error("Invalid OF glyph tile");
   BitmapGlyph glyph{cp,cellWidth,cellHeight,qlie::Bytes(size_t(cellWidth)*cellHeight),0,0,{}};
@@ -47,7 +56,7 @@ MessageText::MessageText(qlie::Assets&assets,bool useStoryLineBreaking):storyLin
   bitmapGlyphs.push_back(std::move(glyph));
  }
  }
- if(!storyLineBreaking)return;
+ if(game_profile::story.legacyAvg||!storyLineBreaking)return;
  std::map<std::string,std::string> project;
  std::istringstream settings(assets.text("avg/projectsetting.txt"));
  while(std::getline(settings,line)){
@@ -84,7 +93,13 @@ void MessageText::index(bool layoutChanged){if(layoutChanged)layoutVersion.publi
  auto append=[&](const std::string&value,bool center){size_t begin=glyphs.size();for(auto cp:codepoints(value)){if(cp!='\n')time+=std::max(0.,currentSpeed);glyphs.push_back({cp,time,0,bitmapFont});}if(center&&glyphs.size()>begin)glyphs[begin].centeredRun=glyphs.size()-begin;};
  for(size_t pos=0;pos<display.size();){
   if(display[pos]=='['){auto end=display.find(']',pos+1);if(end!=display.npos){auto token=display.substr(pos+1,end-pos-1);auto comma=token.find(',');auto command=token.substr(0,comma);
-   if(command=="f"){if(comma==token.npos)bitmapFont=false;else if(token.substr(comma+1)=="6")bitmapFont=true;else throw std::runtime_error("Unsupported message font slot");pos=end+1;continue;}
+   if(command=="f"){
+    const auto slot=comma==token.npos?std::string():token.substr(comma+1);
+    if(slot.empty()||(game_profile::story.legacyAvg&&(slot=="0"||slot=="1")))bitmapFont=false;
+    else if(slot==(game_profile::story.legacyAvg?"5":"6"))bitmapFont=true;
+    else throw std::runtime_error("Unsupported message font slot "+slot);
+    pos=end+1;continue;
+   }
    if(command=="n"){append("\n",false);pos=end+1;continue;}
    if(command=="spd"){currentSpeed=comma==token.npos?speed:std::stod(token.substr(comma+1));if(currentSpeed<0)currentSpeed=speed;pos=end+1;continue;}
    if(command=="pc"&&comma!=token.npos){append(token.substr(comma+1),true);pos=end+1;continue;}

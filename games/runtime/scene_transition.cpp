@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "diagnostics.h"
 #include "scene_transition.hpp"
+#include "profile.hpp"
 #include "asset_read_ahead.hpp"
 #include "story.hpp"
 #include "state_io.hpp"
@@ -85,7 +86,9 @@ void mosaic(qlie::Bytes&out,const qlie::Bytes&old,double amount){
  }
 }
 }
-SceneTransition::SceneTransition(qlie::Assets&assets):assets(assets){std::istringstream in(assets.text("avg/imoscripter_template_sentence.txt"));std::string line;
+SceneTransition::SceneTransition(qlie::Assets&assets):assets(assets){
+ if(game_profile::story.legacyAvg)return;
+ std::istringstream in(assets.text("avg/imoscripter_template_sentence.txt"));std::string line;
  while(std::getline(in,line)){auto pos=line.find('=');if(pos!=line.npos)templates[trim(line.substr(0,pos))]=trim(line.substr(pos+1));}
 }
 SceneTransition::~SceneTransition()=default;

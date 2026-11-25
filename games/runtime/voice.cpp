@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "voice.hpp"
+#include "profile.hpp"
 #include "story.hpp"
 #include <sstream>
 #include <algorithm>
 namespace whj2 {
 VoiceResolver::VoiceResolver(qlie::Assets&a):assets(a){
  for(auto name:{"avg/setting.txt","avg/projectsetting.txt"}){
+  if(game_profile::story.legacyAvg&&std::string_view(name)=="avg/projectsetting.txt")continue;
   std::istringstream in(assets.text(name));std::string line;
   while(std::getline(in,line)){
    auto p=line.find('=');if(p==line.npos)continue;

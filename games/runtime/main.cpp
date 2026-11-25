@@ -432,7 +432,7 @@ struct Frontend {
  if(std::filesystem::exists(saveDir+"/settings.cfg"))settings.restore(qlie::file(saveDir+"/settings.cfg"));
  applySettings(false);
  prepareExtras();
- for(auto type:{"music","sound"}){std::istringstream in(assets.text(std::string("avg/imoscripter_template_")+type+".txt"));
+ if(!game_profile::story.legacyAvg)for(auto type:{"music","sound"}){std::istringstream in(assets.text(std::string("avg/imoscripter_template_")+type+".txt"));
  std::string l;
  while(std::getline(in,l)){auto p=l.find(61);
  if(p!=l.npos)audioTemplates[type][whj2::trim(l.substr(0,p))]=whj2::trim(l.substr(p+1));
@@ -445,7 +445,7 @@ struct Frontend {
   constexpr auto intro=game_profile::title.audio;
   if(intro.opening)audio->warmFile(assets,intro.opening);
   if(intro.middle)audio->warmFile(assets,intro.middle);
-  audio->warmFile(assets,game_profile::titleMusic);
+  if(game_profile::titleMusic[0])audio->warmFile(assets,game_profile::titleMusic);
  }
  opening=1;images->command("^ui_caution,file:script/caution/caution.b,x:0,y:0");
  QLIE_LOG_LINE(<<"OPENING caution\n");
@@ -552,7 +552,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
     const auto fields=whj2::split(line.substr(comma+1),',');
     for(const auto&part:fields)if(part.rfind("file:",0)==0){
      auto name=part.substr(5);if(name.empty()||name=="none"||name.find('$')!=name.npos)continue;
-     auto path=std::string(cmd=="^music01"?"music/":"se/")+name;if(!assets.inPack(path))path+=".ogg";
+     auto path=game_profile::story.legacyAvg&&name.rfind("voice/",0)==0?name:
+      std::string(cmd=="^music01"?"music/":"se/")+name;if(!assets.inPack(path))path+=".ogg";
      if(assets.inPack(path)){
       if(line.find(",sndfilter:bathroom2")!=line.npos)path="@bathroom2:"+path;
       for(const auto&field:fields){
@@ -593,7 +594,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   cgScreen->prepare();
   replayScreen->prepare();
  }
- void playTitleTheme(){audio->playFile(assets,0,game_profile::titleMusic,true,255.f/256,0,0);}
+ void playTitleTheme(){if(game_profile::titleMusic[0])audio->playFile(assets,0,game_profile::titleMusic,true,255.f/256,0,0);}
  void updateTitleAudio(double elapsed,bool skipped=false){
   constexpr auto intro=game_profile::title.audio;
   if(!intro.opening||titleAudioElapsed>=intro.musicAt)return;
@@ -620,7 +621,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   if(intro.opening){
    audio->playFile(assets,8,intro.opening,false,255.f/256,0,0);
    audio->warmFile(assets,intro.middle);
-   audio->warmFile(assets,game_profile::titleMusic);
+   if(game_profile::titleMusic[0])audio->warmFile(assets,game_profile::titleMusic);
   }else playTitleTheme();
   warmNextScene(true);
  }
@@ -790,7 +791,7 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(f=="none"){if(ch==0)audio->stopMusic(ms,audioTypes[ch]);else audio->volume(output,0,ms,true);
  return true;
  }if(ch!=0&&normalSkip&&!loops[ch]){audio->stop(output);return true;}
- std::string path=(ch==0?"music/":"se/")+f;
+ std::string path=game_profile::story.legacyAvg&&f.rfind("voice/",0)==0?f:(ch==0?"music/":"se/")+f;
  if(!assets.exists(path))path+=".ogg";
  if(attrs.count("sndfilter")&&attrs.at("sndfilter")=="bathroom2")path="@bathroom2:"+path;
  const auto pan=attrs.find("pan");
@@ -1538,7 +1539,9 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   QLIE_LOG_LINE(<<"TITLE START wait_ms="<<game_profile::titleStartWait<<'\n');
   if(skipTitleExitForTest)finishTitleStart();
  }
- void activate(){if(titleStarting){finishTitleStart();return;}if(normalSkip){normalSkip=false;return;}if(opening){if(opening==1)leaveCaution();else {movie->stop();nextMakerLogo();}return;}if(!menu&&hidden){hidden=false;return;}if(movie->playing()){movie->stop();
+ void activate(){if(titleStarting){finishTitleStart();return;}if(normalSkip){normalSkip=false;return;}if(opening){if(opening==1)leaveCaution();else {movie->stop();nextMakerLogo();}return;}if(!menu&&hidden){hidden=false;return;}if(movie->playing()){
+  if(game_profile::story.legacyAvg&&story.state.vars.count("__avg1_credits_clock")&&movie->elapsedMs()<5000)return;
+  movie->stop();
  if(movieOnly)done=true;
  else next();
  return;
@@ -1717,13 +1720,13 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   else if(musicScreen->visible())musicScreen->close();
   switch(exit.destination){
   case ExtrasDestination::Title:
-   title->returnToExtras(exit.alternateBackdrop);audio->playFile(assets,0,game_profile::titleMusic,true,255.f/256,0,0);break;
+   title->returnToExtras(exit.alternateBackdrop);playTitleTheme();break;
   case ExtrasDestination::CG:openCg();break;
   case ExtrasDestination::Music:openMusic();break;
   case ExtrasDestination::Replay:openReplay();break;
   case ExtrasDestination::Playback:
    transition->reset();replayPage=replayScreen->pageIndex();
-   audio->stopAll();story.startReplay(replayScreen->entry(exit.entry).script);clearBackgroundVoice();
+   audio->stopAll();story.startReplay(replayScreen->entry(exit.entry).script,replayScreen->entry(exit.entry).label);clearBackgroundVoice();
    progress.apply(story);replayActive=true;menu=false;hidden=false;autoPlay.enabled=false;focus=0;warmNextScene();next();
    break;
   }

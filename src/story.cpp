@@ -4,6 +4,7 @@
 #include <sstream>
 #include <cstring>
 #include <algorithm>
+#include <charconv>
 namespace whj2 {
 std::string trim(std::string s){auto a=s.find_first_not_of(" \t\r\n");if(a==s.npos)return {};return s.substr(a,s.find_last_not_of(" \t\r\n")-a+1);}
 std::vector<std::string> split(const std::string&s,char delim){std::vector<std::string>r;bool quote=false;size_t start=0;for(size_t i=0;i<s.size();i++){if(s[i]==34)quote=!quote;if(s[i]==delim&&!quote){r.push_back(trim(s.substr(start,i-start)));start=i+1;}}r.push_back(trim(s.substr(start)));return r;}
@@ -98,18 +99,41 @@ Story::Script&Story::script(const std::string&n){
  }
  if(sc.labels.count("@@main"))sc.labels["@@top"]=sc.labels["@@!top"]=0;
  std::vector<size_t>stack;
- for(size_t i=0;i<sc.ops.size();i++){auto&s=sc.ops[i].text;if(s.rfind("\\if,",0)==0||s.rfind("\\for",0)==0)stack.push_back(i);else if(s=="\\else"){if(stack.empty())throw std::runtime_error("Unmatched else");sc.ops[stack.back()].otherwise=int(i);}else if(s=="\\end"){if(stack.empty())throw std::runtime_error("Unmatched end in "+name);size_t start=stack.back();stack.pop_back();sc.ops[start].end=int(i);sc.ops[i].end=int(start);if(sc.ops[start].otherwise>=0)sc.ops[size_t(sc.ops[start].otherwise)].end=int(i);}}
+ for(size_t i=0;i<sc.ops.size();i++){auto&s=sc.ops[i].text;if(s.rfind("\\if,",0)==0||s.rfind("\\for",0)==0||(profile.legacyAvg&&s.rfind("\\case,",0)==0))stack.push_back(i);else if(s=="\\else"){if(stack.empty())throw std::runtime_error("Unmatched else");sc.ops[stack.back()].otherwise=int(i);}else if(s=="\\end"){if(stack.empty())throw std::runtime_error("Unmatched end in "+name);size_t start=stack.back();stack.pop_back();sc.ops[start].end=int(i);sc.ops[i].end=int(start);if(sc.ops[start].otherwise>=0)sc.ops[size_t(sc.ops[start].otherwise)].end=int(i);}}
  if(!stack.empty())throw std::runtime_error("Unclosed control block in "+name);
  return scripts.emplace(name,std::move(sc)).first->second;
 }
+static std::string legacyVariable(std::string name){
+ if(name=="#1_route_a_f")return "#game_aclearflag";
+ if(name=="#1_route_b_f")return "#game_bclearflag";
+ return name;
+}
 std::string Story::value(std::string s)const{
  s=trim(s);
+ if(profile.legacyAvg){
+  const auto terms=split(s,'+');
+  if(terms.size()>1){
+   std::string text;
+   long sum=0;
+   bool numeric=true;
+   for(const auto&term:terms){
+    const auto resolved=value(term);
+    text+=resolved;
+    long number=0;
+    const auto result=std::from_chars(resolved.data(),resolved.data()+resolved.size(),number);
+    if(result.ec!=std::errc{}||result.ptr!=resolved.data()+resolved.size())numeric=false;
+    else if(numeric)sum+=number;
+   }
+   return numeric?std::to_string(sum):text;
+  }
+ }
  if(s.size()>=2&&s.front()==34&&s.back()==34)return s.substr(1,s.size()-2);
- const auto name=lower(s);
+ const auto name=profile.legacyAvg?legacyVariable(lower(s)):lower(s);
  if(name=="selffilename")return state.at.file;
  auto it=state.vars.find(name);
  if(it!=state.vars.end())return it->second;
  if(name=="__rootfile")return profile.root;
+ if(profile.legacyAvg&&!s.empty()&&s.front()==35)return "0";
  return s;
 }
 bool Story::setPlayerName(std::string name){
@@ -250,19 +274,43 @@ void Story::start(){
  state.at.file=profile.root;
  jump("@@top",state.at.file);
 }
-void Story::startReplay(const std::string&file){resetState();state.replay=true;state.at.file=qlie::canonical(file);jump("@@top",state.at.file);}
+void Story::startReplay(const std::string&file,const std::string&label){
+ resetState();state.replay=true;state.at.file=qlie::canonical(file);
+ if(profile.legacyAvg&&!label.empty()){
+  jump(label,state.at.file);
+  state.vars["__avg1_created"]="1";
+  state.pending.push_back(event("create",state.at.file));
+ }else jump("@@top",state.at.file);
+}
 void Story::native(const Op&o){auto a=split(o.text,44);std::string cmd=lower(a[0]);auto arg=[&](size_t i){return i<a.size()?a[i]:std::string();};auto need=[&](bool ok){if(!ok)throw std::runtime_error("Unsupported native command: "+o.text);};
- if(cmd=="\\then")return;
+ if(profile.legacyAvg&&legacyNative(o,a))return;
+ if(cmd=="\\then"||(profile.legacyAvg&&cmd=="\\lk"&&state.scope=="sys"))return;
+ if(profile.legacyAvg&&cmd=="\\case"){
+  need(o.end>=0);
+  const auto selected=value(arg(1));
+  const auto&ops=script(state.at.file).ops;
+  auto top=state.at.pc;
+  auto stop=o.otherwise>=0?unsigned(o.otherwise):unsigned(o.end);
+  for(;top<stop;++top){
+   const auto&branch=ops[top];
+   if(branch.end>int(top)&&branch.end<o.end){top=unsigned(branch.end);continue;}
+   if(branch.text.rfind("\\ans,",0)==0&&value(branch.text.substr(5))==selected){
+    state.at.pc=top+1;return;
+   }
+  }
+  state.at.pc=uint32_t(o.otherwise>=0?o.otherwise+1:o.end+1);
+  return;
+ }
  if(cmd=="\\if"){if(!condition(arg(1)))state.at.pc=uint32_t(o.otherwise>=0?o.otherwise+1:o.end+1);return;}
  if(cmd=="\\else"){state.at.pc=uint32_t(o.end+1);return;}
  if(cmd=="\\end"){auto&start=script(state.at.file).ops[size_t(o.end)];if(start.text.rfind("\\for",0)==0){auto v=split(start.text,44);need(v.size()==4);auto n=lower(v[3].substr(0,v[3].size()-2));state.vars[n]=std::to_string(std::stoi(value(n))+1);if(condition(v[2]))state.at.pc=uint32_t(o.end+1);}return;}
  if(cmd=="\\for"){need(a.size()==4);auto eq=a[1].find(61);need(eq!=a[1].npos);state.vars[lower(trim(a[1].substr(0,eq)))]=value(a[1].substr(eq+1));if(!condition(a[2]))state.at.pc=uint32_t(o.end+1);return;}
- if(cmd=="\\cal"){auto eq=arg(1).find(61);need(eq!=arg(1).npos);state.vars[lower(trim(arg(1).substr(0,eq)))]=value(arg(1).substr(eq+1));return;}
+ if(cmd=="\\cal"){auto eq=arg(1).find(61);need(eq!=arg(1).npos);auto name=lower(trim(arg(1).substr(0,eq)));state.vars[profile.legacyAvg?legacyVariable(std::move(name)):name]=value(arg(1).substr(eq+1));return;}
  if(cmd=="\\var"||cmd=="\\gvar"||cmd=="\\svar"){for(size_t i=2;i<a.size();i++)state.vars.emplace(lower(a[i]),a[1]=="str"?"":"0");return;}
  if(cmd=="\\vexs"){state.vars["resultint[0]"]=state.vars.count(lower(arg(1)))?"1":"0";return;}
  if(cmd=="\\init"){need(lower(arg(1))=="game_routeflag");state.vars["game_routeflag[0]"]="0";return;}
  if(cmd=="\\del"){state.vars.erase(lower(arg(1)));return;}
- if(cmd=="\\scp"){state.scope=lower(value(arg(1)));if(state.scope.rfind("dsnd[",0)==0){auto p=state.scope.find(93);state.scope="dsnd["+value(state.scope.substr(5,p-5))+"]";}return;}
+ if(cmd=="\\scp"){state.scope=lower(profile.legacyAvg?arg(1):value(arg(1)));if(state.scope.rfind("dsnd[",0)==0){auto p=state.scope.find(93);state.scope="dsnd["+value(state.scope.substr(5,p-5))+"]";}return;}
  if(cmd=="\\?sr"){need(state.scope=="sys");state.vars["resultstr[0]"]=state.replay?"@@replayreturn":"";return;}
  if(cmd=="\\r"){need(state.scope=="sys");state.finished=true;state.pending.push_back(event("finish","title",o.line));return;}
  if(cmd=="\\i"){need(state.scope.rfind("dsnd[",0)==0);state.pending.push_back(event("audio-clear",state.scope,o.line));return;}
@@ -385,21 +433,38 @@ void Story::caret(const Op&o){auto a=split(o.text,44);std::string cmd=lower(a[0]
   state.pending.push_back(event("command",endingMovieCommand(media->second),o.line));
   return;
  }
+ if(profile.legacyAvg&&legacyCaret(o,a))return;
  if(profile.ignoredCaretCommands.count(cmd))return;
  if(!profile.sceneCommands.count(cmd))throw std::runtime_error("Unsupported story command: "+o.text);
  state.pending.push_back(event("command",o.text,o.line));
 }
 Event Story::next(){if(!state.pending.empty()){Event e=state.pending.front();state.pending.pop_front();return e;}if(state.awaiting)return event("await-choice","");if(state.finished)return event("finished","");for(unsigned count=0;count<10000;count++){auto&sc=script(state.at.file);auto reached=sc.labelsAt.find(state.at.pc);if(reached!=sc.labelsAt.end())for(const auto&label:reached->second)visited.insert(state.at.file+":"+label);if(state.at.pc>=sc.ops.size()){if(state.calls.empty())throw std::runtime_error("Unexpected script EOF: "+state.at.file);state.at=state.calls.back();state.calls.pop_back();continue;}Op o=sc.ops[state.at.pc++];operations++;try{if(o.text=="!page")return event("page","",o.line);if(o.text=="!create"||o.text=="!create-alternate"){
+ if(profile.legacyAvg){
+  if(state.vars.count("__avg1_created"))continue;
+  state.vars["__avg1_created"]="1";
+ }
  state.vars.erase("__view_pan");
  if(profile.historyJumpLimit)state.vars["__log_jump_locked"]="0";
  if(o.text=="!create-alternate")state.vars["__avg2_active"]="1";
  else state.vars.erase("__avg2_active");
  return event("create",state.at.file,o.line);
 }if(o.text=="!free"){
+ if(profile.legacyAvg){
+  state.vars.erase("__avg1_created");
+  for(auto it=state.vars.begin();it!=state.vars.end();){
+   if(it->first.rfind("__avg1_slot_",0)==0||it->first.rfind("__avg1_actor_",0)==0||
+      it->first.rfind("__avg1_layer_",0)==0||it->first=="__avg1_previous_chara")it=state.vars.erase(it);
+   else ++it;
+  }
+ }
  if(profile.historyJumpLimit)state.vars["__log_jump_locked"]="1";
  return event("free",state.at.file,o.line);
 }if(o.text[0]==92)native(o);else if(o.text[0]==94){caret(o);if(o.after!=After::None)state.pending.push_back(event(o.after==After::Interlude?"interlude":"visual-wait","",o.line));}else return event("text",substitutePlayerName(o.text),o.line);}catch(const std::exception&e){throw std::runtime_error(state.at.file+":"+std::to_string(o.line)+" "+e.what());}if(!state.pending.empty()){Event e=state.pending.front();state.pending.pop_front();return e;}if(state.finished)return event("finish","title",o.line);}throw std::runtime_error("Story instruction budget exhausted at "+state.at.file);}
-void Story::choose(unsigned i){if(!state.awaiting||i>=state.choices.size())throw std::runtime_error("Invalid choice");state.choice=int(i);state.awaiting=false;}
+void Story::choose(unsigned i){
+ if(!state.awaiting||i>=state.choices.size())throw std::runtime_error("Invalid choice");
+ state.choice=int(i);state.awaiting=false;
+ if(profile.legacyAvg)state.vars["resultbtnint[0]"]=std::to_string(i);
+}
 struct Writer {qlie::Bytes b;void n(uint32_t v){for(int i=0;i<4;i++)b.push_back(uint8_t(v>>(8*i)));}void s(const std::string&v){n(uint32_t(v.size()));b.insert(b.end(),v.begin(),v.end());}void f(const Frame&v){s(v.file);n(v.pc);}};
 struct Reader {const qlie::Bytes&b;size_t p=0;uint32_t n(){if(p+4>b.size())throw std::runtime_error("Truncated story save");uint32_t v=0;for(int i=0;i<4;i++)v|=uint32_t(b[p++])<<(8*i);return v;}std::string s(){size_t size=n();if(size>b.size()-p)throw std::runtime_error("Truncated saved string");std::string v(b.begin()+p,b.begin()+p+size);p+=size;return v;}Frame f(){auto s0=s();return {s0,n()};}};
 qlie::Bytes Story::save()const{Writer w;w.s(profile.saveSignature);w.f(state.at);w.n(uint32_t(state.calls.size()));for(auto&x:state.calls)w.f(x);w.n(uint32_t(state.vars.size()));for(auto&x:state.vars){w.s(x.first);w.s(x.second);}for(auto&x:{state.scope,state.home,state.selectLabel,state.branchLabel,state.routeStr})w.s(x);w.n(uint32_t(state.routeValue));w.n(uint32_t(state.choice));w.n(state.awaiting);w.n(state.finished);w.n(state.replay);w.n(uint32_t(state.choices.size()));for(auto&s:state.choices)w.s(s);w.n(uint32_t(state.pending.size()));for(auto&e:state.pending){w.s(e.type);w.s(e.value);w.s(e.file);w.n(e.line);}w.n(qlie::hash(w.b));return w.b;}

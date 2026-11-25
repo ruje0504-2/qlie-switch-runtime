@@ -37,5 +37,6 @@ struct TitleLayout {
  int extraLastYOffset=0,extraFrameXOffset=0;
  bool exitUsesMotions=false;
  double fadeInMs=0,buttonStaggerMs=0,backdropExitDelayMs=0;
+ bool frameBackdrop=false,albumAlwaysAvailable=false;
 };
 }

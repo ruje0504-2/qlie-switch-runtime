@@ -36,7 +36,7 @@ bool TitleScreen::prepareOpening(AssetReadAhead*loader,bool unlocked){
  std::vector<std::string> paths;
  auto add=[&](const char*item){for(auto state:{layout.buttonOff,layout.buttonOn})paths.push_back(std::string("script/title/")+item+state);};
  for(auto item:layout.mainFiles)add(item);
- if(unlocked)for(auto item:layout.extraFiles)add(item);
+ if(unlocked||layout.albumAlwaysAvailable)for(auto item:layout.extraFiles)add(item);
  scene.warmUiBitmaps(titleBitmaps,std::move(paths));
  return alternate;
 }
@@ -61,12 +61,12 @@ std::string TitleScreen::buttonPosition(unsigned index,bool extra)const{
                     (extra&&index==3?layout.extraLastYOffset:0)};
  return ",x:"+std::to_string(point[0])+",y:"+std::to_string(point[1]);
 }
-void TitleScreen::reset(bool alternate,bool unlocked){scene.clear(true);scene.takeUiBitmaps(titleBitmaps);elapsed=0;shown=hover=false;selected=0;buttonMotions.fill("");extras=unlocked;extraPage=false;
+void TitleScreen::reset(bool alternate,bool unlocked){scene.clear(true);scene.takeUiBitmaps(titleBitmaps);elapsed=0;shown=hover=false;selected=0;buttonMotions.fill("");extras=unlocked||layout.albumAlwaysAvailable;extraPage=false;
  shownButtons=0;
  backdropExitRemaining=-1;
  if(layout.alternateRequiresExtras&&!extras)alternate=false;
  setBackdrop(alternate);
- setFrame(alternate,false);
+ setFrame(alternate,layout.frameBackdrop);
  for(unsigned i=0;i<5;i++){
   const auto id="ui_button"+std::to_string(i);
   const auto asset=std::string("script/title/")+layout.mainFiles[i];
@@ -83,7 +83,7 @@ void TitleScreen::setExtraPage(bool extra){if(extra&&!extras)return;extraPage=ex
   scene.command(command+buttonPosition(unsigned(i),extra)+",show:true,motion:"+entryMotion(i));
   auto file=std::string("script/title/")+(extra?layout.extraFiles[i]:layout.mainFiles[i]);scene.uiSlot(id,0,file+layout.buttonOff);scene.uiSlot(id,1,file+layout.buttonOn);
  }
- scene.command("^ui_frame,motion:*Enable"+(layout.extraFrameXOffset?
+ if(!layout.frameBackdrop)scene.command("^ui_frame,motion:*Enable"+(layout.extraFrameXOffset?
   ",x:"+std::to_string(layout.frameX[0]+(extra?layout.extraFrameXOffset:0)):std::string()));
 }
 const char*TitleScreen::entryMotion(int i){
@@ -96,7 +96,7 @@ void TitleScreen::showNextButton(){
 }
 void TitleScreen::enable(){
  buttonMotions.fill("");shown=true;
- scene.command("^ui_frame,show:true,motion:*Enable");
+ if(!layout.frameBackdrop)scene.command("^ui_frame,show:true,motion:*Enable");
  const auto count=layout.buttonStaggerMs>0?1u:5u;
  while(shownButtons<count)showNextButton();
 }
@@ -107,7 +107,7 @@ void TitleScreen::highlight(){hover=true;for(int i=0;i<(extraPage?4:5);i++){
 }}
 void TitleScreen::beginExit(){
  backdropExitRemaining=layout.backdropExitDelayMs;
- scene.command("^ui_frame,motion:*Disable");
+ if(!layout.frameBackdrop)scene.command("^ui_frame,motion:*Disable");
  for(int i=0;i<5;i++)scene.command("^ui_button"+std::to_string(i)+",motion:*Disable");
 }
 void TitleScreen::view(float x){viewTarget=std::clamp(x,0.f,1280.f);}

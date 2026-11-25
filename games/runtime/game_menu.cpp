@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "game_menu.hpp"
+#include "profile.hpp"
 #include <cmath>
 #include <cstdio>
 #include <algorithm>
@@ -59,7 +60,7 @@ void GameMenu::prepareHistory(bool jumps){
  loadHistoryTracks();
  for(const char* path:{"script/log/アッパーフレーム.png","script/log/アンダーフレーム.png",
      "script/log/ゲームに戻る_off.png","script/log/button_voice.b#0","script/log/button_voice.b#1",
-     "script/log/scroll_bar_log.b#0","script/log/scroll_bar_log.b#1",
+     "script/log/scroll_bar_log.b#0",game_profile::story.legacyAvg?"script/log/barframe.png":"script/log/scroll_bar_log.b#1",
      "script/log/scroll_button.b#0","script/log/scroll_button.b#1","script/log/line.b#0"})
   resource(path);
  if(jumps){
@@ -237,7 +238,8 @@ void GameMenu::drawHistory(RenderQueue&q){
   if(historyJumps[row])put(q,std::string("script/log/button_jump.b#")+texture,51,585-row*150,true);
  }
  // BarFrame sits behind the original scroll track artwork at priority -1.
- put(q,"script/log/scroll_bar_log.b#1",HistoryBarX,HistoryBarY-10,false,191);
+ if(game_profile::story.legacyAvg)put(q,"script/log/barframe.png",1193,86);
+ else put(q,"script/log/scroll_bar_log.b#1",HistoryBarX,HistoryBarY-10,false,191);
  put(q,"script/log/scroll_bar_log.b#0",HistoryBarX-8,HistoryBarY-16);
  // The native control centers the logical thumb, then adds the artwork offsets.
  const int thumbX=HistoryBarX+(HistoryTrackWidth-HistoryThumbWidth)/2-4;
@@ -254,7 +256,7 @@ void GameMenu::render(qlie::Bytes*pixels,RenderTarget*target,const PanelContent&
  for(int i=0;i<8;i++){float x=i<4?323:956,y=182+(i%4)*135;put(q,dir+(focus==i?"セーブファイル_on.png":"セーブファイル_off.png"),x,y,true);put(q,dir+"サムネイル_no_data.png",i<4?27:660,137+(i%4)*135);if(populatedSlots[i])put(q,dir+(focus==8+i?"削除ボタン_on.png":"削除ボタン_off.png"),deleteButtonX[i],148+(i%4)*135,true);}
  put(q,dir+"戻る_off.png",1211,695,true);put(q,dir+"タイトルへ戻る_off.png",1080,695,true);put(q,dir+"ゲームの終了_off.png",950,695,true);
  }else if(panel==History){drawHistory(q);
- }else if(panel==Settings){put(q,"script/config/背景.png",0,0);put(q,"script/config/設定フレーム.png",139,89);put(q,"script/config/アッパーフレーム.png",0,0);put(q,"script/config/アンダーフレーム.png",0,656);
+ }else if(panel==Settings){put(q,"script/config/背景.png",0,0);if(game_profile::story.legacyAvg)put(q,"script/config/設定_フレーム_0.png",135,86);else put(q,"script/config/設定フレーム.png",139,89);put(q,"script/config/アッパーフレーム.png",0,0);put(q,"script/config/アンダーフレーム.png",0,656);
  put(q,"script/config/priview_windowalpha.b#0",356,225);
  put(q,"script/config/priview_windowalpha.b#1",349,225,false,unsigned(settings.get("WindowAlpha")));
  put(q,"script/config/priview_windowalpha.b#3",349,225);

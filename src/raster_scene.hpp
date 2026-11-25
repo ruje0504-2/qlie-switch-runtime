@@ -23,6 +23,10 @@ struct DrawSources {
  uint64_t primary=0,secondary=0;
  bool opaque=false;
  uint32_t singlePixel=0;
+ bool monochrome=false;
+#ifdef QLIE_PROFILE_WHJ6
+ std::shared_ptr<const ImageAlphaTiles> alphaTiles{};
+#endif
 };
 struct AxisBounds {
  float left,top,right,bottom;
@@ -86,7 +90,7 @@ struct Scene {
   Span storage;unsigned width=0,height=0;
   uint64_t lastUsed=0,checkedBatch=0,pixelVersion=0,uploadId=0;
   qlie::Bytes unversionedCopy;
-  std::optional<bool> opaque;
+  std::optional<bool> opaque,monochrome;
  };
 
  // Compare a replacement full-screen bitmap once when its uploaded pixels
@@ -129,7 +133,7 @@ struct Scene {
 
  void freeSpan(Span);
  Span allocateSpan(size_t);
- uint32_t texture(const Image&,uint64_t& uploadId,bool* opaque=nullptr);
+ uint32_t texture(const Image&,uint64_t& uploadId,bool* opaque=nullptr,bool* monochrome=nullptr);
  void waitForPrevious();
  void completeFrame();
  void traceFrame(const char* format,...) __attribute__((format(printf,2,3)));

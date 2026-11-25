@@ -28,7 +28,7 @@ inline bool opaqueBaseDraw(const DrawData& draw,const DrawSources& sources){
 
 #ifdef QLIE_PROFILE_WHJ6
 struct Whj6SnowDraw {
- enum Part : uint8_t { None,Panorama,Video,Fog,Flash };
+ enum Part : uint8_t { None,Panorama,Video,Flash };
  Part part=None;
  AxisBounds bounds{};
 
@@ -39,21 +39,29 @@ struct Whj6SnowDraw {
      p.p[0][1]!=0.f||p.p[0][2]!=0.f)return {};
   const unsigned blend=(p.meta[2]>>8)&255u;
   if(blend==7&&coversCanvasWithSolid(p))return {Flash,{}};
-  if(!sources.opaque||p.colors[0]!=0||p.colors[1]!=0xffffff)return {};
-  if(blend==2&&p.meta[0]==1920&&p.meta[1]==1080)return {Fog,axisBounds(p)};
-  if(p.meta[3]!=255)return {};
+  if(!sources.opaque||p.meta[3]!=255||p.colors[0]!=0||p.colors[1]!=0xffffff)return {};
   if(blend==0)return {Panorama,axisBounds(p)};
   if(blend==2&&p.meta[0]==1280&&p.meta[1]==720)return {Video,axisBounds(p)};
   return {};
  }
 };
+inline bool axisBitmap(const Push& p){
+ constexpr uint32_t allowed=0xffffu|524288u;
+ return !(p.meta[2]&~allowed)&&p.p[0][1]==0.f&&p.p[0][2]==0.f&&p.p[0][0]>0.f&&p.p[0][3]>0.f;
+}
+inline bool fogDraw(const DrawData& draw,const DrawSources& sources){
+ const auto& p=draw.image;
+ // At this scale a tile's linear filter visits at most 17 source rows.
+ return sources.opaque&&sources.monochrome&&axisBitmap(p)&&((p.meta[2]>>8)&255u)==2&&
+        p.p[0][3]>=1.0625f&&p.colors[0]==0&&p.colors[1]==0xffffff;
+}
 #endif
 
 class DekoTileBatches {
 public:
  enum Kind : uint8_t { Motion,Base,General,
 #ifdef QLIE_PROFILE_WHJ6
-  Snow,
+  Snow,Fog,
 #endif
   KindCount };
  static constexpr uint32_t AlignmentWords=64;
@@ -65,13 +73,9 @@ private:
  std::array<Kind,TileCount> tileKinds{};
 #ifdef QLIE_PROFILE_WHJ6
  std::vector<Whj6SnowDraw> snowDraws;
+ std::vector<AxisBounds> fogDraws;
+ std::vector<uint8_t> fogOverlays;
  bool snowTile(const uint32_t* ids,unsigned layers,uint32_t control,unsigned x,unsigned y)const{
-  if(layers==1){
-   // The static backdrop is already in the prefix buffer. A tile touched
-   // by the moving eagle or a transition still uses the ordered renderer.
-   const auto& fog=snowDraws[ids[0]];
-   return control==0x80000000u&&fog.part==Whj6SnowDraw::Fog&&fog.bounds.covers(x,y,Tile,Tile);
-  }
   if(control||layers>3)return false;
   const auto& base=snowDraws[ids[0]];
   const auto& snow=snowDraws[ids[1]];
@@ -79,15 +83,22 @@ private:
          base.bounds.covers(x,y,Tile,Tile)&&snow.bounds.covers(x,y,Tile,Tile)&&
          (layers==2||snowDraws[ids[2]].part==Whj6SnowDraw::Flash);
  }
+ bool fogTile(const uint32_t* ids,unsigned layers,uint32_t control,unsigned x,unsigned y)const{
+  // Only replay the moving cloud and normal sprites over the cached scene.
+  return control==0x80000000u&&fogDraws[ids[0]].covers(x,y,Tile,Tile)&&
+         std::all_of(ids+1,ids+layers,[this](uint32_t id){return fogOverlays[id]!=0;});
+ }
 #endif
 public:
  void write(const Scene& scene,uint32_t* words){
   const auto& frame=*scene.current;
   const auto& tiles=scene.workTiles;
   drawKinds.resize(frame.commands.size());
-  bool hasBase=false,hasGeneral=false,hasSnow=false;
+  bool hasBase=false,hasGeneral=false,hasSnow=false,hasFog=false;
 #ifdef QLIE_PROFILE_WHJ6
   snowDraws.resize(frame.commands.size());
+  fogDraws.resize(frame.commands.size());
+  fogOverlays.resize(frame.commands.size());
 #endif
   for(size_t i=0;i<frame.commands.size();++i){
    const auto& draw=frame.commands[i];
@@ -95,12 +106,16 @@ public:
    hasBase|=drawKinds[i]==Base;hasGeneral|=drawKinds[i]==General;
 #ifdef QLIE_PROFILE_WHJ6
    snowDraws[i]=Whj6SnowDraw::classify(draw,frame.sources[i]);
-   hasSnow|=snowDraws[i].part==Whj6SnowDraw::Video||snowDraws[i].part==Whj6SnowDraw::Fog;
+   hasSnow|=snowDraws[i].part==Whj6SnowDraw::Video;
+   const bool fog=fogDraw(draw,frame.sources[i]);
+   fogDraws[i]=fog?axisBounds(draw.image):AxisBounds{};
+   hasFog|=fog;
+   fogOverlays[i]=axisBitmap(draw.image)&&((draw.image.meta[2]>>8)&255u)<2;
 #endif
   }
   offsetWords.fill(0);
   count.fill(0);
-  if(!hasBase&&!hasGeneral&&!hasSnow){
+  if(!hasBase&&!hasGeneral&&!hasSnow&&!hasFog){
    count[Motion]=unsigned(tiles.size());scene.writeTileList(words);
    return;
   }
@@ -110,7 +125,8 @@ public:
    auto first=scene.workIndices.begin()+h[1];
    Kind kind=Motion;
 #ifdef QLIE_PROFILE_WHJ6
-   if(hasSnow&&h[2]&&snowTile(scene.workIndices.data()+h[1],h[2],h[3],x,y))kind=Snow;
+   if(hasFog&&h[2]&&fogTile(scene.workIndices.data()+h[1],h[2],h[3],x,y))kind=Fog;
+   else if(hasSnow&&h[2]>=2&&snowTile(scene.workIndices.data()+h[1],h[2],h[3],x,y))kind=Snow;
    else
 #endif
    if(h[2]==1&&drawKinds[*first]==Base&&frame.covered[tile]&&frame.tiles[tile].size()==1)kind=Base;

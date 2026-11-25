@@ -19,30 +19,10 @@ uvec2 nearestCoord(Draw p,ivec2 q){
  precise vec2 d=vec2(q)+0.5-p.p1.xy;
  return uvec2(divide(p.p0.w*d.x,p.p1.z),divide(p.p0.x*d.y,p.p1.z));
 }
-void screenOverPrefix(Draw fog,ivec2 origin){
- uint x=gl_LocalInvocationID.x,y=gl_LocalInvocationID.y;
- if(y==0u){
-  uvec2 texel=nearestCoord(fog,origin+ivec2(int(x)));
-  addresses[x]=uvec4(fog.colors.z+texel.x,texel.y*fog.meta.x,0,0);
- }
- barrier();
- ivec2 q=origin+ivec2(int(x),int(y));
- uint index=uint(q.y)*frame.meta.x+uint(q.x);
- uvec4 backdrop=unpack(destination[index+frame.meta.x*frame.meta.y]);
- uint alpha=fog.meta.w;
- uvec4 fogColor=unpack(source[addresses[x].x+addresses[y].y]);
- fogColor.a=alpha;
- uvec4 weighted=(fogColor*(alpha+(alpha>>7u)))>>8u;
- uint result=pack(min(uvec4(255),weighted+backdrop-((weighted*backdrop)>>8u)));
- destination[index]=result;
- if(frame.meta.z!=0u)imageStore(presentImage,q,uvec4(result,0,0,0));
-}
-
 void main(){
  uint header=gl_WorkGroupID.x*4u,packedOrigin=tiles[header];
  ivec2 origin=ivec2(packedOrigin&65535u,packedOrigin>>16);
  uint first=tiles[header+1u];
- if(tiles[header+2u]==1u){screenOverPrefix(draws[tiles[first]],origin);return;}
  Draw base=draws[tiles[first]],snow=draws[tiles[first+1u]];
  uint x=gl_LocalInvocationID.x,y=gl_LocalInvocationID.y;
  if(y==0u){

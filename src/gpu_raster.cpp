@@ -103,7 +103,7 @@ Scene::Span Scene::allocateSpan(size_t size){
   for(auto it=freeSpans.begin();it!=freeSpans.end();++it)if(it->second>=size){Span span{it->first,size};size_t rest=it->second-size;freeSpans.erase(it);if(rest)freeSpans.emplace(span.offset+size,rest);return span;}
   Span span{textureEnd,size};textureEnd+=size;return span;
  }
-uint32_t Scene::texture(const Image&i,uint64_t&uploadId,bool*opaque){
+uint32_t Scene::texture(const Image&i,uint64_t&uploadId,bool*opaque,bool*monochrome){
   if(i.videoSurface){
    if(auto address=videoTexture(i.videoSurface->surface,uploadId,i.videoSurface->sepia)){
     if(opaque)*opaque=true;
@@ -150,6 +150,14 @@ uint32_t Scene::texture(const Image&i,uint64_t&uploadId,bool*opaque){
    }
    *opaque=*t.opaque;
   }
+  if(monochrome){
+   if(!t.monochrome){
+    bool gray=true;
+    for(size_t n=0;n<bytes;n+=4)if(pixels[n]!=pixels[n+1]||pixels[n]!=pixels[n+2]){gray=false;break;}
+    t.monochrome=gray;
+   }
+   *monochrome=*t.monochrome;
+  }
   return uint32_t(t.storage.offset/sizeof(uint32_t));
  }
 void Scene::append(Push p,DrawSources sources){
@@ -160,6 +168,24 @@ void Scene::append(Push p,DrawSources sources){
   current->commands.push_back({p,{},{},{}});current->sources.push_back(sources);
   if constexpr (qlie::diagnostics) ++draws;
  }
+#ifdef QLIE_PROFILE_WHJ6
+namespace {
+bool tileMaySampleAlpha(const ImageAlphaTiles& coverage,const Push& p,unsigned x,unsigned y){
+ const double sx=p.p[0][3]/double(p.p[1][2]),sy=p.p[0][0]/double(p.p[1][2]);
+ // Include every bilinear neighbor and a margin for GPU coordinate rounding.
+ const auto cell=[](double texel,unsigned length){
+  return unsigned(std::clamp(texel,0.,double(length-1)))/ImageAlphaTiles::size;
+ };
+ const unsigned l=cell((x*Tile+.5-p.p[1][0])*sx-2,p.meta[0]);
+ const unsigned r=cell(((x+1)*Tile-.5-p.p[1][0])*sx+2,p.meta[0]);
+ const unsigned t=cell((y*Tile+.5-p.p[1][1])*sy-2,p.meta[1]);
+ const unsigned b=cell(((y+1)*Tile-.5-p.p[1][1])*sy+2,p.meta[1]);
+ for(unsigned row=t;row<=b;++row)for(unsigned col=l;col<=r;++col)
+  if(coverage.visible[size_t(row)*coverage.columns+col])return true;
+ return false;
+}
+}
+#endif
  // Masks are attached after the image is queued. Bin only the final commands.
 void Scene::binDraw(uint32_t index){
   const auto&p=current->commands[index].image;
@@ -169,6 +195,9 @@ void Scene::binDraw(uint32_t index){
   unsigned x0=unsigned(p.rect[0])/Tile,x1=unsigned(p.rect[2]-1)/Tile;
   unsigned y0=unsigned(p.rect[1])/Tile,y1=unsigned(p.rect[3]-1)/Tile;
   bool manyTiles=(x1-x0+1)*(y1-y0+1)>4;
+#ifdef QLIE_PROFILE_WHJ6
+  const auto* coverage=op==0&&!(p.meta[2]&(65536u|262144u))?current->sources[index].alphaTiles.get():nullptr;
+#endif
   bool cull=(p.meta[2]&65536u)&&manyTiles;
   bool rotatedSprite=p.meta[2]<(1u<<20)&&!(p.meta[2]&65536u)&&(p.p[0][1]!=0||p.p[0][2]!=0);
   bool thinSprite=manyTiles&&rotatedSprite&&float((p.rect[2]-p.rect[0])*(p.rect[3]-p.rect[1]))>2*std::abs(p.p[1][2])*p.meta[0]*p.meta[1];
@@ -181,6 +210,9 @@ void Scene::binDraw(uint32_t index){
    }
   }
   for(unsigned y=y0;y<=y1;++y)for(unsigned x=x0;x<=x1;++x){
+#ifdef QLIE_PROFILE_WHJ6
+   if(coverage&&!tileMaySampleAlpha(*coverage,p,x,y))continue;
+#endif
    bool insideTriangle=cull&&opaque;
    if(cull){
     // Maximum of each linear edge over this tile's pixel centers. A strict
@@ -262,14 +294,18 @@ void Scene::dispatch(const Image&i,Push&p,float alpha,uint32_t add,uint32_t mul,
   // Use the regular integer sampler without inverting a matrix at every pixel.
   if(p.meta[3]<255&&coversCanvasWithSolid(p)&&std::abs(p.p[1][0])<4194304&&std::abs(p.p[1][1])<4194304)
    p.meta[2]|=524288u;
-  bool mayOcclude=blend<2&&p.meta[3]==255;
+  bool needOpacity=blend<2&&p.meta[3]==255;
+  bool* monochrome=nullptr;
 #ifdef QLIE_PROFILE_WHJ6
-  // The screen compositor needs opacity independently of occlusion. The
-  // full-resolution still is the moving cloud layer in the flight scene.
-  mayOcclude|=blend==2&&filter==0&&((p.meta[3]==255&&i.videoSurface)||
-             (i.width==1920&&i.height==1080&&!i.videoSurface));
+  const bool fog=blend==2&&i.width==1920&&i.height==1080&&!i.videoSurface;
+  needOpacity|=fog||(blend==2&&filter==0&&p.meta[3]==255&&i.videoSurface);
+  if(fog)monochrome=&sources.monochrome;
+  if(filter==2&&i.alphaTiles&&i.alphaTiles->sourceVersion&&i.alphaTiles->sourceVersion==i.version.get()&&
+     p.p[0][1]==0.f&&p.p[0][2]==0.f&&p.p[0][0]>=.125f&&p.p[0][3]>=.125f&&
+     std::abs(p.p[1][0])<=65536.f&&std::abs(p.p[1][1])<=65536.f)
+   sources.alphaTiles=i.alphaTiles;
 #endif
-  p.colors[2]=texture(i,sources.primary,mayOcclude?&sources.opaque:nullptr);
+  p.colors[2]=texture(i,sources.primary,needOpacity?&sources.opaque:nullptr,monochrome);
   if(i.width==1&&i.height==1)std::memcpy(&sources.singlePixel,i.pixels.data(),4);
   if(compareAlignedBitmaps&&!i.videoSurface&&current->cleared&&current->alignedBitmap==UINT32_MAX&&(p.meta[2]&524288u)&&
      i.width==Width&&i.height==Height&&p.p[1][0]==0.f&&p.p[1][1]==0.f){

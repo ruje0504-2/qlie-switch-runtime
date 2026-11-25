@@ -23,6 +23,12 @@ struct ImageAlphaBounds {
  uint64_t sourceVersion=0;
  unsigned left=0,top=0,right=0,bottom=0;
 };
+struct ImageAlphaTiles {
+ static constexpr unsigned size=16;
+ unsigned columns=0;
+ uint64_t sourceVersion=0;
+ std::vector<uint8_t> visible;
+};
 struct Image {
  unsigned width=0,height=0;
  qlie::Bytes pixels; // BGRA8 straight alpha
@@ -30,6 +36,7 @@ struct Image {
  std::shared_ptr<const VideoSurfaceImage> videoSurface{};
  std::shared_ptr<const ImagePatches> patches{};
  ImageAlphaBounds alphaBounds{};
+ std::shared_ptr<const ImageAlphaTiles> alphaTiles{};
 };
 // Optional nonoverlapping regions for pixel-aligned GPU draws. Their versions
 // are independent, and the stamp prevents editable image copies using stale regions.
@@ -39,6 +46,7 @@ struct Member {std::string type,name;qlie::Bytes data;size_t dataOffset=0,stored
 std::vector<Member> abmp(const qlie::Bytes&);
 Image image(const qlie::Bytes&);
 ImageAlphaBounds findImageAlphaBounds(const Image&);
+std::shared_ptr<const ImageAlphaTiles> findSparseAlphaTiles(const Image&);
 void applySepia(qlie::Bytes&);
 Image filterImage(const Image&,const std::string&);
 }

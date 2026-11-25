@@ -106,6 +106,11 @@ std::shared_ptr<const Image> decodeSceneBitmap(const qlie::Bytes&data,[[maybe_un
     (data[0]==0x89||!std::memcmp(data.data(),"DPNG",4)))){
   pixels.version.publish();
   pixels.alphaBounds=findImageAlphaBounds(pixels);
+  // Large RGBA and DPNG sprites can have empty interior tiles as well as
+  // transparent margins. Keep coverage on the decoded bitmap for binning.
+  if(size_t(pixels.width)*pixels.height>=512*300&&
+     (data[0]!=0x89||(data.size()>25&&(data[25]==6||data[25]==4))))
+   pixels.alphaTiles=findSparseAlphaTiles(pixels);
   return std::make_shared<const Image>(std::move(pixels));
  }
 #endif

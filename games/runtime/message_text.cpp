@@ -108,6 +108,9 @@ void MessageText::index(bool layoutChanged){if(layoutChanged)layoutVersion.publi
    }
    if(command=="n"){append("\n",false);pos=end+1;continue;}
    if(command=="spd"){currentSpeed=comma==token.npos?speed:std::stod(token.substr(comma+1));if(currentSpeed<0)currentSpeed=speed;pos=end+1;continue;}
+#ifdef QLIE_PROFILE_WHJ6
+   if(command=="w"&&comma!=token.npos){time+=std::max(0.,std::stod(token.substr(comma+1)));pos=end+1;continue;}
+#endif
    if(command=="pc"&&comma!=token.npos){append(token.substr(comma+1),true);pos=end+1;continue;}
    if(command=="rb"&&comma!=token.npos){
     const auto separator=token.find(',',comma+1);

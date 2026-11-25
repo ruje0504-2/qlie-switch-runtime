@@ -4,7 +4,13 @@
 #include "profile.hpp"
 #include <sstream>
 #include <iostream>
+#ifdef QLIE_PROFILE_WHJ6
+#include "profiles/whj6/catalogs.hpp"
+#endif
 namespace whj2 {
+#ifdef QLIE_PROFILE_WHJ6
+CgCatalog::CgCatalog(qlie::Assets&assets,bool):entries(whj6::catalogs::gallery(assets)){}
+#else
 CgCatalog::CgCatalog(qlie::Assets&assets,bool extendedRoots){std::istringstream input(assets.text("script/albummode/list.txt"));std::string line;
  const std::vector<const char*> prefixes=game_profile::story.legacyAvg?std::vector<const char*>{"image/"}:extendedRoots?
   std::vector<const char*>{"image/ev/","image/movie/","image/cutin/"}:
@@ -29,5 +35,6 @@ CgCatalog::CgCatalog(qlie::Assets&assets,bool extendedRoots){std::istringstream 
  }
  if(entry.files.empty()||!assets.exists(entry.thumbnail)){throw std::runtime_error("Incomplete CG group: "+entry.thumbnail);}entries.push_back(std::move(entry));
  }}
+#endif
 bool CgCatalog::unlocked(size_t index,const Progress&progress)const{for(auto&path:entries.at(index).files)if(progress.seenFile(path))return true;return false;}
 }

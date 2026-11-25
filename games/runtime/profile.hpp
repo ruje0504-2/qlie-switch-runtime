@@ -5,6 +5,9 @@
 #include "profiles/whj1.hpp"
 namespace game_profile=whj1::profile;
 inline constexpr auto& gameSettingsLayout=whj1::profile::settingsLayout;
+#elif defined(QLIE_PROFILE_WHJ6)
+#include "profiles/whj6.hpp"
+namespace game_profile=whj6::profile;
 #elif defined(QLIE_PROFILE_WHJ5)
 #include "profiles/whj5.hpp"
 namespace game_profile=whj5::profile;
@@ -23,4 +26,9 @@ namespace game_profile=whj2::profile;
 #endif
 #if !defined(QLIE_PROFILE_WHJ1)
 inline constexpr auto& gameSettingsLayout=whj2::standardSettingsLayout;
+#endif
+#if defined(QLIE_PROFILE_WHJ6)
+inline constexpr auto gameSceneSize=game_profile::sceneSize;
+#else
+inline constexpr std::array<unsigned,2> gameSceneSize{1280,720};
 #endif

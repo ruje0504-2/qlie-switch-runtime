@@ -3,7 +3,13 @@
 #include "profile.hpp"
 #include <sstream>
 #include <stdexcept>
+#ifdef QLIE_PROFILE_WHJ6
+#include "profiles/whj6/catalogs.hpp"
+#endif
 namespace whj2 {
+#ifdef QLIE_PROFILE_WHJ6
+ReplayCatalog::ReplayCatalog(qlie::Assets&assets):entries(whj6::catalogs::replays(assets)){}
+#else
 ReplayCatalog::ReplayCatalog(qlie::Assets&assets){std::istringstream input(assets.text("script/memorymode/list.txt"));std::string line;
  while(std::getline(input,line)){line=trim(line);if(line.empty())continue;auto row=split(line,',');if(row.size()!=3)throw std::runtime_error("Replay list fields");
   auto base=qlie::canonical(std::string(game_profile::story.legacyAvg?"scenario/":"scenario/本編/")+row[1]);ReplayEntry entry;
@@ -15,4 +21,5 @@ ReplayCatalog::ReplayCatalog(qlie::Assets&assets){std::istringstream input(asset
   entries.push_back(std::move(entry));
  }
 }
+#endif
 }

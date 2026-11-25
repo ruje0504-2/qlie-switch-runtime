@@ -1,5 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 qlie_game=${QLIE_GAME:-whj2}
+qlie_switch_vulkan_default=1
+qlie_nro_publisher="QLIE Switch Runtime contributors"
+qlie_nro_title_id=
 case "$qlie_game" in
   whj1)
     qlie_profile_flags=-DQLIE_PROFILE_WHJ1
@@ -38,8 +41,17 @@ case "$qlie_game" in
     qlie_nro_title="美少女万華鏡 -理與迷宮的少女-"
     qlie_nro_version=1.0.0
     ;;
+  whj6)
+    qlie_profile_flags=-DQLIE_PROFILE_WHJ6
+    qlie_binary=whj6-switch-runtime
+    qlie_nro_title="美少女万華鏡異聞 雪女"
+    qlie_nro_version=1.0.1
+    qlie_nro_publisher="ωstar"
+    qlie_nro_title_id=01007F8E5C160000
+    qlie_switch_vulkan_default=0
+    ;;
   *)
-    echo "QLIE_GAME must be whj1, whj2, whj25, whj3, whj4, or whj5" >&2
+    echo "QLIE_GAME must be whj1, whj2, whj25, whj3, whj4, whj5, or whj6" >&2
     exit 2
     ;;
 esac

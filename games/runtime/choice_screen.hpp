@@ -6,7 +6,8 @@ class ChoiceScreen {
  SceneImages scene;MessageText label;std::vector<std::string> entries;double elapsed=0;int selected=0;
  int pending=-1;double closingElapsed=0;bool closing=false;
 public:
- ChoiceScreen(qlie::Assets&a,const MessageText&text):scene(a),label(text.forLabels()){}
+ ChoiceScreen(qlie::Assets&a,const MessageText&text,std::array<unsigned,2> sceneSize={1280,720})
+  :scene(a,sceneSize),label(text.forLabels()){}
  void prepare(AssetReadAhead&);
  void show(const std::vector<std::string>&,KFont*);
  void update(double ms);

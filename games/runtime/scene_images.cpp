@@ -2,6 +2,9 @@
 #include "diagnostics.h"
 #include "scene_images.hpp"
 #include "profile.hpp"
+#ifdef QLIE_PROFILE_WHJ6
+#include "profiles/whj6/media.hpp"
+#endif
 #include "video_surface_image.hpp"
 #include "asset_read_ahead.hpp"
 #include "story.hpp"
@@ -238,6 +241,18 @@ const Motion* findMotion(const Animation&definition,const std::string&name){
  if((name.empty()||name=="def")&&!definition.motions.empty())return &definition.motions.front();
  return nullptr;
 }
+std::pair<unsigned,unsigned> videoSize(const qlie::Bytes& bytes,const Image&frame){
+#ifdef QLIE_PROFILE_WHJ6
+ const auto size=whj6::media::authoredSize(bytes);
+ if(size.first&&size.second)return size;
+#else
+ (void)bytes;
+#endif
+ return {frame.width,frame.height};
+}
+Affine2D textureScale(unsigned logicalWidth,unsigned logicalHeight,const Image&frame){
+ return {float(logicalWidth)/frame.width,0,0,float(logicalHeight)/frame.height,0,0};
+}
 }
 struct EmbeddedDecoder {
  std::shared_ptr<const qlie::Bytes> bytes;
@@ -253,7 +268,11 @@ struct EmbeddedDecoder {
  ~EmbeddedDecoder(){if(video)kvideo_close(video);}
  void reset(){
   if(video)kvideo_close(video);
+#ifdef QLIE_PROFILE_WHJ6
+  video=kvideo_open_with_height_limit(bytes->data(),bytes->size(),softwareOnly,game_profile::sceneVideoMaxHeight);
+#else
   video=softwareOnly?kvideo_open_mode(bytes->data(),bytes->size(),KVIDEO_SOFTWARE):kvideo_open(bytes->data(),bytes->size());
+#endif
   if(!video)throw std::runtime_error("Embedded video open failed: "+source);
   const unsigned width=kvideo_source_width(video),height=kvideo_source_height(video);
   frame=std::make_shared<Image>(Image{width,height,qlie::Bytes(size_t(width)*height*4)});
@@ -594,6 +613,10 @@ struct Composite {
  }
  std::pair<unsigned,unsigned> dimensions(AssetReadAhead*worker=nullptr,double ms=0,bool live=false,bool nativeVideo=false,bool async=true)const{
   if(standaloneVideo){
+#ifdef QLIE_PROFILE_WHJ6
+   const auto size=whj6::media::authoredSize(*members.front().video);
+   if(size.first&&size.second)return size;
+#endif
    const auto frame=standaloneFrame(ms,live,nativeVideo,worker,async);
    return frame?std::make_pair(frame->width,frame->height):std::make_pair(0u,0u);
   }
@@ -605,10 +628,12 @@ struct Composite {
    auto image=standaloneFrame(ms,liveVideo,queue.supportsVideoSurfaces(),worker,asyncVideo);
    if(!image){queue.waitForVideoFrame();return;}
    const auto&frame=queue.retainImage(std::move(image));
+   const auto [width,height]=videoSize(*members.front().video,frame);
+   const auto stretch=textureScale(width,height,frame);
    if(parent3D){
     AnimationSample sample;sample.alpha=opacity;sample.addColor=parentAdd;sample.mulColor=parentMul;sample.flags=parentBlend;sample.textureFilter=filterOverride;
-    quad(queue,frame,*parent3D,sample,depth);
-   }else queue.image(frame,parent,depth,opacity,parentAdd,parentMul,parentBlend,filterOverride);
+    quad(queue,frame,combine(*parent3D,from2D(stretch)),sample,depth);
+   }else queue.image(frame,affine(parent,stretch),depth,opacity,parentAdd,parentMul,parentBlend,filterOverride);
    return;
   }
   if(definition.bounds[0]<0||definition.bounds[1]<0||definition.bounds[0]>4096||definition.bounds[1]>4096)throw std::runtime_error("Composite bounds "+path);
@@ -616,14 +641,15 @@ struct Composite {
  if(!motion)throw std::runtime_error("Missing motion "+motionName+" in "+path);
   auto randomSeed=0x35246u^identity^motionIdentities[size_t(motion-&definition.motions[0])];
   randomSeed=((randomSeed&0xffff)*(randomSeed>>16))&1023;
-  AnimationContext context{unsigned(definition.bounds[0]),unsigned(definition.bounds[1]),1280,720,randomSeed};
+  const auto [sceneWidth,sceneHeight]=queue.sceneSize();
+  AnimationContext context{unsigned(definition.bounds[0]),unsigned(definition.bounds[1]),sceneWidth,sceneHeight,randomSeed};
   context.external=externalDefaults;context.externalMask=externalDefaultMask;
   if(external){
    for(unsigned i=0;i<context.external.size();++i)
     if(external->externalMask&(1u<<i))context.external[i]=external->external[i];
    context.externalMask|=external->externalMask;context.randomCursor=external->randomCursor;
   }
-  auto samples=sampleMotion(*motion,ms,1280,720,false,context);
+  auto samples=sampleMotion(*motion,ms,sceneWidth,sceneHeight,false,context);
   auto bitmap=[&](size_t slot)->const Image*{
    if(slot>=members.size())return nullptr;
    if(uiSlots){
@@ -725,7 +751,7 @@ struct Composite {
   auto seed=0x35246u^identity^motionIdentities[size_t(motion-&definition.motions[0])];
   seed=((seed&0xffff)*(seed>>16))&1023;
   for(auto&point:particlePoints(k.particles,seed)){
-   auto pos=projectParticle(point,k.particles,k.x,k.y,k.anchorX/100,k.anchorY/100,k.rotationZ,1280,720,particleImage->width,particleImage->height);
+   auto pos=projectParticle(point,k.particles,k.x,k.y,k.anchorX/100,k.anchorY/100,k.rotationZ,sceneWidth,sceneHeight,particleImage->width,particleImage->height);
    if(!pos.visible)continue;
    auto placement=imagePlacement(pos.x,pos.y,pos.scale,pos.scale,k.rotationZ,.5f,.5f,particleImage->width,particleImage->height);
    queue.image(*particleImage,affine(parent,placement),depth+k.priority,k.alpha*point.alpha/255,k.addColor,k.mulColor,k.flags&0x7f,k.textureFilter);
@@ -759,6 +785,9 @@ struct Composite {
   continue;
  }
  if(k.kind!=2&&k.kind!=3&&k.kind!=4)continue;
+#ifdef QLIE_PROFILE_WHJ6
+ if(game_profile::emptyAnimationSlot(path,k.resource,members.size()))continue;
+#endif
  if(k.resource>=members.size())throw std::runtime_error("Composite image index "+path);
    auto&e=members[k.resource];
  const bool textSlot=messageSurface&&k.resource==messageSlot;
@@ -770,6 +799,12 @@ struct Composite {
  if(textSlot&&messagePlaceholder&&!slot)continue;
  const Image*source=slot?slot:e.image.get();
    if(slot&&k.kind==4){
+#ifdef QLIE_PROFILE_WHJ6
+    if(replacementMedia&&k.resource==0){
+     const auto [width,height]=videoSize(*replacementMedia->members.front().video,*source);
+     k.scaleX*=float(width)/source->width;k.scaleY*=float(height)/source->height;
+    }
+#endif
     if(parent3D||k.rotationX||k.rotationY||k.z){auto matrix=combine(parent3D?*parent3D:from2D(parent),placement3D(k,source->width,source->height));quad(queue,*source,matrix,k,depth+k.priority);continue;}
     queue.image(*source,affine(parent,imagePlacement(k.x,k.y,k.scaleX/100,k.scaleY/100,k.rotationZ,k.anchorX/100,k.anchorY/100,source->width,source->height)),depth+k.priority,k.alpha,k.addColor,k.mulColor,k.flags&0x7f,k.textureFilter);continue;
    }
@@ -793,6 +828,10 @@ struct Composite {
     auto image=clip.at(k.mediaTime,liveVideo,queue.supportsVideoSurfaces(),false,worker,asyncVideo);
     if(!image){queue.waitForVideoFrame();continue;}
     source=&queue.retainImage(std::move(image));
+    if(k.kind!=3){
+     const auto [width,height]=videoSize(*e.video,*source);
+     k.scaleX*=float(width)/source->width;k.scaleY*=float(height)/source->height;
+    }
     if(clip.audible)warn("video nonzero audio requires mixer binding");
    }else if(!slot&&e.jpegAnimation){
     if(k.alpha<=0)continue;
@@ -1139,7 +1178,8 @@ std::vector<std::string> SceneImages::warmPaths(const std::string&line,Character
  if(chara&&future)future->simple.insert_or_assign(cmd,std::move(stem));
  return result;
 }
-SceneImages::SceneImages(qlie::Assets&a):assets(a),eyecatchFilm(std::make_shared<EyecatchFilm>()){
+SceneImages::SceneImages(qlie::Assets&a,std::array<unsigned,2> sceneSize)
+ :assets(a),canvas(sceneSize),eyecatchFilm(std::make_shared<EyecatchFilm>()){
  // The original AVG uses per-object files instead of ImoScripter tables.
  if(game_profile::story.legacyAvg)return;
  if(a.inPack("avg/projectobjects.txt")){
@@ -1232,6 +1272,11 @@ void SceneImages::takeUiBitmaps(const std::string&key){
 }
 void SceneImages::uiSlot(const std::string&name,unsigned slot,const std::string&path){if(name.rfind("ui_",0)!=0)throw std::runtime_error("UI slot owner");prepareUiBitmap(path);layers.at(name).uiSlots[slot]=cache.at(path);}
 void SceneImages::uiSlot(const std::string&name,unsigned slot,const Image&value){if(name.rfind("ui_",0)!=0)throw std::runtime_error("UI slot owner");layers.at(name).uiSlots[slot]=sceneBitmap(value);}
+void SceneImages::setUiBitmap(const std::string&name,Image value){
+ if(name.rfind("ui_",0)!=0)throw std::runtime_error("UI bitmap owner");
+ auto&layer=layers.at(name);
+ layer.pixels=sceneBitmap(std::move(value));
+}
 void SceneImages::setUiMotion(const std::string&name,const char*motion){
  if(name.rfind("ui_",0)!=0)throw std::runtime_error("UI motion owner");
  auto&layer=layers.at(name);
@@ -1261,11 +1306,26 @@ void SceneImages::removeUiLayer(const std::string&name,bool releaseAsset){
 bool SceneImages::uiHit(const std::string&name,float x,float y)const{
  if(name.rfind("ui_",0)!=0)throw std::runtime_error("UI hit owner");
  auto found=layers.find(name);if(found==layers.end())return false;const auto&l=found->second;
- if(!l.composite||l.params.at("show")=="false")return false;
+ if(l.params.at("show")=="false")return false;
+ if(!l.composite){
+  if(!l.pixels)return false;
+  const auto&align=l.params.at("align");
+  const float ax=align.rfind("center",0)==0?.5f:align.rfind("right",0)==0?1.f:0.f;
+  const float ay=align.find(":bottom")!=align.npos?1.f:align.find(":center")!=align.npos?.5f:0.f;
+  const auto matrix=imagePlacement(value(l,"x",0),value(l,"y",0),value(l,"scalex",100)/100,
+   value(l,"scaley",100)/100,value(l,"rotz",0),ax,ay,l.pixels->width,l.pixels->height);
+  const float det=matrix.a*matrix.d-matrix.b*matrix.c;
+  if(std::abs(det)<1e-9f)return false;
+  const float dx=x*canvas[0]/captureWidth-matrix.x,dy=y*canvas[1]/captureHeight-matrix.y;
+  const float u=(matrix.d*dx-matrix.b*dy)/det,v=(matrix.a*dy-matrix.c*dx)/det;
+  return u>=0&&v>=0&&u<l.pixels->width&&v<l.pixels->height;
+ }
  const auto&definition=l.composite->definition;auto selected=l.params.find("motion");auto motion=findMotion(definition,selected==l.params.end()?"":selected->second);if(!motion)return false;
  auto align=l.params.at("align");float ax=align.rfind("center",0)==0?.5f:align.rfind("right",0)==0?1.f:0.f,ay=align.find(":bottom")!=align.npos?1.f:align.find(":center")!=align.npos?.5f:0.f;
  auto parent=imagePlacement(value(l,"x",0),value(l,"y",0),value(l,"scalex",100)/100,value(l,"scaley",100)/100,value(l,"rotz",0),ax,ay,unsigned(definition.bounds[0]),unsigned(definition.bounds[1]));
- auto samples=sampleMotion(*motion,l.milliseconds,1280,720,true,AnimationContext{unsigned(definition.bounds[0]),unsigned(definition.bounds[1]),1280,720});
+ x*=float(canvas[0])/captureWidth;y*=float(canvas[1])/captureHeight;
+ auto samples=sampleMotion(*motion,l.milliseconds,canvas[0],canvas[1],true,
+  AnimationContext{unsigned(definition.bounds[0]),unsigned(definition.bounds[1]),canvas[0],canvas[1]});
  for(size_t i=0;i<samples.size();i++){auto&k=samples[i];if(!motion->layers[i].flags||k.kind!=6)continue;
   // Primitive6 is the authored collision rectangle; eae50 is its debug overlay.
   auto local=imagePlacement(k.x,k.y,k.scaleX,k.scaleY,k.rotationZ,k.anchorX/100,k.anchorY/100,1,1);
@@ -1508,8 +1568,8 @@ SpeakerStyle SceneImages::speakerStyle()const{
   return {};
  }
  const auto&layer=found->second;
- return {int(value(layer,"x",200)),int(value(layer,"y",570)),
-         unsigned(value(layer,"fontsizeh",26)),unsigned(value(layer,"fontcolor",0xffffff))};
+ return {int(value(layer,"x",200)*captureWidth/canvas[0]),int(value(layer,"y",570)*captureHeight/canvas[1]),
+         unsigned(value(layer,"fontsizeh",26)*captureHeight/canvas[1]),unsigned(value(layer,"fontcolor",0xffffff))};
 }
 bool SceneImages::command(const std::string&line){auto p=line.find(44);
  auto cmd=line.substr(1,p-1);
@@ -1570,8 +1630,8 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
   return defaults;
  }();
  if(face&&l.params.empty())l.params=faceDefaults;
- if(message&&l.params.empty())l.params={{"mode","cls"},{"show","false"},{"x","0"},{"y","720"},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri","1100"},{"align","left:top"},{"textarea","920:300"},{"fontsize","26:26"},{"fontcolor","$FFFFFF"}};
- if(l.params.empty())l.params={{"x",ui?"0":"640"},{"y",ui?"0":chara?"720":"360"},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri",chara?"500":"0"},{"show","true"},{"align",chara?"center:bottom":(ui||cmd=="effect")?"left:top":"center:center"}};
+ if(message&&l.params.empty())l.params={{"mode","cls"},{"show","false"},{"x","0"},{"y",std::to_string(canvas[1])},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri","1100"},{"align","left:top"},{"textarea","920:300"},{"fontsize","26:26"},{"fontcolor","$FFFFFF"}};
+ if(l.params.empty())l.params={{"x",std::to_string(ui?0:canvas[0]/2)},{"y",std::to_string(ui?0:chara?canvas[1]:canvas[1]/2)},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri",chara?"500":"0"},{"show","true"},{"align",chara?"center:bottom":(ui||cmd=="effect")?"left:top":"center:center"}};
  auto resetsMotion=[&](const char*key,const char*keep){
   const auto motion=l.params.find(key);
   return motion!=l.params.end()&&motion->second!="def"&&motion->second!="0"&&
@@ -1751,7 +1811,7 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
   }
   constexpr const char*base[]={"x","y","z"};
   constexpr const char*offset[]={"ax","ay","az"};
-  constexpr float defaults[]={640,360,0};
+  const float defaults[]={canvas[0]/2.f,canvas[1]/2.f,0};
   for(unsigned axis=0;axis<3;++axis){
    const auto current=beginPosition.find(base[axis]),delta=beginPosition.find(offset[axis]);
    if(current==beginPosition.end()&&delta==beginPosition.end())continue;
@@ -1904,7 +1964,7 @@ std::optional<std::string> SceneImages::selectFace(const std::string&speaker,con
 std::pair<unsigned,unsigned> SceneImages::dimensions(const std::string&name)const{const auto&layer=layers.at(name);if(layer.composite){
  if(layer.composite->standaloneVideo){
   const auto&clip=layer.composite->videoClip(0,layer.composite->members.front(),readAhead);
-  if(clip.shown)return {clip.shown->width,clip.shown->height};
+  if(clip.shown)return videoSize(*layer.composite->members.front().video,*clip.shown);
   return layer.composite->dimensions(readAhead,layer.milliseconds,false,prefetchNativeVideo);
  }
  return layer.composite->dimensions();
@@ -1959,18 +2019,25 @@ void SceneImages::drawScene(RenderTarget&target,bool liveVideo)const{qlie::Bytes
 void SceneImages::drawFaces(RenderTarget&target)const{qlie::Bytes unused;render(unused,2,&target);}
 void SceneImages::drawMessages(RenderTarget&target)const{qlie::Bytes unused;render(unused,3,&target);}
 RenderQueue SceneImages::captureQueue(bool shaderMasks,bool nativeVideo)const{
- RenderQueue queue(shaderMasks,nativeVideo);
+ auto queue=makeQueue(shaderMasks,nativeVideo);
  enqueue(queue,1,999,true);
  return queue;
 }
+RenderQueue SceneImages::makeQueue(bool shaderMasks,bool nativeVideo,const Affine2D*view)const{
+ if(canvas[0]==captureWidth&&canvas[1]==captureHeight)return RenderQueue(shaderMasks,nativeVideo,view,canvas);
+ Affine2D scale{float(captureWidth)/canvas[0],0,0,float(captureHeight)/canvas[1],0,0};
+ if(view)scale=affine(*view,scale);
+ return RenderQueue(shaderMasks,nativeVideo,&scale,canvas);
+}
 bool SceneImages::render(qlie::Bytes&out,unsigned pass,RenderTarget*target,float maxPriority,bool liveVideo,const Affine2D*view)const{
  if(!target&&out.size()!=1280*720*4)throw std::runtime_error("Scene canvas size");
- RenderQueue queue(target&&target->supportsMasks(),target&&target->supportsVideoSurfaces(),view);
+ auto queue=makeQueue(target&&target->supportsMasks(),target&&target->supportsVideoSurfaces(),view);
  enqueue(queue,pass,maxPriority,liveVideo);
  if(target)queue.draw(*target,1280,720);else queue.draw(out,1280,720);
  return queue.usesFieldPresentation();
 }
 void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool liveVideo)const{
+ const float centerX=canvas[0]/2.f,centerY=canvas[1]/2.f;
  const auto priority=[](const Layer&layer){return value(layer,"pri",0)+value(layer,"addpri",0);};
  const auto camera=layers.find("camera");
  Affine2D view;
@@ -1988,7 +2055,7 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
    x+=wave[0];y+=wave[1];viewZ+=wave[2];
   }
   if constexpr(game_profile::relativeCameraDepth)viewZ=-viewZ;
-  view=imagePlacement(640+x,360+y,zoomX/100,zoomY/100,value(layer,"rotz",0),.5f,.5f,1280,720);
+  view=imagePlacement(centerX+x,centerY+y,zoomX/100,zoomY/100,value(layer,"rotz",0),.5f,.5f,canvas[0],canvas[1]);
   nearPriority=value(layer,"pri1",-100);farPriority=value(layer,"pri2",999);
   cameraFilter=unsigned(value(layer,"texfilter",0));
  }
@@ -2032,17 +2099,18 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
  auto film=filmLayer?l->composite->standaloneFrame(l->milliseconds,liveVideo,queue.supportsVideoSurfaces(),readAhead,asyncVideo):nullptr;
  if(filmLayer&&!film){queue.waitForVideoFrame();continue;}
  const auto*bitmap=film?film.get():l->pixels.get();
- const auto [w,h]=l->composite&&!filmLayer?l->composite->dimensions():std::make_pair(bitmap->width,bitmap->height);
+ const auto [w,h]=filmLayer?videoSize(*l->composite->members.front().video,*bitmap):
+  l->composite?l->composite->dimensions():std::make_pair(bitmap->width,bitmap->height);
  const auto blend=l->params.find("blend");
  const unsigned blendMode=blend==l->params.end()?0:imageBlend(blend->second);
  const bool messageLayer=message!=layers.end()&&l==&message->second;
  const auto* legacyWindow=messageLayer?game_profile::story.legacyAvg:nullptr;
- const float textX=get(l,"x",640),textY=get(l,"y",360);
+ const float textX=get(l,"x",centerX),textY=get(l,"y",centerY);
  float layerX=legacyWindow?legacyWindow->frameX:textX,layerY=legacyWindow?legacyWindow->frameY:textY;
  float layerZ=get(l,"z",0),scaleX=get(l,"scalex",100),scaleY=get(l,"scaley",100),scaleZ=get(l,"scalez",100);
  if(panned!=layers.end()&&l==&panned->second){
-  layerX=640-panExtentX*std::clamp(1.7f*panX,-1.f,1.f);
-  layerY=360-panExtentY*std::clamp(1.7f*panY,-1.f,1.f);
+  layerX=centerX-panExtentX*std::clamp(1.7f*panX,-1.f,1.f);
+  layerY=centerY-panExtentY*std::clamp(1.7f*panY,-1.f,1.f);
  }
  const auto wave=sampleWave(*l);
  if(l->params.count("wave_target")&&l->params.at("wave_target")=="zoom"){
@@ -2062,6 +2130,11 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
  bool spatial=transform.z!=0||transform.rotationX!=0||transform.rotationY!=0||transform.scaleZ!=100;
  Matrix3D matrix;if(spatial)matrix=placement3D(transform,w,h);
  if(spatial&&cameraAffects)matrix=combine(from2D(view),matrix);
+ if(filmLayer&&(w!=bitmap->width||h!=bitmap->height)){
+  const auto stretch=textureScale(w,h,*bitmap);
+  placement=affine(placement,stretch);
+  if(spatial)matrix=combine(matrix,from2D(stretch));
+ }
  std::map<unsigned,const Image*> uiSlots;for(auto&slot:l->uiSlots)uiSlots[slot.first]=slot.second.get();if(l->scriptReplacement)uiSlots[0]=l->scriptReplacement.get();
  if(l->path==eyecatchPath&&l->composite&&!uiSlots.count(0))
   l->composite->loadEyecatchFallback();
@@ -2208,7 +2281,7 @@ SceneImages::SceneImages(const SceneImages&live,RestoreTarget)
   faceRepId(live.faceRepId),faceRepFile(live.faceRepFile),waveRecipes(live.waveRecipes),extensionPositions(live.extensionPositions),splitCharacters(live.splitCharacters),imageObjects(live.imageObjects),
   hasCamera(live.hasCamera),hasNameText(live.hasNameText),
   faceType(live.faceType),faceDefaultFile(live.faceDefaultFile),
-  assets(live.assets),eyecatchFilm(live.eyecatchFilm),templates(live.templates),cache(live.cache),
+  assets(live.assets),canvas(live.canvas),eyecatchFilm(live.eyecatchFilm),templates(live.templates),cache(live.cache),
   prefetchNativeVideo(live.prefetchNativeVideo){}
 std::unique_ptr<SceneImages> SceneImages::makeRestoreTarget()const{
  // Bitmap pixels are immutable. Live layers, decoders and speculative

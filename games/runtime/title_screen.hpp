@@ -20,7 +20,7 @@ class TitleScreen {
  unsigned openingBrightness()const;
 public:
  enum Action {None,Start,Load,Extra,Settings,Quit,CG,Memory,Sound,Back};
- explicit TitleScreen(qlie::Assets&,TitleLayout={});
+ explicit TitleScreen(qlie::Assets&,TitleLayout={},std::array<unsigned,2> sceneSize={1280,720});
  bool rollAlternate();
  bool prepareOpening(AssetReadAhead*loader,bool unlocked=false);
  void beginExit();

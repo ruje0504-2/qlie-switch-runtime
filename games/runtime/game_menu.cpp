@@ -5,6 +5,9 @@
 #include <cmath>
 #include <cstdio>
 #include <algorithm>
+#ifdef QLIE_PROFILE_WHJ6
+#include "profiles/whj6/ui.hpp"
+#endif
 namespace whj2 {
 struct PreparedMenuAssets {
  std::map<std::string,Image> images;
@@ -66,6 +69,12 @@ void GameMenu::loadHistoryTracks(){
  throw std::runtime_error("Missing history zoom metadata");
 }
 void GameMenu::prepareHistory(bool jumps){
+#ifdef QLIE_PROFILE_WHJ6
+ resource("script/log/frame.png");
+ resource("script/log/button_voice.b#0");
+ if(jumps)resource("script/log/button_jump.b#0");
+ return;
+#endif
  loadHistoryTracks();
  for(const char* path:{"script/log/アッパーフレーム.png","script/log/アンダーフレーム.png",
      "script/log/ゲームに戻る_off.png","script/log/button_voice.b#0","script/log/button_voice.b#1",
@@ -177,6 +186,12 @@ void GameMenu::setHistorySize(std::size_t entries){
 }
 void GameMenu::move(int dx,int dy){if(panelClosing||panelTransitioning())return;if(asking){if(dx||dy)focus=1-focus;return;}
  if(panel==Save||panel==Load){
+#ifdef QLIE_PROFILE_WHJ6
+  if(panel==Load&&choiceBackupAvailable){
+   if(focus==ChoiceBackupFocus){if(dx||dy)focus=dy<0?3:0;return;}
+   if((dy<0&&focus==0)||(dy>0&&focus==3)){focus=ChoiceBackupFocus;return;}
+  }
+#endif
   if(dx){int row=focus%4,column=(focus%8)/4*2+(focus>=8);for(int n=0;n<4;n++){column=(column+(dx<0?-1:1)+4)%4;int slot=column/2*4+row;focus=slot+(column%2)*8;if(focus<8||populatedSlots[slot])break;}}
   if(dy){int deletion=focus>=8?8:0;for(int n=0;n<8;n++){focus=(focus%8+dy+8)%8+deletion;if(!deletion||populatedSlots[focus%8])break;}}
  }
@@ -191,6 +206,9 @@ void GameMenu::move(int dx,int dy){if(panelClosing||panelTransitioning())return;
 GameMenu::Action GameMenu::confirm(){
  if(panelClosing||panelTransitioning())return Nothing;
  if(asking)return focus==0?Yes:No;
+#ifdef QLIE_PROFILE_WHJ6
+ if(panel==Load&&choiceBackupAvailable&&focus==ChoiceBackupFocus)return LoadChoiceBackup;
+#endif
  if(panel==Save||panel==Load)return focus>=8?DeleteSlot:Slot;
  if(panel==History){
   historyVoiceRow=focus;
@@ -213,7 +231,16 @@ GameMenu::Action GameMenu::confirm(){
 GameMenu::Action GameMenu::jumpHistory()const{
  return panel==History&&!asking&&!panelClosing&&focus<historyRows&&historyJumps[focus]?JumpHistory:Nothing;
 }
-int GameMenu::volumeTestAt(float x,float y){const auto&button=resource("script/config/音量テスト_off.png");for(int i=0;i<5;i++)if(std::abs(x-1070)<=button.width*.5f&&std::abs(y-testButtonY[i])<=button.height*.5f)return i;return -1;}
+int GameMenu::volumeTestAt(float x,float y){
+#ifdef QLIE_PROFILE_WHJ6
+ constexpr float halfWidth=34,halfHeight=13;
+#else
+ const auto&button=resource("script/config/音量テスト_off.png");
+ const float halfWidth=button.width*.5f,halfHeight=button.height*.5f;
+#endif
+ for(int i=0;i<5;i++)if(std::abs(x-1070)<=halfWidth&&std::abs(y-testButtonY[i])<=halfHeight)return i;
+ return -1;
+}
 bool GameMenu::beginDrag(float x,float y){
  if(asking||panelClosing||panelTransitioning())return false;
  const float rawX=x,rawY=y;
@@ -235,6 +262,9 @@ GameMenu::Action GameMenu::tap(float x,float y){
  if(panelClosing||panelTransitioning())return Nothing;
  panelPoint(x,y);
  if(asking){if(std::abs(y-325)<=20){if(std::abs(x-550)<=60){focus=0;return Yes;}if(std::abs(x-730)<=60){focus=1;return No;}}return Nothing;}
+#ifdef QLIE_PROFILE_WHJ6
+ if(panel==Load&&choiceBackupAvailable&&y>=668&&x>=32&&x<=266){focus=ChoiceBackupFocus;return LoadChoiceBackup;}
+#endif
  if(panel==Settings){
   int test=volumeTestAt(x,y);if(test>=0){focus=17+test;return confirm();}
   for(unsigned i=0;i<settings.voiceActorCount();++i){
@@ -276,12 +306,88 @@ GameMenu::Action GameMenu::tap(float x,float y){
  if(y>=670){if(x>1145)return Close;if(panel==Settings){if(x>1015)return ResetSettings;if(x>885)return Title;if(x>755)return Quit;if(allowSceneReturn&&x>=490)return SceneReturn;}else if(panel==Save||panel==Load){if(x>1015)return Title;if(x>885)return Quit;}}
  return Nothing;
 }
-void GameMenu::drawAutoButton(qlie::Bytes&pixels,bool enabled){RenderQueue q;put(q,std::string("avg/window/オートプレイ")+(enabled?"_on.png":"_off.png"),1170,700,true);q.draw(pixels,1280,720);}
-void GameMenu::drawSkipButton(qlie::Bytes&pixels,bool enabled){RenderQueue q;put(q,std::string("avg/window/スキップ")+(enabled?"_on.png":"_off.png"),1200,700,true);q.draw(pixels,1280,720);}
-void GameMenu::drawAutoButton(RenderTarget&target,bool enabled){RenderQueue q;put(q,std::string("avg/window/オートプレイ")+(enabled?"_on.png":"_off.png"),1170,700,true);q.draw(target,1280,720);}
-void GameMenu::drawSkipButton(RenderTarget&target,bool enabled){RenderQueue q;put(q,std::string("avg/window/スキップ")+(enabled?"_on.png":"_off.png"),1200,700,true);q.draw(target,1280,720);}
+namespace {
+std::string autoButtonAsset(bool enabled){
+#ifdef QLIE_PROFILE_WHJ6
+ return enabled?"avg/window/fnc_オートプレイ解除_on.png":"avg/window/fnc_オートプレイ開始_off.png";
+#else
+ return std::string("avg/window/オートプレイ")+(enabled?"_on.png":"_off.png");
+#endif
+}
+std::string skipButtonAsset(bool enabled){
+#ifdef QLIE_PROFILE_WHJ6
+ return enabled?"avg/window/fnc_スキップ停止_on.png":"avg/window/fnc_スキップ開始_off.png";
+#else
+ return std::string("avg/window/スキップ")+(enabled?"_on.png":"_off.png");
+#endif
+}
+}
+void GameMenu::drawAutoButton(qlie::Bytes&pixels,bool enabled){RenderQueue q;put(q,autoButtonAsset(enabled),1170,700,true);q.draw(pixels,1280,720);}
+void GameMenu::drawSkipButton(qlie::Bytes&pixels,bool enabled){RenderQueue q;put(q,skipButtonAsset(enabled),1200,700,true);q.draw(pixels,1280,720);}
+void GameMenu::drawAutoButton(RenderTarget&target,bool enabled){RenderQueue q;put(q,autoButtonAsset(enabled),1170,700,true);q.draw(target,1280,720);}
+void GameMenu::drawSkipButton(RenderTarget&target,bool enabled){RenderQueue q;put(q,skipButtonAsset(enabled),1200,700,true);q.draw(target,1280,720);}
 void GameMenu::draw(qlie::Bytes&pixels,const PanelContent&content,const PanelContent&prompt){render(&pixels,nullptr,content,prompt);}
 void GameMenu::draw(RenderTarget&target,const PanelContent&content,const PanelContent&prompt){render(nullptr,&target,content,prompt);}
+#ifdef QLIE_PROFILE_WHJ6
+void GameMenu::drawWhj6Panel(RenderQueue& q){
+ using whj6::ui::bitmap;
+ using whj6::ui::rectangle;
+ if(panel==Save||panel==Load){
+  const char* dir="script/saveload/";
+  bitmap(q,resource(std::string(dir)+(panel==Save?"bg_save.png":"bg_load.png")),0,0,1280,720);
+  for(int i=0;i<15;++i){
+   char number[3];std::snprintf(number,sizeof(number),"%02d",i+1);
+   const auto path=std::string(dir)+"list_"+number+(i==page?"_on.png":"_off.png");
+   bitmap(q,resource(path),694+i*40,90,34,30,true);
+  }
+  for(int i=0;i<8;++i){
+   const float x=i<4?16.f:649.f,y=125.f+(i%4)*135;
+   rectangle(q,x,y,609,111,focus==i?0x476979:0x182c38,242);
+   rectangle(q,x+11,y+12,160,90,0x10202a);
+   if(populatedSlots[i])bitmap(q,resource("script/saveload/file_del_off.png"),deleteButtonX[i],148+(i%4)*135,38,30,true);
+   if(focus==8+i)rectangle(q,deleteButtonX[i]-18,131+(i%4)*135,35,3,0xc0f0ff);
+  }
+  if(panel==Load&&choiceBackupAvailable)
+   rectangle(q,32,668,234,38,focus==ChoiceBackupFocus?0x517181:0x365564);
+  return;
+ }
+ if(panel==History){
+  rectangle(q,0,0,1280,720,0x15232c,245);
+  bitmap(q,resource("script/log/frame.png"),0,0,1280,720);
+  for(int row=0;row<historyRows;++row){
+   const float y=510-row*150;
+   rectangle(q,42,y,1125,139,(asking?promptFocus:focus)==row?0x304b5b:0x182c38,237);
+   if(historyVoices[row])put(q,"script/log/button_voice.b#0",210,585-row*150,true);
+   if(historyJumps[row])put(q,"script/log/button_jump.b#0",51,585-row*150,true);
+  }
+  rectangle(q,1193,95,18,528,0x162934);
+  const float ratio=historyMaxOffset?float(historyMaxOffset-historyOffset)/historyMaxOffset:0;
+  rectangle(q,1193,95+ratio*482,18,46,0x83aebf);
+  return;
+ }
+ if(panel==Settings){
+  bitmap(q,resource("script/config/bg1.png"),0,0,1280,720);
+  rectangle(q,132,115,1016,541,0x142835,238);
+  if(!windowPreview.pixels.empty())bitmap(q,windowPreview,363,230,300,38);
+  for(int i=0;i<9;++i){
+   const auto&slider=sliders[i];
+   rectangle(q,slider.x,slider.y-3,slider.width,6,0x678091);
+   rectangle(q,slider.x+sliderPosition(settings,i)*slider.width/20-5,slider.y-9,10,18,focus==i+3?0xffea99:0xc7edf8);
+  }
+  for(int i=0;i<3;++i){
+   const auto&toggle=toggles[i];const bool left=bool(settings.get(toggle.key))==toggle.leftValue;
+   rectangle(q,left?370:493,toggle.y-13,82,26,focus==13+i?0x517181:0x365564);
+  }
+  for(int i=0;i<5;++i)rectangle(q,1038,testButtonY[i]-12,68,25,focus==17+i?0x517181:0x365564);
+ }
+}
+void GameMenu::drawWhj6Prompt(RenderQueue&q){
+ using whj6::ui::rectangle;
+ rectangle(q,402,254,476,116,0x182c38);
+ rectangle(q,493,310,114,39,focus==0?0x517181:0x365564);
+ rectangle(q,673,310,114,39,focus==1?0x517181:0x365564);
+}
+#endif
 void GameMenu::drawHistory(RenderQueue&q){
  static const auto tint=[] {Image pixel{1,1,{32,19,0,255}};pixel.version.publish();return pixel;}();
  // script/log/black.b uses a tinted rectangle at alpha 191.
@@ -305,6 +411,9 @@ void GameMenu::render(qlie::Bytes*pixels,RenderTarget*target,const PanelContent&
  applyPanelView(q);
  auto draw=[&](const RenderQueue&queue){if(target)queue.draw(*target,1280,720);else if(pixels)queue.draw(*pixels,1280,720);};
  auto dim=[&](unsigned numerator,unsigned denominator){if(target)target->dim(numerator,denominator);else for(size_t i=0;i<pixels->size();i+=4)for(unsigned c=0;c<3;c++)(*pixels)[i+c]=uint8_t(unsigned((*pixels)[i+c])*numerator/denominator);};
+#ifdef QLIE_PROFILE_WHJ6
+ drawWhj6Panel(q);
+#else
  if(panel==Save||panel==Load){std::string dir="script/saveload/";put(q,dir+"背景.png",0,0);put(q,dir+(panel==Save?"アッパーフレーム_セーブ.png":"アッパーフレーム_ロード.png"),0,0);put(q,dir+"アンダーフレーム.png",1,656);
  for(int i=0;i<15;i++){char n[8];std::snprintf(n,sizeof(n),"%02d",i+1);put(q,dir+"ページ_"+n+(i==page?"_on.png":"_off.png"),694+i*40,90,true);}
  for(int i=0;i<8;i++){float x=i<4?323:956,y=182+(i%4)*135;put(q,dir+(focus==i?"セーブファイル_on.png":"セーブファイル_off.png"),x,y,true);put(q,dir+"サムネイル_no_data.png",i<4?27:660,137+(i%4)*135);if(populatedSlots[i])put(q,dir+(focus==8+i?"削除ボタン_on.png":"削除ボタン_off.png"),deleteButtonX[i],148+(i%4)*135,true);}
@@ -351,14 +460,19 @@ void GameMenu::render(qlie::Bytes*pixels,RenderTarget*target,const PanelContent&
  }
  const char*names[]={"戻る","タイトルへ戻る","ゲームの終了"};const int xs[]={1210,950,820};for(int i=0;i<3;i++)put(q,std::string("script/config/")+names[i]+(focus==i?"_on.png":"_off.png"),xs[i],695,true);
  }
+#endif
  if((!asking||prompt)&&content)content(q);
  draw(q);
  if(asking){
   if(target||pixels)dim(3,8);
   RenderQueue dialog;applyPanelView(dialog);
+#ifdef QLIE_PROFILE_WHJ6
+  drawWhj6Prompt(dialog);
+#else
   put(dialog,"script/config/確認_フレーム.png",640,300,true);
   put(dialog,std::string("script/config/確認_はい")+(focus==0?"_on.png":"_off.png"),550,325,true);
   put(dialog,std::string("script/config/確認_いいえ")+(focus==1?"_on.png":"_off.png"),730,325,true);
+#endif
   if(prompt)prompt(dialog);
   else if(content)content(dialog);
   draw(dialog);

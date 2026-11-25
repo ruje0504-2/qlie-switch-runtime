@@ -65,7 +65,7 @@ static void decrypt31(Bytes& bytes,uint32_t arc,const std::string& name,unsigned
  const uint32_t length=uint32_t(bytes.size()),factor=secondary?13u:7u;
  const uint32_t lengthConstant=secondary?0x56e213u:0x8f32dcu;
  seed+=arc^(factor*(length&0xffffff)+length+hash+(hash^length^lengthConstant));
- seed=factor*(seed&0xffffff);
+ seed=(secondary?13u:9u)*(seed&0xffffff);
  const uint32_t multiplier=secondary?0x8a77f473u:0x8df21431u;
  uint32_t table[32];
  for(auto& word:table){
@@ -159,7 +159,7 @@ std::string canonical(std::string s){for(auto&c:s){if(c==92)c=47;else if(c>=65&&
 Bytes file(const std::string&p){std::ifstream f(p,std::ios::binary);if(!f)throw std::runtime_error("Cannot open "+p);f.seekg(0,std::ios::end);auto n=f.tellg();if(n<0)throw std::runtime_error("Cannot size "+p);f.seekg(0);Bytes b(static_cast<size_t>(n));if(!b.empty()&&!f.read(reinterpret_cast<char*>(b.data()),b.size()))throw std::runtime_error("Cannot read "+p);return b;}
 void write_uncommitted_file(const std::string&p,const Bytes&b){std::ofstream f(p,std::ios::binary|std::ios::trunc);if(!f||!f.write(reinterpret_cast<const char*>(b.data()),b.size()))throw std::runtime_error("Cannot write "+p);f.close();if(!f)throw std::runtime_error("Cannot close "+p);}
 void write_file(const std::string&p,const Bytes&b){write_uncommitted_file(p,b);whj2::commitSavePath(p);}
-Pack::Pack(const std::string& path,const Bytes& a,const Bytes& b,PackVersion expected)
+Pack::Pack(const std::string& path,const Bytes& a,const Bytes& b,PackVersion expected,bool useEmbeddedFileKey)
  :fp(path,std::ios::binary),k1(a),k2(b),version(expected){
  if(!fp)throw std::runtime_error("Cannot open "+path);
  fp.seekg(0,std::ios::end);
@@ -211,13 +211,15 @@ Pack::Pack(const std::string& path,const Bytes& a,const Bytes& b,PackVersion exp
   if(entry.offset>index||entry.size>index-entry.offset)throw std::runtime_error("Invalid entry range");
   entries.push_back(std::move(entry));
  }
- // WHJ4's method-2 entries use the supplied RESKEY payload. They do not use
- // the decrypted pack_keyfile entry, which is the convention in version 3.0.
- if(!unicode){
+ // Version 3.0 and the embedded-key 3.1 layout bootstrap from pack_keyfile.
+ if(!unicode||useEmbeddedFileKey){
   for(const auto& entry:entries){
    if(entry.name.find("pack_keyfile")==std::string::npos)continue;
+   if(unicode&&(entry.encrypted!=1||entry.unpacked<128))
+    throw std::runtime_error("Invalid embedded QLIE 3.1 key: "+path);
    key_entry=read(entry);k1=key_entry;key_ready=true;break;
   }
+  if(unicode&&!key_ready)throw std::runtime_error("Missing embedded QLIE 3.1 key: "+path);
  }
 }
 uint32_t Pack::checksum(const Bytes& bytes) const{
@@ -245,6 +247,7 @@ Bytes Pack::read(const Entry&e){
  return b;
 }
 std::pair<Bytes,Bytes> game_keys(const std::string&root,const ArchiveLayout&layout){
+ if(layout.version==PackVersion::v31&&layout.fileKey.empty())return {};
  Bytes k1=file(root+"/"+layout.fileKey);
  if(layout.version==PackVersion::v31){
   if(k1.size()<128)throw std::runtime_error("QLIE 3.1 key file is too short: "+layout.fileKey);
@@ -286,7 +289,8 @@ Assets::Assets(const std::string&directory,const ArchiveLayout&layout)
  :root(directory),looseVoicePrefix(layout.looseVoicePrefix),resourceAliases(layout.resourceAliases){
  auto keys=game_keys(root,layout);
  const auto addPack=[&](const std::string& path,const Bytes& fileKey,const Bytes& iconKey,PackVersion version){
-  auto pack=std::make_unique<Pack>(path,fileKey,iconKey,version);
+  const bool embedded=version==PackVersion::v31&&layout.fileKey.empty();
+  auto pack=std::make_unique<Pack>(path,fileKey,iconKey,version,embedded);
   for(const auto& entry:pack->entries){
    if(entry.name.find("pack_keyfile")!=std::string::npos)continue;
    auto key=canonical(entry.name);

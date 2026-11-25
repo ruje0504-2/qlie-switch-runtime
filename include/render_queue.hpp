@@ -37,10 +37,13 @@ class RenderQueue {
  size_t visibleImages=0;
  bool shaderMasks=false,nativeVideo=false,fieldPresentation=false,pendingVideoFrame=false;
  std::optional<Affine2D> view;
+ std::array<unsigned,2> logicalSize;
  void drawRows(qlie::Bytes&,unsigned,unsigned,unsigned,unsigned,RenderTarget* =nullptr)const;
 public:
- explicit RenderQueue(bool masks=false,bool video=false,const Affine2D* outerView=nullptr)
-  :shaderMasks(masks),nativeVideo(video){if(outerView)view=*outerView;}
+ explicit RenderQueue(bool masks=false,bool video=false,const Affine2D* outerView=nullptr,
+                      std::array<unsigned,2> sceneSize={})
+  :shaderMasks(masks),nativeVideo(video),logicalSize(sceneSize){if(outerView)view=*outerView;}
+ const std::array<unsigned,2>& sceneSize()const{return logicalSize;}
  bool supportsMasks()const{return shaderMasks;}
  bool supportsVideoSurfaces()const{return nativeVideo;}
  void requestFieldPresentation(){fieldPresentation=true;}

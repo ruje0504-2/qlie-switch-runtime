@@ -18,7 +18,8 @@ uint32_t titleSeed(){
 #endif
 }
 }
-TitleScreen::TitleScreen(qlie::Assets&assets,TitleLayout placement):scene(assets),layout(placement),random(titleSeed()){}
+TitleScreen::TitleScreen(qlie::Assets&assets,TitleLayout placement,std::array<unsigned,2> sceneSize)
+ :scene(assets,sceneSize),layout(placement),random(titleSeed()){}
 bool TitleScreen::rollAlternate(){
  return std::uniform_int_distribution<unsigned>(0,layout.alternateRange-1)(random)<layout.alternateHits;
 }

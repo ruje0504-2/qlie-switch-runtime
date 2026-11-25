@@ -29,7 +29,7 @@ fi
 # Deko3d can be built without the optional Mesa Vulkan fallback.
 vulkan_objects=
 vulkan_flags=
-case "${QLIE_SWITCH_VULKAN:-1}" in
+case "${QLIE_SWITCH_VULKAN:-$qlie_switch_vulkan_default}" in
 1)
   mesa=${WHJ2_MESA_SDK:-$PWD/local/mesa-sdk/opt/devkitpro/portlibs/switch}
   rust=${WHJ2_RUST_LIBDIR:-$PWD/local/rust/rust-std-nightly-aarch64-unknown-linux-gnu/rust-std-aarch64-unknown-linux-gnu/lib/rustlib/aarch64-unknown-linux-gnu/lib}
@@ -69,5 +69,9 @@ fi
 if [ "${1:-}" = "--elf-only" ]; then
   exit 0
 fi
-"$dkp/tools/bin/nacptool" --create "$qlie_nro_title" "QLIE Switch Runtime contributors" "$qlie_nro_version" "build-switch/$qlie_binary.nacp"
-"$dkp/tools/bin/elf2nro" "build-switch/$qlie_binary.elf" "build-switch/$qlie_binary.nro" --nacp="build-switch/$qlie_binary.nacp"
+set --
+if [ -n "$qlie_nro_title_id" ]; then set -- "--titleid=$qlie_nro_title_id"; fi
+"$dkp/tools/bin/nacptool" --create "$qlie_nro_title" "$qlie_nro_publisher" "$qlie_nro_version" "build-switch/$qlie_binary.nacp" "$@"
+set -- "--nacp=build-switch/$qlie_binary.nacp"
+if [ -n "${QLIE_NRO_ICON:-}" ]; then set -- "$@" "--icon=$QLIE_NRO_ICON"; fi
+"$dkp/tools/bin/elf2nro" "build-switch/$qlie_binary.elf" "build-switch/$qlie_binary.nro" "$@"

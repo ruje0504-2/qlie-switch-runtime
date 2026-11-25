@@ -8,7 +8,7 @@
 namespace whj2 {
 class MusicScreen {
  qlie::Assets& assets;Audio& audio;Settings& settings;SceneImages scene;MessageText labelText;KFont*font;
- struct Track {std::string title,path;};std::vector<Track> tracks;
+ struct Track {std::string title,path,button{};};std::vector<Track> tracks;
  bool prepared=false,opened=false,loop=false,audible=false,dirty=false;int selected=0,playing=-1,volumeValue=100,page=0;std::string caption;
  float shownSeek=-1;
  int shownVolume=-1;
@@ -30,6 +30,9 @@ class MusicScreen {
  void highlight();void play(int);void text(const std::string&,unsigned,const std::string&,unsigned,unsigned,unsigned);void refresh();
  void clearSeek(){seekFraction.reset();seekOffsetMs=0;}
  void uiSound(const char*);
+#ifdef QLIE_PROFILE_WHJ6
+ void prepareWhj6();
+#endif
 public:
  enum Destination {NoDestination,Title,CG,Replay};
  MusicScreen(qlie::Assets&,Audio&,Settings&,KFont*,const MessageText&,int expectedTracks=0);

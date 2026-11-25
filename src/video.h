@@ -23,7 +23,7 @@ void kvideo_release_hardware(void);
    video advance. Clone the AVFrame to use it after that point. */
 void kvideo_enable_surface(KVideo *v);
 static inline int kvideo_scene_surface_size(unsigned width,unsigned height){
-    return width==1280 && (height==720 || height==1440);
+    return width==1280 && (height==720 || height==1440 || height==1800);
 }
 int kvideo_get_surface(const KVideo *v,KVideoSurface *surface);
 int kvideo_copy_surface(KVideo *v,KImage *screen);
@@ -32,6 +32,7 @@ void kvideo_free_frame(struct AVFrame *frame);
 int kvideo_read_frame(const struct AVFrame *frame,KImage *screen,char *error,size_t error_size);
 int kvideo_read_software_picture(const uint8_t *data,size_t size,uint64_t tick,KImage *target);
 KVideo *kvideo_open_mode(const uint8_t *data,size_t size,KVideoMode mode);
+KVideo *kvideo_open_with_height_limit(const uint8_t *data,size_t size,int software_only,int max_height);
 int kvideo_stats(const KVideo *v,KVideoStats *stats);
 /* Reopen the same bytes in software and seek back to a keyframe for tick.
    The new decoder uses the previous clip's presentation time origin. */

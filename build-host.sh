@@ -25,6 +25,12 @@ build_qlie_archive build "$cxx" "$cc" "${AR:-ar}" "$common $codec_flags" "$commo
 if [ "${1:-}" = --engine-only ]; then
   exit 0
 fi
+if [ "${1:-}" = --repack-video ]; then
+  $cxx -std=c++17 $common $qlie_profile_flags $codec_flags -Igames -Igames/runtime \
+    tools/repack_video.cpp build/libqlie-runtime.a \
+    $($pc --libs libavformat libavcodec libswscale libswresample libavutil libpng libjpeg) -o build/repack-video
+  exit 0
+fi
 . ./games/runtime/sources.sh
 common="$common -Igames -Igames/runtime"
 runtime_flags=

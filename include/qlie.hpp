@@ -18,6 +18,7 @@ enum class PackVersion { v30, v31 };
 struct ArchiveLayout {
  PackVersion version;
  unsigned slotCount;
+ // An empty fileKey selects the key embedded in each 3.1 archive.
  std::string archivePrefix, fileKey, iconKey, hostExecutable, looseVoicePrefix, patchFile{};
  std::map<std::string,std::string> resourceAliases{};
 };
@@ -28,7 +29,8 @@ class Pack {
  PackVersion version;
 public:
  std::vector<Entry> entries;
- Pack(const std::string&,const Bytes&,const Bytes&,PackVersion expected=PackVersion::v30);
+ Pack(const std::string&,const Bytes&,const Bytes&,PackVersion expected=PackVersion::v30,
+      bool useEmbeddedFileKey=false);
  uint32_t checksum(const Bytes&) const;
  Bytes read(const Entry&);
 };

@@ -54,15 +54,14 @@ Image boxBlur(const Image&source){
  }
  return out;
 }
-Image characterBlurCanvas(const Image&source){
- // The authored canvas,10,10,10,0 adds left/top/right/bottom margins.
+Image characterBlurCanvas(const Image&source,unsigned margin){
+ // The character filter pads the top and the two sides.
  // WHJ3's canvas handler fills the margin with transparent 0x00888888.
- constexpr unsigned left=10,top=10,right=10;
- const unsigned width=source.width+left+right,height=source.height+top;
+ const unsigned width=source.width+margin*2,height=source.height+margin;
  Image padded{width,height,qlie::Bytes(size_t(width)*height*4,0x88)};
  for(size_t i=3;i<padded.pixels.size();i+=4)padded.pixels[i]=0;
  for(unsigned y=0;y<source.height;++y)
-  std::memcpy(padded.pixels.data()+(size_t(y+top)*width+left)*4,
+  std::memcpy(padded.pixels.data()+(size_t(y+margin)*width+margin)*4,
               source.pixels.data()+size_t(y)*source.width*4,size_t(source.width)*4);
  return padded;
 }
@@ -310,7 +309,8 @@ Image filterImage(const Image&source,const std::string&name){
  if(const auto separator=name.find('\\');separator!=name.npos)
   return filterImage(filterImage(source,name.substr(0,separator)),name.substr(separator+1));
  if(name.rfind("\"goverlay,",0)==0&&name.back()=='"')return gradientOverlay(source,name);
- if(name=="charablur10")return boxBlur<5>(characterBlurCanvas(source));
+ if(name=="charablur10")return boxBlur<5>(characterBlurCanvas(source,10));
+ if(name=="charablur20")return boxBlur<10>(characterBlurCanvas(source,20));
  if(name=="blur2"||name=="[blur,2,2]")return boxBlur<1>(source);
  if(name=="blur5"||name=="\"blur,4,4\""||name=="\"blur,5,5\"")return boxBlur<2>(source);
  if(name=="blur8")return boxBlur<4>(source);

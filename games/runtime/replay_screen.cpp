@@ -2,8 +2,21 @@
 #include "replay_screen.hpp"
 #include "profile.hpp"
 #include <algorithm>
+#ifdef QLIE_PROFILE_WHJ6
+#include "profiles/whj6/ui.hpp"
+#endif
 namespace whj2 {
 void ReplayScreen::prepareLayout(){
+#ifdef QLIE_PROFILE_WHJ6
+ using whj6::ui::sprite;
+ sprite(scene,"ui_replay_bg","script/memorymode/bg.png",0,0,100,66.6667f,false);
+ for(unsigned i=0;i<15;++i)
+  sprite(scene,"ui_replay_item"+std::to_string(i),"script/memorymode/mem_hide.png",155+int(i%5)*240,204+int(i/5)*152,110,60);
+ for(int i=0;i<pageCount();++i)
+  sprite(scene,"ui_replay_page"+std::to_string(i),"script/memorymode/cs_0"+std::to_string(i+1)+"_off.png",1170+i*40,90,110);
+ for(unsigned i=0;i<4;++i)
+  sprite(scene,"ui_replay_nav"+std::to_string(i),std::string("script/modecommon/")+whj6::ui::extraNav[i],int(whj6::ui::navX(i)),690,120,58);
+#else
  auto add=[&](const std::string&id,const std::string&file,int x,int y,int pri){scene.command("^"+id+",file:script/memorymode/"+file+",x:"+std::to_string(x)+",y:"+std::to_string(y)+",pri:"+std::to_string(pri));};
  add("ui_replay_bg","背景.png",0,0,100);add("ui_replay_upper","アッパーフレーム.png",0,0,100);add("ui_replay_lower","アンダーフレーム.png",0,656,100);
  const bool legacy=game_profile::story.legacyAvg!=nullptr;
@@ -17,6 +30,7 @@ void ReplayScreen::prepareLayout(){
   scene.uiSlot(id,1,"script/memorymode/"+std::string(names[i])+"_on.png");
  }
  scene.prepareUiBitmap("script/memorymode/サムネイル_no_image.png");
+#endif
  prepared=true;
 }
 void ReplayScreen::prepare(){
@@ -33,14 +47,36 @@ void ReplayScreen::open(unsigned pageIndex){
 int ReplayScreen::pageCount()const{return int((catalog.items().size()+14)/15);}
 int ReplayScreen::navigationStart()const{return 15+pageCount();}
 bool ReplayScreen::exists(int item)const{return item>=0&&item<15&&page*15+unsigned(item)<catalog.items().size();}
-void ReplayScreen::setup(){elapsed=0;scene.resetUiAnimations();for(unsigned i=0;i<15;i++){auto id="ui_replay_item"+std::to_string(i);auto index=page*15+i;
- if(index>=catalog.items().size()){scene.command("^"+id+",show:false");continue;}scene.command("^"+id+",show:true,motion:*Enable");scene.uiSlot(id,0,catalog.unlocked(index,progress)?catalog.items()[index].thumbnail:"script/memorymode/サムネイル_no_image.png");}
- highlight();}
-void ReplayScreen::highlight(){for(unsigned i=0;i<15;i++){auto index=page*15+i;if(index>=catalog.items().size())continue;auto motion=!catalog.unlocked(index,progress)?"*OnLock":selected==int(i)?"*OnMouse":"*OffMouse";scene.setUiMotion("ui_replay_item"+std::to_string(i),motion);}
+void ReplayScreen::setup(){
+ elapsed=0;scene.resetUiAnimations();
+ for(unsigned i=0;i<15;++i){
+  const auto id="ui_replay_item"+std::to_string(i);
+  const auto index=page*15+i;
+  if(index>=catalog.items().size()){scene.command("^"+id+",show:false");continue;}
+#ifdef QLIE_PROFILE_WHJ6
+  scene.command("^"+id+",show:true,file:"+(catalog.unlocked(index,progress)?
+   catalog.items()[index].thumbnail:"script/memorymode/mem_hide.png"));
+#else
+  scene.command("^"+id+",show:true,motion:*Enable");
+  scene.uiSlot(id,0,catalog.unlocked(index,progress)?catalog.items()[index].thumbnail:"script/memorymode/サムネイル_no_image.png");
+#endif
+ }
+ highlight();
+}
+void ReplayScreen::highlight(){
+#ifdef QLIE_PROFILE_WHJ6
+ for(int i=0;i<15&&exists(i);++i)
+  whj6::ui::focus(scene,"ui_replay_item"+std::to_string(i),selected==i,!catalog.unlocked(page*15+unsigned(i),progress));
+ for(int i=0;i<pageCount();++i)
+  whj6::ui::focus(scene,"ui_replay_page"+std::to_string(i),selected==15+i||page==unsigned(i));
+ for(int i=0;i<4;++i)whj6::ui::focus(scene,"ui_replay_nav"+std::to_string(i),selected==navigationStart()+i,i==1);
+#else
+ for(unsigned i=0;i<15;i++){auto index=page*15+i;if(index>=catalog.items().size())continue;auto motion=!catalog.unlocked(index,progress)?"*OnLock":selected==int(i)?"*OnMouse":"*OffMouse";scene.setUiMotion("ui_replay_item"+std::to_string(i),motion);}
  for(int i=0;i<pageCount();i++)scene.setUiMotion("ui_replay_page"+std::to_string(i),page==unsigned(i)?"*OnCheck":selected==15+int(i)?"*OnMouse":"*OffMouse");
  for(int i=game_profile::story.legacyAvg?3:0;i<4;i++){
   scene.setUiMotion("ui_replay_nav"+std::to_string(i),i==1?"*OnLock":selected==navigationStart()+i?"*OnMouse":"*OffMouse");
  }
+#endif
 }
 void ReplayScreen::close(){opened=false;}
 void ReplayScreen::update(double ms){if(!opened)return;elapsed+=std::max(0.,ms);scene.update(ms);}

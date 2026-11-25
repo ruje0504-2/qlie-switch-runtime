@@ -3,12 +3,33 @@
 #include "asset_read_ahead.hpp"
 #include "profile.hpp"
 #include <algorithm>
+#ifdef QLIE_PROFILE_WHJ6
+#include "profiles/whj6/ui.hpp"
+#endif
 namespace whj2 {
 namespace {
 constexpr auto openingBitmaps="@cg/opening-bitmaps";
+#ifdef QLIE_PROFILE_WHJ6
+constexpr auto lockedThumbnail="script/albummode/thumcg_hide.png";
+constexpr const char* whj6ViewAssets[]={"前へ_off.png","拡大_off.png","閉じる_off.png","次へ_off.png"};
+#else
 constexpr auto lockedThumbnail="script/albummode/サムネイル_no_image.png";
+#endif
 }
 void CgScreen::prepareLayout(){
+#ifdef QLIE_PROFILE_WHJ6
+ using whj6::ui::sprite;
+ sprite(menuScene,"ui_cg_bg","script/albummode/bg.png",0,0,100,66.6667f,false);
+ for(unsigned i=0;i<24;++i)
+  sprite(menuScene,"ui_cg_item"+std::to_string(i),lockedThumbnail,164+int(i%6)*190,186+int(i/6)*125,110,60);
+ for(int i=0;i<pageButtons();++i)
+  sprite(menuScene,"ui_cg_page"+std::to_string(i),"script/albummode/cs_0"+std::to_string(i+1)+"_off.png",860+i*148,90,110);
+ for(unsigned i=0;i<4;++i)
+  sprite(menuScene,"ui_cg_nav"+std::to_string(i),std::string("script/modecommon/")+whj6::ui::extraNav[i],int(whj6::ui::navX(i)),690,120,58);
+ for(int i=0;i<4;++i)
+  sprite(viewScene,"ui_cg_viewbutton"+std::to_string(i),std::string("script/albummode/")+whj6ViewAssets[i],930+i*90,685,120);
+ viewScene.command("^ui_cg_count,x:25,y:685,pri:120");
+#else
  auto add=[&](const std::string&id,const std::string&file,int x,int y,int pri){menuScene.command("^"+id+",file:script/albummode/"+file+",x:"+std::to_string(x)+",y:"+std::to_string(y)+",pri:"+std::to_string(pri));};
  add("ui_cg_bg","背景.png",0,0,100);add("ui_cg_upper","アッパーフレーム.png",0,0,100);add("ui_cg_lower","アンダーフレーム.png",0,656,100);
  for(unsigned i=0;i<24;i++)add("ui_cg_item"+std::to_string(i),"Button_Thum.b",85+int(i%6)*190,135+int(i/6)*130,110);
@@ -30,6 +51,7 @@ void CgScreen::prepareLayout(){
  viewScene.command(game_profile::story.legacyAvg?
   "^ui_cg_count,file:script/albummode/ViewText.b,x:60,y:695,pri:100":
   "^ui_cg_count,file:script/albummode/ViewText.b,x:20,y:690,pri:100");
+#endif
  prepared=true;
 }
 void CgScreen::prepare(){
@@ -40,9 +62,13 @@ void CgScreen::prepare(){
 void CgScreen::warmOpening(){
  if(!readAhead||openingWarm||prepared)return;
  std::vector<std::string> paths{
+#ifdef QLIE_PROFILE_WHJ6
+  "script/albummode/bg.png",
+#else
   "script/albummode/背景.png",
   "script/albummode/アッパーフレーム.png",
   "script/albummode/アンダーフレーム.png",
+#endif
   lockedThumbnail
  };
  for(size_t i=0;i<std::min<size_t>(24,catalog.items().size());++i)
@@ -62,14 +88,37 @@ bool CgScreen::open(){
  setup();
  return true;
 }
-void CgScreen::setup(){elapsed=0;menuScene.resetUiAnimations();for(unsigned i=0;i<24;i++){auto index=page*24+i;auto id="ui_cg_item"+std::to_string(i);if(index>=catalog.items().size()){menuScene.command("^"+id+",show:false");continue;}menuScene.command("^"+id+",show:true,motion:*Enable");menuScene.uiSlot(id,0,catalog.unlocked(index,progress)?catalog.items()[index].thumbnail:lockedThumbnail);}highlight();}
+void CgScreen::setup(){
+ elapsed=0;menuScene.resetUiAnimations();
+ for(unsigned i=0;i<24;i++){
+  const auto index=page*24+i;const auto id="ui_cg_item"+std::to_string(i);
+  if(index>=catalog.items().size()){menuScene.command("^"+id+",show:false");continue;}
+  const auto file=catalog.unlocked(index,progress)?catalog.items()[index].thumbnail:lockedThumbnail;
+#ifdef QLIE_PROFILE_WHJ6
+  menuScene.command("^"+id+",show:true,file:"+file);
+#else
+  menuScene.command("^"+id+",show:true,motion:*Enable");menuScene.uiSlot(id,0,file);
+#endif
+ }
+ highlight();
+}
 int CgScreen::pageCount()const{return int((catalog.items().size()+23)/24);}
 int CgScreen::pageButtons()const{return game_profile::story.legacyAvg&&pageCount()==1?0:pageCount();}
 int CgScreen::navigationStart()const{return 24+pageButtons();}
 bool CgScreen::exists(int item)const{return item>=0&&item<24&&page*24+unsigned(item)<catalog.items().size();}
-void CgScreen::highlight(){for(unsigned i=0;i<24;i++){auto index=page*24+i;if(index>=catalog.items().size())continue;auto mode=!catalog.unlocked(index,progress)?"*OnLock":selected==int(i)?"*OnMouse":"*OffMouse";menuScene.setUiMotion("ui_cg_item"+std::to_string(i),mode);}
+void CgScreen::highlight(){
+#ifdef QLIE_PROFILE_WHJ6
+ for(int i=0;i<24&&exists(i);++i)
+  whj6::ui::focus(menuScene,"ui_cg_item"+std::to_string(i),selected==i,!catalog.unlocked(page*24+unsigned(i),progress));
+ for(int i=0;i<pageButtons();++i)
+  whj6::ui::focus(menuScene,"ui_cg_page"+std::to_string(i),selected==24+i||page==unsigned(i));
+ for(int i=0;i<4;++i)whj6::ui::focus(menuScene,"ui_cg_nav"+std::to_string(i),selected==navigationStart()+i,i==0);
+#else
+ for(unsigned i=0;i<24;i++){auto index=page*24+i;if(index>=catalog.items().size())continue;auto mode=!catalog.unlocked(index,progress)?"*OnLock":selected==int(i)?"*OnMouse":"*OffMouse";menuScene.setUiMotion("ui_cg_item"+std::to_string(i),mode);}
  for(int i=0;i<pageButtons();i++)menuScene.setUiMotion("ui_cg_page"+std::to_string(i),page==unsigned(i)?"*OnCheck":selected==24+i?"*OnMouse":"*OffMouse");
- for(int i=game_profile::story.legacyAvg?3:0;i<4;i++)menuScene.setUiMotion("ui_cg_nav"+std::to_string(i),i==0?"*OnLock":selected==navigationStart()+i?"*OnMouse":"*OffMouse");}
+ for(int i=game_profile::story.legacyAvg?3:0;i<4;i++)menuScene.setUiMotion("ui_cg_nav"+std::to_string(i),i==0?"*OnLock":selected==navigationStart()+i?"*OnMouse":"*OffMouse");
+#endif
+}
 void CgScreen::cancelViewRequest(){
  if(readAhead&&!pendingView.empty())readAhead->discard(pendingView);
  pendingView.clear();
@@ -101,13 +150,27 @@ void CgScreen::loadView(){
  auto count=std::to_string(variant+1)+"/"+std::to_string(files.size());
  if(count!=displayedCount){
   countText.start("[spd,0]"+count);
-  viewScene.uiSlot("ui_cg_count",0,countText.render(font,MessageStyle{100,50,16,16,0xffffff}));
+  auto countImage=countText.render(font,MessageStyle{100,50,16,16,0xffffff});
+#ifdef QLIE_PROFILE_WHJ6
+  viewScene.setUiBitmap("ui_cg_count",std::move(countImage));
+#else
+  viewScene.uiSlot("ui_cg_count",0,countImage);
+#endif
   displayedCount=std::move(count);
  }
  viewReady=true;positionView();viewFade.present();
 }
-void CgScreen::positionView(){auto size=viewScene.dimensions("ui_cg_view");float dx=std::max(0.f,size.first*zoom*.5f-640),dy=std::max(0.f,size.second*zoom*.5f-360);float x=640-(pointerX-640)*dx/640,y=360-(pointerY-360)*dy/360;
- viewScene.command("^ui_cg_view,x:"+std::to_string(x)+",y:"+std::to_string(y)+",scalex:"+std::to_string(zoom*100)+",scaley:"+std::to_string(zoom*100));}
+void CgScreen::positionView(){
+ const auto size=viewScene.dimensions("ui_cg_view");
+ float scale=float(zoom);
+#ifdef QLIE_PROFILE_WHJ6
+ if(size.first&&size.second)scale*=std::min(1280.f/size.first,720.f/size.second);
+#endif
+ const float dx=std::max(0.f,size.first*scale*.5f-640),dy=std::max(0.f,size.second*scale*.5f-360);
+ const float x=640-(pointerX-640)*dx/640,y=360-(pointerY-360)*dy/360;
+ const auto percent=std::to_string(scale*100);
+ viewScene.command("^ui_cg_view,x:"+std::to_string(x)+",y:"+std::to_string(y)+",scalex:"+percent+",scaley:"+percent);
+}
 void CgScreen::closeView(){cancelViewRequest();viewFade.reset();viewing=viewReady=false;viewScene.removeUiLayer("ui_cg_view",true);}
 void CgScreen::close(){closeView();opened=false;}
 void CgScreen::update(double ms){

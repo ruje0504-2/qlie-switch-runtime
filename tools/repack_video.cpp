@@ -52,7 +52,8 @@ std::optional<Bytes> replaceVideo(const Bytes&input,const fs::path&encoded,const
  if(starts(input,"OggS")){
   const auto end=input.begin()+std::min<size_t>(input.size(),65536);
   const std::array<uint8_t,7> identification{0x80,'t','h','e','o','r','a'};
-  if(std::search(input.begin(),end,identification.begin(),identification.end())==end)return {};
+  const auto header=std::search(input.begin(),end,identification.begin(),identification.end());
+  if(header==end)return {};
   const auto digest=sha256(input);
   if(extract){
    const auto output=encoded/(digest+".ogv");
@@ -65,6 +66,21 @@ std::optional<Bytes> replaceVideo(const Bytes&input,const fs::path&encoded,const
   if(!fs::is_regular_file(output))throw std::runtime_error("Missing H.264 encoding for original video: "+name+" ("+digest+")");
   auto video=qlie::file(output.string());
   require(starts(video,"\x1a\x45\xdf\xa3"),"H.264 encoding must use Matroska");
+#ifdef QLIE_PROFILE_WHJ6
+  require(input.end()-header>=20,"Truncated Theora identification");
+  const auto dimension=[&](unsigned index){
+   return (unsigned(header[index])<<16)|(unsigned(header[index+1])<<8)|unsigned(header[index+2]);
+  };
+  const auto width=dimension(14),height=dimension(17);
+  require(width>0&&width<=2048&&height>0&&height<=2700,"Unexpected WHJ6 authored scene video dimensions");
+  Bytes addressed(20+video.size());
+  std::copy_n("VSD1",4,addressed.begin());
+  writeLE(addressed,4,12,4);
+  std::copy_n("W6CG",4,addressed.begin()+8);
+  writeLE(addressed,12,width,4);writeLE(addressed,16,height,4);
+  std::copy(video.begin(),video.end(),addressed.begin()+20);
+  video=std::move(addressed);
+#endif
   std::cout<<"VIDEO\t"<<digest<<"\t"<<sha256(video)<<"\t"<<input.size()<<"\t"<<video.size()<<"\t"<<name<<"\n";
   return video;
  }
@@ -114,14 +130,19 @@ void verifyCopy(std::ifstream&before,std::ifstream&after,const qlie::Entry&old,c
 }
 
 void repack(const fs::path&source,const fs::path&destination,const fs::path&encoded,
-            const std::pair<Bytes,Bytes>&keys,qlie::PackVersion version,bool extract){
- qlie::Pack archive(source.string(),keys.first,keys.second,version);
+            const std::pair<Bytes,Bytes>&keys,const qlie::ArchiveLayout&layout,bool extract){
+ const auto version=layout.version;
+ const bool embedded=version==qlie::PackVersion::v31&&layout.fileKey.empty();
+ qlie::Pack archive(source.string(),keys.first,keys.second,version,embedded);
  std::map<size_t,Bytes> replacements;
  for(size_t index=0;index<archive.entries.size();++index){
   const auto&entry=archive.entries[index];
   const auto name=qlie::canonical(entry.name);
   const auto extension=fs::path(name).extension();
   if(extension!=".b"&&extension!=".ogv")continue;
+#ifdef QLIE_PROFILE_WHJ6
+  if(extension==".ogv"&&name.rfind("画像/",0)!=0)continue;
+#endif
   auto replacement=replaceVideo(archive.read(entry),encoded,source.filename().string()+":"+name,extract);
   if(replacement)replacements.emplace(index,std::move(*replacement));
  }
@@ -183,7 +204,7 @@ void repack(const fs::path&source,const fs::path&destination,const fs::path&enco
   output.close();
   require(bool(output),"Cannot close staged pack");
 
-  qlie::Pack verified(temporary.string(),keys.first,keys.second,version);
+  qlie::Pack verified(temporary.string(),keys.first,keys.second,version,embedded);
   require(verified.entries.size()==archive.entries.size(),"Repacked entry count changed");
   std::ifstream fresh(temporary,std::ios::binary);
   std::vector<char> readback(buffer.size());
@@ -217,7 +238,7 @@ int main(int argc,char**argv){
   for(int slot=0;slot<16;++slot){
    const auto name="data"+std::to_string(slot)+".pack";
    const auto source=game/"GameData"/name;
-   if(fs::is_regular_file(source))repack(source,output/name,encoded,keys,layout.version,extract);
+   if(fs::is_regular_file(source))repack(source,output/name,encoded,keys,layout,extract);
   }
   return 0;
  }catch(const std::exception&e){std::cerr<<"FAIL "<<e.what()<<"\n";return 1;}

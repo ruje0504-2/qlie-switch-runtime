@@ -9,6 +9,13 @@ namespace {
 constexpr auto AnimationFile="avg/select/animation.b";
 constexpr auto ButtonFile="avg/select/selectbutton.b";
 constexpr auto AnimationLayer="ui_choice_animation";
+#ifdef QLIE_PROFILE_WHJ6
+constexpr MessageStyle choiceText{810,75,36,36,0xffffff};
+constexpr int choiceCenter=960,choiceFirst=260,choiceStep=80;
+#else
+constexpr MessageStyle choiceText{540,50,24,24,0xffffff};
+constexpr int choiceCenter=640,choiceFirst=290,choiceStep=60;
+#endif
 }
 void ChoiceScreen::prepare(AssetReadAhead&loader){
  scene.setReadAhead(&loader);
@@ -21,12 +28,16 @@ void ChoiceScreen::show(const std::vector<std::string>&values,KFont*font){
  for(size_t i=0;i<entries.size();++i)scene.removeUiLayer("ui_choice"+std::to_string(i));
  entries=values;elapsed=0;selected=0;pending=-1;closing=false;closingElapsed=0;
  scene.command(std::string("^")+AnimationLayer+",file:"+AnimationFile+",x:100,y:600,pri:1500,motion:*Enable");
- const int top=290-int(entries.size()-1)*30;
+#ifdef QLIE_PROFILE_WHJ6
+ const int top=choiceFirst;
+#else
+ const int top=choiceFirst-int(entries.size()-1)*choiceStep/2;
+#endif
  for(size_t i=0;i<entries.size();++i){
   auto name="ui_choice"+std::to_string(i);
-  scene.command("^"+name+",file:"+ButtonFile+",x:640,y:"+std::to_string(top+int(i)*60)+",pri:1520,motion:*Enable");
+  scene.command("^"+name+",file:"+ButtonFile+",x:"+std::to_string(choiceCenter)+",y:"+std::to_string(top+int(i)*choiceStep)+",pri:1520,motion:*Enable");
   label.start("[spd,0][pc,"+entries[i]+"]");
-  scene.uiSlot(name,2,label.render(font,MessageStyle{540,50,24,24,0xffffff}));
+  scene.uiSlot(name,2,label.render(font,choiceText));
  }
  select(0);
 }
@@ -59,7 +70,7 @@ void ChoiceScreen::restore(const qlie::Bytes&bytes,KFont*font){
  scene.restore(qlie::Bytes(state.begin(),state.end()));
  for(size_t i=0;i<entries.size();++i){
   label.start("[spd,0][pc,"+entries[i]+"]");
-  scene.uiSlot("ui_choice"+std::to_string(i),2,label.render(font,MessageStyle{540,50,24,24,0xffffff}));
+  scene.uiSlot("ui_choice"+std::to_string(i),2,label.render(font,choiceText));
  }
 }
 int ChoiceScreen::hit(float x,float y)const{if(!ready())return -1;for(size_t i=0;i<entries.size();i++)if(scene.uiHit("ui_choice"+std::to_string(i),x,y))return int(i);return -1;}

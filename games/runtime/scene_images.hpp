@@ -31,6 +31,7 @@ class SceneImages {
  bool hasCamera=false,hasNameText=false,alternateMessageWindow=false;
  unsigned faceType=0;std::string faceDefaultFile;
  qlie::Assets&assets;
+ const std::array<unsigned,2> canvas;
  std::shared_ptr<EyecatchFilm> eyecatchFilm;
  std::map<std::string,Layer>layers;std::map<std::string,std::map<std::string,std::string>>templates;std::map<std::string,std::shared_ptr<const Image>>cache;
  std::map<std::string,std::shared_ptr<Composite>>composites;
@@ -54,13 +55,14 @@ class SceneImages {
  static std::array<float,3> sampleWave(const Layer&);
  bool cameraCommand(const std::string&);
  bool render(qlie::Bytes&,unsigned pass,RenderTarget*target=nullptr,float maxPriority=999,bool liveVideo=false,const Affine2D* view=nullptr)const;
+ RenderQueue makeQueue(bool shaderMasks,bool nativeVideo,const Affine2D* view=nullptr)const;
  void enqueue(RenderQueue&,unsigned pass,float maxPriority,bool liveVideo)const;
  std::string mappedFace(std::string)const;
  std::string faceResource(const std::string&,bool packedOnly)const;
  std::string legacyFaceResource(const std::string& body,bool packedOnly)const;
  std::string expand(std::string,const std::string&)const;
 public:
- explicit SceneImages(qlie::Assets&);
+ explicit SceneImages(qlie::Assets&,std::array<unsigned,2> sceneSize={1280,720});
  void setReadAhead(AssetReadAhead*loader){readAhead=loader;}
  void setNativeVideoSurfaces(bool enable){prefetchNativeVideo=enable;}
  struct CharacterPrefixes {
@@ -102,6 +104,7 @@ public:
  // UI slots are transient presentation state owned by title/choice screens.
  void uiSlot(const std::string&layer,unsigned slot,const std::string&asset);
  void uiSlot(const std::string&layer,unsigned slot,const Image&);
+ void setUiBitmap(const std::string&layer,Image);
  void prepareUiBitmap(const std::string&asset);
  qlie::Bytes captureBitmap(const std::string& asset);
  bool warmUiBitmaps(const std::string&key,std::vector<std::string> paths,bool required=false);

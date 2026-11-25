@@ -159,7 +159,8 @@ void RenderQueue::drawRows(qlie::Bytes&out,unsigned w,unsigned h,unsigned rowBeg
  }
  unsigned blend=s.flags&0x7f;
  auto model=c->placement;float alpha=s.alpha;uint32_t add=s.addColor,mul=s.mulColor;
- if(!stack.empty()){const auto&p=stack.back();if(p.flags&0x7f)blend=p.flags&0x7f;float r=p.rotationZ*3.14159265358979323846f/180,co=std::cos(r),si=std::sin(r),sx=p.scaleX/100,sy=p.scaleY/100,cx=w/2.f,cy=h/2.f;
+ if(!stack.empty()){const auto&p=stack.back();if(p.flags&0x7f)blend=p.flags&0x7f;float r=p.rotationZ*3.14159265358979323846f/180,co=std::cos(r),si=std::sin(r),sx=p.scaleX/100,sy=p.scaleY/100;
+ float cx=(logicalSize[0]?logicalSize[0]:w)/2.f,cy=(logicalSize[1]?logicalSize[1]:h)/2.f;
  Affine2D post{sx*co,sx*si,-sy*si,sy*co,cx+sx*(co*(p.x-cx)+si*(p.y-cy)),cy+sy*(-si*(p.x-cx)+co*(p.y-cy))};
  model=affine(post,model);alpha=int(alpha)*int(p.alpha)/255;add=colorAdd(add,p.addColor);mul=colorMultiply(mul,p.mulColor);}
  if(view)model=affine(*view,model);

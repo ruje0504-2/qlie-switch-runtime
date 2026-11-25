@@ -27,9 +27,13 @@ class GameMenu {
  void put(RenderQueue&,const std::string&,float,float,bool center=false,unsigned opacity=255);
  using PanelContent=std::function<void(RenderQueue&)>;
  void render(qlie::Bytes*,RenderTarget*,const PanelContent&,const PanelContent&);
+#ifdef QLIE_PROFILE_WHJ6
+ void drawWhj6Panel(RenderQueue&);
+ void drawWhj6Prompt(RenderQueue&);
+#endif
 public:
  enum Panel {None,Save,Load,History,Settings};
- enum Action {Nothing,Close,Slot,Quit,Title,Yes,No,SettingsChanged,ResetSettings,SceneReturn,ReplayVoice,TestVolume,DeleteSlot,PageChange,JumpHistory,SectionSkip};
+ enum Action {Nothing,Close,Slot,Quit,Title,Yes,No,SettingsChanged,ResetSettings,SceneReturn,ReplayVoice,TestVolume,DeleteSlot,PageChange,JumpHistory,SectionSkip,LoadChoiceBackup};
  Panel panel=None;int focus=0,page=0,requestedPage=0,historyOffset=0;bool asking=false;
  Action requested=Nothing;
  bool settingsDirty=false,allowSceneReturn=false;
@@ -37,6 +41,10 @@ public:
  std::array<int,4> historyTextOffset{},historyTextMax{};
  std::array<bool,8> populatedSlots{};
  int historyVoiceRow=-1,historyMaxOffset=0,historyRows=0;
+#ifdef QLIE_PROFILE_WHJ6
+ static constexpr int ChoiceBackupFocus=16;
+ bool choiceBackupAvailable=false;
+#endif
  void setHistorySize(std::size_t entries);
  unsigned testVolumeCategory=0;
  explicit GameMenu(qlie::Assets&a,whj2::Settings&s):assets(a),settings(s){}

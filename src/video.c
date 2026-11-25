@@ -146,7 +146,7 @@ int kvideo_is_container(const uint8_t *d,size_t n){
     return d&&n>=4&&(!memcmp(d,"VSD1",4)||!memcmp(d,"OggS",4)||!memcmp(d,"\x1a\x45\xdf\xa3",4));
 }
 KVideo *kvideo_open(const uint8_t *d,size_t n){return kvideo_open_mode(d,n,default_mode);}
-KVideo *kvideo_open_mode(const uint8_t *d,size_t n,KVideoMode mode){
+static KVideo *open_video(const uint8_t *d,size_t n,KVideoMode mode,int max_height){
     if(n<8||!kvideo_is_container(d,n))return NULL;
     size_t skip=0;
     if(!memcmp(d,"VSD1",4)){
@@ -162,7 +162,7 @@ KVideo *kvideo_open_mode(const uint8_t *d,size_t n,KVideoMode mode){
     if(avformat_open_input(&v->format,NULL,NULL,NULL)<0||avformat_find_stream_info(v->format,NULL)<0)goto bad;
     v->vi=av_find_best_stream(v->format,AVMEDIA_TYPE_VIDEO,-1,-1,NULL,0);
     v->ai=av_find_best_stream(v->format,AVMEDIA_TYPE_AUDIO,-1,-1,NULL,0);
-    v->video=decoder(v->format,v->vi,v,mode);if(!v->video||v->video->width<1||v->video->height<1||v->video->width>2048||v->video->height>2048)goto bad;
+    v->video=decoder(v->format,v->vi,v,mode);if(!v->video||v->video->width<1||v->video->height<1||v->video->width>2048||v->video->height>max_height)goto bad;
     if(v->ai>=0){
         v->audio=decoder(v->format,v->ai,NULL,KVIDEO_SOFTWARE);if(!v->audio)goto bad;
         AVChannelLayout stereo=AV_CHANNEL_LAYOUT_STEREO;
@@ -170,6 +170,10 @@ KVideo *kvideo_open_mode(const uint8_t *d,size_t n,KVideoMode mode){
     }
     v->download=av_frame_alloc();v->frame=av_frame_alloc();v->sound=av_frame_alloc();v->packet=av_packet_alloc();if(!v->download||!v->frame||!v->sound||!v->packet)goto bad;return v;
  bad:kvideo_close(v);return NULL;
+}
+KVideo *kvideo_open_mode(const uint8_t *d,size_t n,KVideoMode mode){return open_video(d,n,mode,2048);}
+KVideo *kvideo_open_with_height_limit(const uint8_t *d,size_t n,int software_only,int max_height){
+    return open_video(d,n,software_only?KVIDEO_SOFTWARE:default_mode,max_height);
 }
 static void cache_clear(KVideo *v){
     for(unsigned i=0;i<v->cache_count;i++)av_frame_free(&v->cache[i]);

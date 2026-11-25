@@ -23,6 +23,7 @@ extern "C" {
 #include <cstring>
 #include <mutex>
 #include <optional>
+#include <string_view>
 namespace whj2 {
 namespace {
 float numeric(const std::string&s){return !s.empty()&&s[0]=='$'?float(std::stoul(s.substr(1),nullptr,16)):std::stof(s);
@@ -78,6 +79,14 @@ std::string sceneResource(qlie::Assets&assets,const std::string&path,bool packed
   if(packedOnly?assets.inPack(candidate):assets.exists(candidate))return candidate;
  }
  return {};
+}
+float imageAnchor(std::string_view name,std::string_view farEdge){
+ if(name=="center")return .5f;
+ if(name==farEdge)return 1.f;
+ if(name.empty())return 0.f;
+ int percent=0;
+ std::from_chars(name.data(),name.data()+name.size(),percent);
+ return percent/100.f;
 }
 unsigned imageBlend(const std::string&mode){
  constexpr std::array<const char*,9> names{{"pass","normal","screen","multiple","difference","lighten","darken","add","sub"}};
@@ -1472,7 +1481,7 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  if(key=="alpha"||key=="mulcolor"||key=="addcolor")color=true;
  if(key=="vol"&&std::stof(v)==0)l.audioStopPending=true;
  if(key=="motion"){l.milliseconds=0;l.audioMilliseconds=-1;if(chara)l.params["motionkeep"]="false";}
- if(key!="rep0"&&key!="rep1"&&key!="rep2"&&key!="rep3"&&key!="textarea"&&key!="fontsize"&&key!="fontcolor"&&key!="fontno"&&key!="imgfilter"&&key!="trans"&&key!="id"&&key!="mode"&&key!="disp"&&key!="base"&&key!="time"&&key!="speed"&&key!="move"&&key!="movepow"&&key!="ax"&&key!="ay"&&key!="az"&&key!="z"&&key!="scalez"&&key!="rotx"&&key!="roty"&&key!="vol"&&key!="voltype"&&key!="dchannel"&&key!="motion"&&key!="file"&&key!="x"&&key!="y"&&key!="scalex"&&key!="scaley"&&key!="alpha"&&key!="show"&&key!="pri"&&key!="align"&&key!="texfilter"&&key!="rotz"&&key!="mulcolor"&&key!="addcolor")QLIE_LOG_LINE(<<"PENDING-IMAGE-PROPERTY "<<cmd<<" "<<key<<"="<<v<<"\n");
+ if(key!="rep0"&&key!="rep1"&&key!="rep2"&&key!="rep3"&&key!="textarea"&&key!="fontsize"&&key!="fontcolor"&&key!="fontno"&&key!="imgfilter"&&key!="trans"&&key!="id"&&key!="mode"&&key!="disp"&&key!="base"&&key!="time"&&key!="speed"&&key!="move"&&key!="movepow"&&key!="ax"&&key!="ay"&&key!="az"&&key!="z"&&key!="scalez"&&key!="rotx"&&key!="roty"&&key!="vol"&&key!="voltype"&&key!="dchannel"&&key!="motion"&&key!="file"&&key!="x"&&key!="y"&&key!="scalex"&&key!="scaley"&&key!="alpha"&&key!="show"&&key!="pri"&&key!="align"&&key!="alignx"&&key!="aligny"&&key!="texfilter"&&key!="rotz"&&key!="mulcolor"&&key!="addcolor")QLIE_LOG_LINE(<<"PENDING-IMAGE-PROPERTY "<<cmd<<" "<<key<<"="<<v<<"\n");
  }
  if(messageShow&&l.composite){const std::string mode=l.params["show"]=="true"?"*Enable":"*Disable";
   if(findMotion(l.composite->definition,mode)){l.params["motion"]=mode;l.milliseconds=0;l.audioMilliseconds=-1;
@@ -1692,14 +1701,12 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
  const auto panned=layers.find(panLayer);
  for(auto*l:sorted){
  auto beforeImages=queue.imageCount();
- auto align=l->params.at("align");
- if(l->params.count("alignx")||l->params.count("aligny")){
-  const auto pieces=split(align,':');
-  const auto x=l->params.count("alignx")?l->params.at("alignx"):pieces[0];
-  const auto y=l->params.count("aligny")?l->params.at("aligny"):pieces.size()>1?pieces[1]:"top";
-  align=x+":"+y;
- }
- float ax=align.rfind("center",0)==0?0.5f:align.rfind("right",0)==0?1.f:0.f,ay=align.find(":bottom")!=align.npos?1.f:align.find(":center")!=align.npos?0.5f:0.f;
+ const std::string_view align=l->params.at("align");
+ const auto colon=align.find(':');
+ const auto xAlign=l->params.find("alignx"),yAlign=l->params.find("aligny");
+ const auto x=xAlign==l->params.end()?align.substr(0,colon):std::string_view(xAlign->second);
+ const auto y=yAlign==l->params.end()?(colon==align.npos?"top":align.substr(colon+1)):std::string_view(yAlign->second);
+ const float ax=imageAnchor(x,"right"),ay=imageAnchor(y,"bottom");
  // Shared composite instances can be sampled at different times in one frame.
  // Keep those ordered on the caller, and queue ordinary single-owner playback.
  const bool asyncVideo=l->composite&&l->composite.use_count()<=2&&

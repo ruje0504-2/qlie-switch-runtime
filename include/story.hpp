@@ -1,13 +1,12 @@
 #pragma once
 #include "qlie.hpp"
+#include <array>
 #include <deque>
 #include <functional>
 #include <set>
 namespace whj2 {
 std::string trim(std::string);
 std::vector<std::string> split(const std::string&,char delimiter);
-inline constexpr char legacyAvgMessageWindow[]=
- "^message,file:windowframe_window.b,x:261,y:603,pri:1010,textarea:824:120,fontsize:24:24";
 struct Event {std::string type,value,file;unsigned line=0;};
 struct Frame {std::string file;uint32_t pc=0;};
 struct StoryState {
@@ -16,6 +15,18 @@ struct StoryState {
  bool awaiting=false,finished=false,replay=false;
  std::vector<std::string> choices;std::deque<Event> pending;
 };
+struct LegacyAvgLayout {
+ const char* messageImage;
+ unsigned messageX,messageY,messageWidth,messageHeight,messageFontSize;
+ unsigned speakerX,speakerY,speakerSize,speakerColor;
+ const char* faceWindow;
+ const char* externalFontSlot;
+ unsigned externalCodepoint,externalTileIndex;
+ std::array<std::pair<const char*,const char*>,2> routeFlags;
+ const char* creditsFile;
+ unsigned creditsSkipDelay,creditsClickWait;
+};
+std::string legacyAvgMessageWindow(const LegacyAvgLayout&);
 struct StoryProfile {
  std::string root,selection,includeDirectory,header,replayHeader,footer,saveSignature;
  std::set<std::string> sceneCommands;
@@ -29,7 +40,7 @@ struct StoryProfile {
  std::string replayPrelude{};
  bool arithmeticFragments=false;
  std::set<std::string> ignoredCaretCommands{};
- bool legacyAvg=false;
+ const LegacyAvgLayout* legacyAvg=nullptr;
 };
 class Story {
  enum class After {None,Interlude,VisualWait};

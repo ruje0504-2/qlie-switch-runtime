@@ -22,9 +22,8 @@ MessageText::MessageText(qlie::Assets&assets,bool useStoryLineBreaking):storyLin
  std::istringstream in(assets.text("script/config/default.txt"));std::string line;
  while(std::getline(in,line)){auto p=line.find('=');if(p!=line.npos&&trim(line.substr(0,p))=="TextSpeed")speed=std::stod(trim(line.substr(p+1)));}
  std::vector<std::pair<uint32_t,unsigned>> externalGlyphs;
- if(game_profile::story.legacyAvg){
-  // The original AVG script selects font 5 for its CP932 0x81f7 glyph.
-  externalGlyphs.emplace_back(0x00b6,0x01f7);
+ if(const auto*legacy=game_profile::story.legacyAvg){
+  externalGlyphs.emplace_back(legacy->externalCodepoint,legacy->externalTileIndex);
  }else{
  // OF headers and atlas coordinates follow the original bitmap-font loader.
  std::istringstream replacementFile(assets.text("avg/imoscripter_reptextlist.txt"));
@@ -96,7 +95,7 @@ void MessageText::index(bool layoutChanged){if(layoutChanged)layoutVersion.publi
    if(command=="f"){
     const auto slot=comma==token.npos?std::string():token.substr(comma+1);
     if(slot.empty()||(game_profile::story.legacyAvg&&(slot=="0"||slot=="1")))bitmapFont=false;
-    else if(slot==(game_profile::story.legacyAvg?"5":"6"))bitmapFont=true;
+    else if(slot==(game_profile::story.legacyAvg?game_profile::story.legacyAvg->externalFontSlot:"6"))bitmapFont=true;
     else throw std::runtime_error("Unsupported message font slot "+slot);
     pos=end+1;continue;
    }

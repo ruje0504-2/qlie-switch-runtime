@@ -1540,7 +1540,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   if(skipTitleExitForTest)finishTitleStart();
  }
  void activate(){if(titleStarting){finishTitleStart();return;}if(normalSkip){normalSkip=false;return;}if(opening){if(opening==1)leaveCaution();else {movie->stop();nextMakerLogo();}return;}if(!menu&&hidden){hidden=false;return;}if(movie->playing()){
-  if(game_profile::story.legacyAvg&&story.state.vars.count("__avg1_credits_clock")&&movie->elapsedMs()<5000)return;
+  if(const auto*legacy=game_profile::story.legacyAvg;
+     legacy&&story.state.vars.count("__avg1_credits_clock")&&movie->elapsedMs()<legacy->creditsSkipDelay)return;
   movie->stop();
  if(movieOnly)done=true;
  else next();

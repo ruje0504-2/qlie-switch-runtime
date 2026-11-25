@@ -1440,7 +1440,8 @@ bool SceneImages::cameraCommand(const std::string&arguments){
 SpeakerStyle SceneImages::speakerStyle()const{
  const auto found=layers.find("name");
  if(found==layers.end()){
-  if(game_profile::story.legacyAvg)return {285,567,24,0};
+  if(const auto*legacy=game_profile::story.legacyAvg)
+   return {int(legacy->speakerX),int(legacy->speakerY),legacy->speakerSize,legacy->speakerColor};
   return {};
  }
  const auto&layer=found->second;
@@ -1839,7 +1840,8 @@ void SceneImages::pointViewPan(float x,float y){
  panY=std::clamp((y-360)/360,-1.f,1.f);
 }
 MessageStyle SceneImages::messageStyle()const{MessageStyle style;auto it=layers.find("message");if(it==layers.end()){
- if(game_profile::story.legacyAvg)return {824,120,24,24};
+ if(const auto*legacy=game_profile::story.legacyAvg)
+  return {legacy->messageWidth,legacy->messageHeight,legacy->messageFontSize,legacy->messageFontSize};
  return style;
  }auto&params=it->second.params;
  auto pair=[&](const std::string&key,unsigned&a,unsigned&b){auto found=params.find(key);if(found==params.end())return;auto values=split(found->second,':');a=unsigned(numeric(values[0]));b=values.size()>1?unsigned(numeric(values[1])):a;};
@@ -1854,7 +1856,10 @@ MessageStyle SceneImages::messageStyle()const{MessageStyle style;auto it=layers.
 bool SceneImages::messageVisible()const{auto it=layers.find("message");return it!=layers.end()&&it->second.params.at("show")=="true";}
 void SceneImages::setMessageImage(Image image,bool show){setMessageImage(sceneBitmap(std::move(image)),show);}
 void SceneImages::setMessageImage(std::shared_ptr<const Image>image,bool show){
- if(!layers.count("message"))command(game_profile::story.legacyAvg?legacyAvgMessageWindow:"^message,$window01");
+ if(!layers.count("message")){
+  const auto*legacy=game_profile::story.legacyAvg;
+  command(legacy?legacyAvgMessageWindow(*legacy):"^message,$window01");
+ }
  auto&layer=layers.at("message");
  layer.pixels=std::move(image);
  layer.filtered[1]={};

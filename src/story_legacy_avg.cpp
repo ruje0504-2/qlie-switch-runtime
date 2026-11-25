@@ -58,6 +58,13 @@ std::string audioLeaf(const std::string& name){
 }
 }
 
+std::string legacyAvgMessageWindow(const LegacyAvgLayout&layout){
+ const auto size=std::to_string(layout.messageFontSize);
+ return "^message,file:"+std::string(layout.messageImage)+",x:"+std::to_string(layout.messageX)+
+  ",y:"+std::to_string(layout.messageY)+",pri:1010,textarea:"+std::to_string(layout.messageWidth)+
+  ":"+std::to_string(layout.messageHeight)+",fontsize:"+size+":"+size;
+}
+
 bool Story::legacyCaret(const Op&o,const std::vector<std::string>& a){
  const auto cmd=qlie::canonical(a[0]);
  const auto field=[&](size_t i){return value(arg(a,i));};
@@ -68,12 +75,12 @@ bool Story::legacyCaret(const Op&o,const std::vector<std::string>& a){
   return true;
  }
  if(cmd=="^we"||cmd=="^wd"){
-  emit(std::string(legacyAvgMessageWindow)+",show:"+(cmd=="^we"?"true":"false"));
+  emit(legacyAvgMessageWindow(*profile.legacyAvg)+",show:"+(cmd=="^we"?"true":"false"));
   return true;
  }
  if(cmd=="^facewindow"){
   state.vars["__avg1_facewindow"]=field(1);
-  emit("^face,x:200,y:720,align:center:bottom,mode:auto,pri:1015,show:"+std::string(field(1)=="1"?"true":"false"));
+  emit(std::string(profile.legacyAvg->faceWindow)+",show:"+(field(1)=="1"?"true":"false"));
   return true;
  }
  if(cmd=="^ffade"){
@@ -262,7 +269,7 @@ bool Story::legacyNative(const Op&o,const std::vector<std::string>& a){
  }
  if(isVideo&&cmd=="\\p"){
   const auto path=state.vars.at("__avg1_file_"+state.scope);
-  if(field(1)=="0"&&path=="movie/ndou99_1_01.ogv"){
+  if(field(1)=="0"&&path==profile.legacyAvg->creditsFile){
    state.vars["__avg1_credits_clock"]="1";
    emit("^movie,"+path);
   }else emit("^"+layer+",file:"+path+state.vars["__avg1_layer_"+layer]);
@@ -270,10 +277,10 @@ bool Story::legacyNative(const Op&o,const std::vector<std::string>& a){
  }
  if(isVideo&&(cmd=="\\ss"||cmd=="\\vtn"||cmd=="\\v"||cmd=="\\i"))return true;
  if(state.vars.count("__avg1_credits_clock")){
-  // The PC starts the 85-second clip asynchronously. Its next two delays
-  // run concurrently with the film. The shared Movie event already waits.
-  if(cmd=="\\wait"&&field(1)=="5000")return true;
-  if(cmd=="\\clk"&&field(1)=="81000"){
+  // The next waits run concurrently with the source film. Movie already
+  // holds story execution and applies the profile's skip guard.
+  if(cmd=="\\wait"&&field(1)==std::to_string(profile.legacyAvg->creditsSkipDelay))return true;
+  if(cmd=="\\clk"&&field(1)==std::to_string(profile.legacyAvg->creditsClickWait)){
    state.vars.erase("__avg1_credits_clock");
    return true;
   }

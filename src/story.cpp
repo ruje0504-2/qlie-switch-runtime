@@ -103,9 +103,9 @@ Story::Script&Story::script(const std::string&n){
  if(!stack.empty())throw std::runtime_error("Unclosed control block in "+name);
  return scripts.emplace(name,std::move(sc)).first->second;
 }
-static std::string legacyVariable(std::string name){
- if(name=="#1_route_a_f")return "#game_aclearflag";
- if(name=="#1_route_b_f")return "#game_bclearflag";
+static std::string legacyVariable(const LegacyAvgLayout* layout,std::string name){
+ if(layout)for(const auto&[original,runtime]:layout->routeFlags)
+  if(name==original)return runtime;
  return name;
 }
 std::string Story::value(std::string s)const{
@@ -128,7 +128,7 @@ std::string Story::value(std::string s)const{
   }
  }
  if(s.size()>=2&&s.front()==34&&s.back()==34)return s.substr(1,s.size()-2);
- const auto name=profile.legacyAvg?legacyVariable(lower(s)):lower(s);
+ const auto name=legacyVariable(profile.legacyAvg,lower(s));
  if(name=="selffilename")return state.at.file;
  auto it=state.vars.find(name);
  if(it!=state.vars.end())return it->second;
@@ -305,7 +305,7 @@ void Story::native(const Op&o){auto a=split(o.text,44);std::string cmd=lower(a[0
  if(cmd=="\\else"){state.at.pc=uint32_t(o.end+1);return;}
  if(cmd=="\\end"){auto&start=script(state.at.file).ops[size_t(o.end)];if(start.text.rfind("\\for",0)==0){auto v=split(start.text,44);need(v.size()==4);auto n=lower(v[3].substr(0,v[3].size()-2));state.vars[n]=std::to_string(std::stoi(value(n))+1);if(condition(v[2]))state.at.pc=uint32_t(o.end+1);}return;}
  if(cmd=="\\for"){need(a.size()==4);auto eq=a[1].find(61);need(eq!=a[1].npos);state.vars[lower(trim(a[1].substr(0,eq)))]=value(a[1].substr(eq+1));if(!condition(a[2]))state.at.pc=uint32_t(o.end+1);return;}
- if(cmd=="\\cal"){auto eq=arg(1).find(61);need(eq!=arg(1).npos);auto name=lower(trim(arg(1).substr(0,eq)));state.vars[profile.legacyAvg?legacyVariable(std::move(name)):name]=value(arg(1).substr(eq+1));return;}
+ if(cmd=="\\cal"){auto eq=arg(1).find(61);need(eq!=arg(1).npos);auto name=lower(trim(arg(1).substr(0,eq)));state.vars[legacyVariable(profile.legacyAvg,std::move(name))]=value(arg(1).substr(eq+1));return;}
  if(cmd=="\\var"||cmd=="\\gvar"||cmd=="\\svar"){for(size_t i=2;i<a.size();i++)state.vars.emplace(lower(a[i]),a[1]=="str"?"":"0");return;}
  if(cmd=="\\vexs"){state.vars["resultint[0]"]=state.vars.count(lower(arg(1)))?"1":"0";return;}
  if(cmd=="\\init"){need(lower(arg(1))=="game_routeflag");state.vars["game_routeflag[0]"]="0";return;}

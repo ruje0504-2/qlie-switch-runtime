@@ -26,13 +26,21 @@ inline const qlie::ArchiveLayout archives{
   {"script/saveload/タイトルへ戻る_off.png","library/uppermenu/タイトルへ戻る_off.png"},
   {"script/saveload/ゲームの終了_off.png","library/uppermenu/ゲームの終了_off.png"}}
 };
+inline constexpr whj2::LegacyAvgLayout legacyLayout{
+ "windowframe_window.b",261,603,824,120,24,
+ 285,567,24,0,
+ "^face,x:200,y:720,align:center:bottom,mode:auto,pri:1015",
+ "5",0x00b6,0x01f7,
+ {{{"#1_route_a_f","#game_aclearflag"},{"#1_route_b_f","#game_bclearflag"}}},
+ "movie/ndou99_1_01.ogv",5000,81000
+};
 inline const whj2::StoryProfile story{
  "scenario/ks_01/start.s","","",
  "library/avg/header.s","","library/avg/footer.s","WHJ1-STORY-1",
  {"sentence","format","message","face","bg01","bg02","bg03",
   "chara01","chara02","chara03","chara04","motion","ef01",
   "music01","se01","se02","se03","movie"},
- "",{},"",false,"","","",0,false,"",false,{},true
+ "",{},"",false,"","","",0,false,"",false,{},&legacyLayout
 };
 inline void applySentenceTiming(whj2::Event&){}
 inline constexpr char gameName[]="美少女万華鏡 -呪われし伝說の少女-";
@@ -41,10 +49,10 @@ inline constexpr char gameEnv[]="WHJ1_GAME",saveEnv[]="WHJ1_SAVES",
 inline constexpr char sdGame[]="sdmc:/switch/whj1/game";
 inline constexpr char sdSaves[]="sdmc:/switch/whj1/saves";
 inline constexpr char sdRenderer[]="sdmc:/switch/whj1/renderer.cfg";
-inline constexpr char titleMusic[]="";
+inline constexpr char titleMusic[]="music/nbgm04.ogg";
 inline constexpr char cgMusic[]="music/nbgm01.ogg";
 inline constexpr char replayMusic[]="music/nbgm01.ogg";
-inline constexpr char titleStartFade[]="";
+inline constexpr char titleStartFade[]="^sentence,fade:anime:500:script/title/test_01b.b";
 inline constexpr double cautionFade=0,cautionExitWait=0;
 inline constexpr char secondMakerLogo[]="";
 inline constexpr double titleStartWait=1500,titleMusicFade=500,cautionWait=5250;

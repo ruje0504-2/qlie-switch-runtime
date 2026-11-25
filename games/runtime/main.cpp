@@ -461,7 +461,11 @@ struct Frontend {
  if(nativeGpu)title->setNativeVideoSurfaces(gpu->supportsVideoSurfaces());
 #endif
  choiceScreen=std::make_unique<whj2::ChoiceScreen>(assets,*messageText,gameSceneSize);
+#ifdef QLIE_PROFILE_WHJ6
+ choiceScreen->prepare(*readAhead);
+#else
  if(game_profile::story.legacyAvg)choiceScreen->prepare(*readAhead);
+#endif
  musicScreen=std::make_unique<whj2::MusicScreen>(assets,*audio,settings,font,*messageText,game_profile::musicTrackCount);
  replayScreen=std::make_unique<whj2::ReplayScreen>(assets,progress);
  cgScreen=std::make_unique<whj2::CgScreen>(assets,progress,font,game_profile::extendedCgRoots);
@@ -507,6 +511,9 @@ struct Frontend {
  QLIE_LOG_LINE(<<"OPENING caution\n");
  }
  ~Frontend(){
+#ifdef QLIE_PROFILE_WHJ6
+ finishChoiceBackup();
+#endif
  progressWriter.reset();
  movie->setReadAhead(nullptr);
  audio->setReadAhead(nullptr);
@@ -1405,6 +1412,15 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   if(!section.empty()&&progress.markSceneComplete(section))persistProgress();
   section=std::move(key);
  }
+#ifdef QLIE_PROFILE_WHJ6
+ // AVG creation is idempotent. Some branch files configure their layers
+ // before the header, including the dialogue window and character poses.
+ if(e.type=="create"){
+  images->setAlternateMessageWindow(story.state.vars.count("__avg2_active")!=0);
+  syncScenePan();
+  continue;
+ }
+#endif
  resetOutgoingScene();
  story.state.vars.erase("__history_continue");audio->stopAll();clearBackgroundVoice();
  images->setAlternateMessageWindow(story.state.vars.count("__avg2_active")!=0);
@@ -1424,6 +1440,17 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  static constexpr unsigned ManualSlotCount=120;
 #ifdef QLIE_PROFILE_WHJ6
  static constexpr unsigned ChoiceBackupSlot=ManualSlotCount+1;
+ static constexpr auto ChoiceBackupWriteKey="@save:choice-backup";
+ bool choiceBackupWriting=false;
+ void finishChoiceBackup(bool wait=true){
+  if(!choiceBackupWriting||(!wait&&!soundReadAhead->ready(ChoiceBackupWriteKey)))return;
+  choiceBackupWriting=false;
+  try{soundReadAhead->take(ChoiceBackupWriteKey);}
+  catch(const std::exception&e){
+   status=ui.text("保存できませんでした。");
+   QLIE_LOGF("SAVE choice backup failed: %s\n",e.what());
+  }
+ }
  static constexpr unsigned FirstAutomaticSlot=ChoiceBackupSlot+1;
  static constexpr unsigned AutomaticSlotCount=whj6::profile::automaticSaveCount;
  std::array<uint64_t,AutomaticSlotCount> automaticSequences{};
@@ -1500,24 +1527,41 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   if(replayActive||menu||movie->playing())return false;
   if(pendingScene){status=ui.text("場面の準備中です。");return false;}
   try{
-   flushProgress();
-   whj2::SaveSlotWrite output(slotPrefix(slot));
+   const auto path=slotPrefix(slot);
+#ifdef QLIE_PROFILE_WHJ6
+   const bool choiceBackup=slot==ChoiceBackupSlot;
+   const bool deferChoice=choiceBackup&&path.rfind("save:/",0)!=0;
+   if(choiceBackup)finishChoiceBackup();
+#else
+   constexpr bool choiceBackup=false,deferChoice=false;
+#endif
+   std::optional<whj2::SaveSlotWrite> output;
+   if(!deferChoice){flushProgress();output.emplace(path);}
+   std::vector<std::pair<std::string,qlie::Bytes>> parts;
+   auto write=[&](const char* suffix,qlie::Bytes bytes){
+    if(output)output->write(suffix,bytes);
+    else parts.emplace_back(suffix,std::move(bytes));
+   };
    if(caption){
     whj2::StateWriter ordinal;ordinal.n(sequence);
-    output.write(".sequence",ordinal.bytes);
-    output.write(".caption",qlie::Bytes(caption->begin(),caption->end()));
+    write(".sequence",std::move(ordinal.bytes));
+    write(".caption",qlie::Bytes(caption->begin(),caption->end()));
    }
-   qlie::Bytes scene(1280*720*4,0);
-   images->drawThumbnail(scene,float(saveThumbnailPriority));
-   transition->blend(scene);
-   qlie::Bytes thumb(160*90*4);
-   for(unsigned y=0;y<90;y++)for(unsigned x=0;x<160;x++)for(unsigned c=0;c<4;c++)
-    thumb[(y*160+x)*4+c]=scene[((y*8)*1280+x*8)*4+c];
-   output.write(".thumbnail",thumb);
-   output.write(".text",qlie::Bytes(text.begin(),text.end()));
-   output.write(".name",qlie::Bytes(name.begin(),name.end()));
-   output.write(".images",images->save());
-   output.write(".transition",transition->save());
+   // The choice button has no thumbnail. Avoid a second full software render
+   // on the frame that begins its entrance animation.
+   if(!choiceBackup){
+    qlie::Bytes scene(1280*720*4,0);
+    images->drawThumbnail(scene,float(saveThumbnailPriority));
+    transition->blend(scene);
+    qlie::Bytes thumb(160*90*4);
+    for(unsigned y=0;y<90;y++)for(unsigned x=0;x<160;x++)for(unsigned c=0;c<4;c++)
+     thumb[(y*160+x)*4+c]=scene[((y*8)*1280+x*8)*4+c];
+    write(".thumbnail",std::move(thumb));
+   }
+   write(".text",qlie::Bytes(text.begin(),text.end()));
+   write(".name",qlie::Bytes(name.begin(),name.end()));
+   write(".images",images->save());
+   write(".transition",transition->save());
    whj2::StateWriter flow;
    flow.str(pendingHistoryStack?"WHJ2-flow-3":"WHJ2-flow-2");
    const auto waitState=sentenceWait.save();
@@ -1527,11 +1571,11 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    flow.str(pendingVoice);
    flow.str(currentPageKey);
    if(pendingHistoryStack)flow.n(1);
-   output.write(".flow",flow.bytes);
-   output.write(".message",messageText->save());
-   output.write(".auto",autoPlay.save());
-   if(story.state.awaiting)output.write(".choice",choiceScreen->save());
-   output.write(".audio",audio->save());
+   write(".flow",std::move(flow.bytes));
+   write(".message",messageText->save());
+   write(".auto",autoPlay.save());
+   if(story.state.awaiting)write(".choice",choiceScreen->save());
+   write(".audio",audio->save());
    whj2::StateWriter mixer;
    mixer.str(game_profile::mixerSignature);
    for(unsigned i=0;i<game_profile::storyAudioTracks;++i){
@@ -1541,14 +1585,26 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
     mixer.n(audioTypes[i]);
    }
    if constexpr (game_profile::storyAudioTracks>3)mixer.n(bgvMode);
-   output.write(".mixer",mixer.bytes);
-   const auto historyData=whj2::saveHistory(history);
-   const auto storyData=story.save();
-   output.write(".history",historyData);
+   write(".mixer",std::move(mixer.bytes));
+   auto historyData=whj2::saveHistory(history);
+   auto storyData=story.save();
+   const auto historyHash=game_profile::story.historyJumpLimit?qlie::hash(historyData):0;
+   write(".history",std::move(historyData));
    if(game_profile::story.historyJumpLimit)
-    output.write(".checkpoints",saveHistoryCheckpoints(qlie::hash(storyData),qlie::hash(historyData)));
-   output.write(".story",storyData);
-   output.publish();
+    write(".checkpoints",saveHistoryCheckpoints(qlie::hash(storyData),historyHash));
+   write(".story",std::move(storyData));
+   if(output)output->publish();
+#ifdef QLIE_PROFILE_WHJ6
+   else{
+    soundReadAhead->request(ChoiceBackupWriteKey,[path,parts=std::move(parts)]{
+     whj2::SaveSlotWrite backup(path);
+     for(const auto& part:parts)backup.write(part.first,part.second);
+     backup.publish();
+     return whj2::WarmAsset{};
+    },true);
+    choiceBackupWriting=true;
+   }
+#endif
   }catch(const std::exception&e){
    status=ui.text("保存できませんでした。");
    QLIE_LOGF("SAVE slot %u failed: %s\n",slot,e.what());
@@ -1565,7 +1621,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   using UI=whj2::GameMenu;
   if(gameMenu.panel!=UI::Save&&gameMenu.panel!=UI::Load)return;
 #ifdef QLIE_PROFILE_WHJ6
-  gameMenu.choiceBackupAvailable=gameMenu.panel==UI::Load&&std::filesystem::is_regular_file(slotPrefix(ChoiceBackupSlot)+".story");
+  gameMenu.choiceBackupAvailable=gameMenu.panel==UI::Load&&
+   (choiceBackupWriting||std::filesystem::is_regular_file(slotPrefix(ChoiceBackupSlot)+".story"));
 #endif
   for(unsigned i=0;i<8;i++)gameMenu.populatedSlots[i]=slotPreview(displayedSlot(i)).exists;
 #ifdef QLIE_PROFILE_WHJ6
@@ -1588,6 +1645,9 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  static constexpr auto loadSceneKey="@restore:scene";
  bool loadPending()const{return pendingLoadSlot||pendingHistoryLoad;}
  void startLoad(unsigned slot,std::shared_ptr<const HistoryCheckpoint> checkpoint={}){
+#ifdef QLIE_PROFILE_WHJ6
+  if(slot==ChoiceBackupSlot)finishChoiceBackup();
+#endif
   const auto path=checkpoint?std::string{}:slotPrefix(slot);
   auto target=std::make_shared<whj2::PreparedSceneRestore>(*images);
   readAhead->request(loadSceneKey,[&assets=assets,target,path,checkpoint]{
@@ -1722,6 +1782,9 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  bool load(unsigned slot=1,std::shared_ptr<whj2::PreparedAudioRestore> preparedAudio={},
            std::shared_ptr<whj2::PreparedSceneRestore> preparedScene={}){
   if(movie->playing())return false;
+#ifdef QLIE_PROFILE_WHJ6
+  if(slot==ChoiceBackupSlot)finishChoiceBackup();
+#endif
   const auto path=slotPrefix(slot);
   SavedSlotState saved;
   try{
@@ -2569,6 +2632,9 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  while(!done){auto now=SDL_GetTicks64();
  const bool skipAtFrameStart=normalSkip;
  audio->update();
+#ifdef QLIE_PROFILE_WHJ6
+ finishChoiceBackup(false);
+#endif
  updateBackgroundVoice();
  gameMenu.takeWarmPanels();
  gameMenu.update(double(now-lastUpdate));

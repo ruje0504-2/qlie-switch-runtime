@@ -486,6 +486,7 @@ std::vector<AnimationSample> sampleMotion(const Motion&motion,double ms,unsigned
  for(const auto&layer:motion.layers){
   auto value=sampleAnimation(layer,ms,context);
   if(layer.flags&&!layer.keys.empty()&&ms>=keyU32(layer.keys.front(),0)){
+   const auto parentDepth=stack.size();
    if(layer.mode==1&&stack.size()<31){
     auto parent=value;
     // The push operation always multiplies scale, including primitive 3.
@@ -497,7 +498,8 @@ std::vector<AnimationSample> sampleMotion(const Motion&motion,double ms,unsigned
     }
     stack.push_back(parent);
    }
-   if(!stack.empty())value=compose(value,stack.back());
+   const auto depth=layer.mode==1&&layer.version==25&&!context.applyPushToOwnLayer?parentDepth:stack.size();
+   if(depth)value=compose(value,stack[depth-1]);
    if(layer.mode==2&&!stack.empty())stack.pop_back();
   }
   result.push_back(std::move(value));

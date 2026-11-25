@@ -674,6 +674,11 @@ struct Composite {
   randomSeed=((randomSeed&0xffff)*(randomSeed>>16))&1023;
   const auto [sceneWidth,sceneHeight]=queue.sceneSize();
   AnimationContext context{unsigned(definition.bounds[0]),unsigned(definition.bounds[1]),sceneWidth,sceneHeight,randomSeed};
+#ifdef QLIE_PROFILE_WHJ6
+  // The flashback mask's visible push key is centered at (960, 540).
+  // Its transform is inherited by following layers without moving itself twice.
+  context.applyPushToOwnLayer=false;
+#endif
   context.external=externalDefaults;context.externalMask=externalDefaultMask;
   if(external){
    for(unsigned i=0;i<context.external.size();++i)

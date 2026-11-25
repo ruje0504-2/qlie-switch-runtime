@@ -2073,6 +2073,12 @@ MessageStyle SceneImages::messageStyle()const{MessageStyle style;auto it=layers.
  property("@oncefontsizeh",style.fontHeight);property("@oncefontcolor",style.color);
 #ifdef QLIE_PROFILE_WHJ6
  property("fontno",style.fontSlot);property("@oncefontno",style.fontSlot);
+ const auto path=qlie::canonical(it->second.path);
+ const std::string_view file=std::string_view(path).substr(path.find_last_of('/')+1);
+ if((file=="windowframe_window.b"||file=="windowframe_window02.b")&&
+    style.fontSlot!=game_profile::captionFontSlot&&!params.count("@oncefontsizew")&&!params.count("@oncefontsizeh")){
+  style.fontWidth=style.fontHeight=game_profile::dialogueFontSize;
+ }
 #endif
  return style;
 }

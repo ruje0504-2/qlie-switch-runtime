@@ -255,7 +255,7 @@ bool Scene::canReuseBitmapTiles()const{
  return std::memcmp(&a,&b,sizeof(a))==0;
 }
 void Scene::dispatch(const Image&i,Push&p,float alpha,uint32_t add,uint32_t mul,unsigned blend,unsigned filter){
-  if(!recording)throw std::runtime_error("GPU frame not begun");if(!i.width||!i.height||alpha<=0)return;if(blend>8)throw std::runtime_error("GPU unsupported blend");
+  if(!recording)throw std::runtime_error("GPU frame not begun");if(!i.width||!i.height||alpha<=0)return;if(!supportsPixelBlend(blend))throw std::runtime_error("GPU unsupported blend");
   if(p.rect[2]<=0||p.rect[3]<=0||p.rect[0]>=int(Width)||p.rect[1]>=int(Height))return;
   p.meta[0]=i.width;p.meta[1]=i.height;p.meta[2]|=(blend<<8)|filter;p.meta[3]=unsigned(std::clamp(alpha,0.f,255.f));p.colors[0]=add;p.colors[1]=mul;DrawSources sources;
   // Full-screen translucent one-texel rectangles always clamp to that texel.

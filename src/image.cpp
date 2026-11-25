@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // DPNG/ABMP layouts follow GARbro (MIT, morkt); see THIRD_PARTY.md.
 #include "image.hpp"
+#include "story.hpp"
+#include <array>
 #include <png.h>
 #include <cstdio>
 #include <jpeglib.h>
@@ -49,12 +51,50 @@ Image boxBlur(const Image&source){
  return out;
 }
 }
+static Image gradientOverlay(const Image&source,const std::string&name){
+ const auto fields=split(name.substr(1,name.size()-2),',');
+ if(fields.size()!=13||(fields[1]!="vertical"&&fields[1]!="horizontal")||fields[11]!="normal")
+  throw std::runtime_error("Unsupported gradient overlay layout");
+ const auto number=[](const std::string&v){return v.front()=='$'?int(std::stoul(v.substr(1),nullptr,16)):std::stoi(v);};
+ struct Stop {int position;std::array<int,4> rgba;};
+ std::array<Stop,3> stops;
+ for(unsigned i=0;i<stops.size();++i){
+  const auto rgb=unsigned(number(fields[3+i*2]));
+  stops[i]={number(fields[8+i]),{int(rgb&255),int((rgb>>8)&255),
+             int((rgb>>16)&255),std::clamp(number(fields[2+i*2]),0,255)}};
+ }
+ std::stable_sort(stops.begin(),stops.end(),[](const auto&a,const auto&b){return a.position<b.position;});
+ const bool vertical=fields[1]=="vertical";
+ const int length=vertical?source.height:source.width;
+ for(unsigned i=0;i<stops.size();++i)stops[i].position=std::clamp(stops[i].position,i?1:0,100)*length/100;
+ const int opacity=std::clamp(number(fields[12]),0,255);
+ Image out{source.width,source.height,source.pixels};
+ std::vector<std::array<int,4>> colors(length);
+ for(int coordinate=0;coordinate<length;++coordinate){
+  const unsigned segment=coordinate<stops[1].position?0:1;
+  const auto&from=stops[segment];
+  const auto&to=stops[segment+1];
+  const int span=to.position-from.position;
+  const int step=span?std::clamp((coordinate-from.position)*127/span,0,127):127;
+  for(unsigned channel=0;channel<4;++channel)
+   colors[coordinate][channel]=(from.rgba[channel]*(127-step)+to.rgba[channel]*step)/127;
+ }
+ for(unsigned y=0;y<out.height;++y)for(unsigned x=0;x<out.width;++x){
+  const auto&color=colors[vertical?y:x];
+  const auto a=color[3]*opacity/255;
+  auto*pixel=out.pixels.data()+(size_t(y)*out.width+x)*4;
+  for(unsigned channel=0;channel<3;++channel)
+   pixel[channel]=uint8_t((pixel[channel]*(255-a)+color[channel]*a)/255);
+ }
+ return out;
+}
 Image filterImage(const Image&source,const std::string&name){
  if(!source.width||!source.height||source.pixels.size()!=size_t(source.width)*source.height*4)throw std::runtime_error("Filter source dimensions");
  if(const auto separator=name.find('\\');separator!=name.npos)
   return filterImage(filterImage(source,name.substr(0,separator)),name.substr(separator+1));
+ if(name.rfind("\"goverlay,",0)==0&&name.back()=='"')return gradientOverlay(source,name);
  if(name=="blur2")return boxBlur<1>(source);
- if(name=="blur5"||name=="\"blur,4,4\"")return boxBlur<2>(source);
+ if(name=="blur5"||name=="\"blur,4,4\""||name=="\"blur,5,5\"")return boxBlur<2>(source);
  if(name=="blur8")return boxBlur<4>(source);
  if(name=="blur10")return boxBlur<5>(source);
  if(name=="blur20")return boxBlur<10>(source);

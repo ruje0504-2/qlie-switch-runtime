@@ -19,7 +19,7 @@ struct SpeakerStyle {int x=200,y=570;unsigned size=26,color=0xffffff;};
 class SceneImages {
  struct Tween {float from=0,to=0,power=100;double elapsed=0,duration=0;unsigned mode=1;};
  struct FilteredSlot {std::shared_ptr<const Image> source,result;std::string name;};
- struct Layer {mutable std::array<FilteredSlot,4> filtered;std::map<unsigned,std::shared_ptr<const Image>> uiSlots;std::map<std::string,Tween> tweens;std::map<std::string,std::string> params;std::string prefix,path;std::shared_ptr<const Image> pixels,scriptReplacement;std::shared_ptr<Composite> composite,extension;std::array<float,16> external{};uint16_t externalMask=0;double milliseconds=0,audioMilliseconds=-1,waveMilliseconds=-1,extensionMilliseconds=0;bool audioStopPending=false;};
+ struct Layer {mutable std::array<FilteredSlot,4> filtered;std::map<unsigned,std::shared_ptr<const Image>> uiSlots;std::map<std::string,Tween> tweens;std::map<std::string,std::string> params;std::string prefix,path;std::shared_ptr<const Image> pixels,scriptReplacement;std::shared_ptr<Composite> composite,extension,replacementVideo;std::array<float,16> external{};uint16_t externalMask=0;double milliseconds=0,audioMilliseconds=-1,waveMilliseconds=-1,extensionMilliseconds=0;bool audioStopPending=false;};
  unsigned windowAlpha=255;
  uint32_t particleState=particleIdentityInitialState();
  mutable uint32_t waveformCursor=0;

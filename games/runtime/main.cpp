@@ -428,11 +428,16 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
     try{for(const auto&path:transition->ruleAssets(line))add(path,Kind::Rule);}
     catch(const std::exception&){/* The live command reports invalid rules. */}
    }else if(!cmd.empty()&&audioTrack(cmd.substr(1))>=0){
-    for(auto&part:whj2::split(line.substr(comma+1),','))if(part.rfind("file:",0)==0){
+    const auto fields=whj2::split(line.substr(comma+1),',');
+    for(const auto&part:fields)if(part.rfind("file:",0)==0){
      auto name=part.substr(5);if(name.empty()||name=="none"||name.find('$')!=name.npos)continue;
      auto path=std::string(cmd=="^music01"?"music/":"se/")+name;if(!assets.inPack(path))path+=".ogg";
      if(assets.inPack(path)){
       if(line.find(",sndfilter:bathroom2")!=line.npos)path="@bathroom2:"+path;
+      for(const auto&field:fields){
+       if(field=="pan:0")path="@pan-left:"+path;
+       if(field=="pan:100")path="@pan-right:"+path;
+      }
       add(path,Kind::Audio);
      }
     }
@@ -547,7 +552,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   if(v.first=="file"||v.first=="loop"||v.first=="vol"||v.first=="voltype"||v.first=="time"||
      v.first=="clear"||v.first=="oncetime")continue;
   if(game_profile::storyAudioTracks>3){
-   if(v.first=="pan"&&v.second=="50")continue;
+   if(v.first=="pan"&&(v.second=="50"||
+      (attrs.count("file")&&(v.second=="0"||v.second=="100"))))continue;
    if(v.first=="sndfilter"&&(v.second=="none"||v.second=="bathroom2"))continue;
    if(v.first=="delay")continue;
    if(v.first=="trans"&&v.second=="continue"&&!attrs.count("file"))continue;
@@ -577,6 +583,8 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  std::string path=(ch==0?"music/":"se/")+f;
  if(!assets.exists(path))path+=".ogg";
  if(attrs.count("sndfilter")&&attrs.at("sndfilter")=="bathroom2")path="@bathroom2:"+path;
+ const auto pan=attrs.find("pan");
+ if(pan!=attrs.end()&&pan->second!="50")path=(pan->second=="0"?"@pan-left:":"@pan-right:")+path;
  if(ch==0)audio->playMusicFile(assets,path,loops[ch],volumes[ch],ms,audioTypes[ch],attrs.count("time")||attrs.count("oncetime"));
  else audio->playFile(assets,output,path,loops[ch],gain,ms,audioTypes[ch],
                       attrs.count("delay")?unsigned(std::stoul(attrs["delay"])):0);

@@ -20,6 +20,17 @@ namespace {
 qlie::Bytes audioSource(qlie::Assets&,const std::string&);
 
 DecodedPcm decodeSource(qlie::Assets& assets,const std::string& path){
+ constexpr std::string_view left="@pan-left:",right="@pan-right:";
+ if(path.rfind(left,0)==0||path.rfind(right,0)==0){
+  const bool useLeft=path.rfind(left,0)==0;
+  const auto pcm=decodeSource(assets,path.substr(useLeft?left.size():right.size()));
+  auto output=std::shared_ptr<int16_t>(new int16_t[pcm.size()],std::default_delete<int16_t[]>());
+  for(size_t i=0;i<pcm.size();i+=2){
+   output.get()[i]=useLeft?pcm[i]:0;
+   output.get()[i+1]=useLeft?0:pcm[i+1];
+  }
+  return {std::move(output),pcm.size()};
+ }
  constexpr std::string_view bathroom="@bathroom2:";
  if(path.rfind(bathroom,0)!=0)return Audio::decodePcm(audioSource(assets,path));
  const auto pcm=Audio::decodePcm(assets.read(path.substr(bathroom.size())));

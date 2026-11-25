@@ -81,6 +81,9 @@ std::string sceneResource(qlie::Assets&assets,const std::string&path,bool packed
 unsigned imageBlend(const std::string&mode){
  constexpr std::array<const char*,9> names{{"pass","normal","screen","multiple","difference","lighten","darken","add","sub"}};
  if(mode=="lineardodge")return 7;
+ if(mode=="hardlight")return 13;
+ if(mode=="linearlight")return 15;
+ if(mode=="pinlight")return 16;
  auto found=std::find(names.begin(),names.end(),mode);
  if(found==names.end()){QLIE_LOG_LINE(<<"PENDING-IMAGE-BLEND "<<mode<<'\n');return 0;}
  return unsigned(found-names.begin());
@@ -477,7 +480,7 @@ struct Composite {
   }
   return {unsigned(definition.bounds[0]),unsigned(definition.bounds[1])};
  }
- void enqueue(RenderQueue&queue,double ms,const std::string&motionName,const Affine2D&parent,float depth,float opacity,uint32_t parentAdd,uint32_t parentMul,unsigned parentBlend=0,const Image*replacement=nullptr,std::optional<const Image*>messageSurface=std::nullopt,unsigned windowAlpha=255,const std::map<unsigned,const Image*>*uiSlots=nullptr,const AnimationContext*external=nullptr,const Matrix3D*parent3D=nullptr,unsigned filterOverride=0,bool liveVideo=false,AssetReadAhead*worker=nullptr,bool asyncVideo=true)const{
+ void enqueue(RenderQueue&queue,double ms,const std::string&motionName,const Affine2D&parent,float depth,float opacity,uint32_t parentAdd,uint32_t parentMul,unsigned parentBlend=0,const Image*replacement=nullptr,std::optional<const Image*>messageSurface=std::nullopt,unsigned windowAlpha=255,const std::map<unsigned,const Image*>*uiSlots=nullptr,const AnimationContext*external=nullptr,const Matrix3D*parent3D=nullptr,unsigned filterOverride=0,bool liveVideo=false,AssetReadAhead*worker=nullptr,bool asyncVideo=true,const Composite*replacementMedia=nullptr)const{
   if(standaloneVideo){
    if(opacity<=0)return;
    auto&clip=videoClip(0,members.front(),worker);
@@ -505,6 +508,12 @@ struct Composite {
   }
   auto samples=sampleMotion(*motion,ms,1280,720,false,context);
   const size_t messageSlot=messagePlaceholder.value_or(1);
+  auto replacementFrame=[&](double time){
+   auto&clip=replacementMedia->videoClip(0,replacementMedia->members.front(),worker);
+   auto frame=clip.at(time,liveVideo,queue.supportsVideoSurfaces(),false,worker,asyncVideo);
+   if(clip.audible)warn("replacement video nonzero audio requires mixer binding");
+   return frame?&queue.retainImage(std::move(frame)):nullptr;
+  };
   for(size_t index=0;index<samples.size();index++){
  auto&k=samples[index];if(filterOverride)k.textureFilter=filterOverride;
  if(parentBlend)k.flags=parentBlend;
@@ -513,7 +522,7 @@ struct Composite {
  k.alpha=int(k.alpha)*int(opacity)/255;if(messageSurface.value_or(nullptr)&&messageSlot!=0&&k.kind==4&&k.resource==0)k.alpha=int(k.alpha)*int(windowAlpha)/255;k.addColor=colorAdd(k.addColor,parentAdd);k.mulColor=colorMultiply(k.mulColor,parentMul);
  if(k.kind==15||k.kind==16||k.kind==17){queue.control(k,depth+k.priority);continue;}
  if(k.kind==1){
-  if((k.flags&0x7f)>8){warn("rectangle-blend="+std::to_string(k.flags));continue;}
+  if(!supportsPixelBlend(k.flags&0x7f)){warn("rectangle-blend="+std::to_string(k.flags));continue;}
   if(std::abs(k.scaleX)>=32700||std::abs(k.scaleY)>=32700){warn("rectangle-symbolic-size");continue;}
   // PE eaff0/ea798: rectangle dimensions are pixels, not image scale percentages.
   static const Image white=[]{Image pixel{1,1,{255,255,255,255}};pixel.version.publish();return pixel;}();
@@ -527,6 +536,7 @@ struct Composite {
   const Image*source=textSource?*messageSurface:members[k.resource].image.get();
   const Image*mask=members[k.childMotion].image.get();
    if(uiSlots){auto src=uiSlots->find(k.resource);if(src!=uiSlots->end())source=src->second;auto msk=uiSlots->find(k.childMotion);if(msk!=uiSlots->end())mask=msk->second;}
+  if(replacementMedia&&k.resource==0){source=replacementFrame(k.mediaTime);if(!source)continue;}
   if(textSource&&!source)continue;
   if(!source||!mask){warn("mask-nonbitmap-resource");continue;}
    if(!source->width||!source->height||!mask->width||!mask->height)continue;
@@ -606,6 +616,7 @@ struct Composite {
  const bool textSlot=messageSurface&&k.resource==messageSlot;
  const Image*slot=textSlot?*messageSurface:k.resource==0?replacement:nullptr;
  if(uiSlots){auto override=uiSlots->find(k.resource);if(override!=uiSlots->end())slot=override->second;}
+ if(replacementMedia&&k.resource==0){slot=replacementFrame(k.mediaTime);if(!slot)continue;}
  // A message window's authored text placeholder is never displayed while
  // its live text surface is pending. Keep actual animation images available.
  if(textSlot&&messagePlaceholder&&!slot)continue;
@@ -785,6 +796,7 @@ std::vector<std::string> SceneImages::warmPaths(const std::string&line,Character
   if(field=="clear:def"){base.clear();if(chara)stem.clear();}
   auto sep=field.find(':');if(sep==field.npos)continue;
   auto key=field.substr(0,sep),name=field.substr(sep+1);
+  if(key=="file"&&!chara)name=split(name,':').front();
   if((chara||face)&&key=="base"){base=std::move(name);continue;}
   if(name.empty()||name=="none"||name=="none:none"||name.find('$')!=name.npos)continue;
   bool replacement=key.size()==4&&key.rfind("rep",0)==0;
@@ -868,7 +880,13 @@ void SceneImages::loadCharacterExtension(Layer&layer,const std::string&file){
 }
 void SceneImages::loadReplacement(Layer&layer,const std::string&path){
  layer.params["@replacement"]=path;
+ layer.replacementVideo.reset();
+ layer.scriptReplacement.reset();
  if(path.empty()){layer.scriptReplacement=std::make_shared<Image>();return;}
+ if(const auto key=qlie::canonical(path);key.size()>=4&&key.compare(key.size()-4,4,".ogv")==0){
+  layer.replacementVideo=sceneComposite(path);
+  return;
+ }
  auto at=cache.find(path);if(at==cache.end())at=cache.emplace(path,loadBitmap(path)).first;
  layer.scriptReplacement=at->second;
 }
@@ -995,14 +1013,16 @@ float SceneImages::value(const Layer&layer,const std::string&key,float fallback)
  return numeric(param->second);}
  const auto&t=tween->second;double q=t.duration>0?std::clamp(t.elapsed/t.duration,0.,1.):1;
  double exponent=1+1.4*t.power/100;
- if(q<1)switch(t.mode){case 0:q=0;break;case 1:break;case 3:q=1-std::pow(1-q,exponent);break;case 4:q=std::pow(q,exponent);break;default:throw std::runtime_error("Unsupported image tween mode");}
+ if(q<1)switch(t.mode){case 0:q=0;break;case 1:break;case 3:q=1-std::pow(1-q,exponent);break;case 4:q=std::pow(q,exponent);break;
+  case 8:q=q<.5?.5*std::pow(q*2,exponent):1-.5*std::pow((1-q)*2,exponent);break;
+  default:throw std::runtime_error("Unsupported image tween mode");}
  if(key=="mulcolor"||key=="addcolor"){uint32_t result=0;for(unsigned shift=0;shift<24;shift+=8){int from=(uint32_t(t.from)>>shift)&255,to=(uint32_t(t.to)>>shift)&255;result|=uint32_t(from+(to-from)*q)<<shift;}return float(result);}
  return float(t.from+(t.to-t.from)*q);
 }
 void SceneImages::transition(Layer&layer,const Layer&before,bool position,bool color){
  double duration=layer.params.count("time")?numeric(layer.params.at("time")):0;
  unsigned mode=1;auto m=layer.params.find("move");if(m!=layer.params.end()){
-  if(m->second=="step")mode=0;else if(m->second=="linear")mode=1;else if(m->second=="outquart"||m->second=="square")mode=3;else if(m->second=="inquart"||m->second=="invsqare")mode=4;
+  if(m->second=="step")mode=0;else if(m->second=="linear")mode=1;else if(m->second=="outquart"||m->second=="square")mode=3;else if(m->second=="inquart"||m->second=="invsqare")mode=4;else if(m->second=="inoutquart")mode=8;
   else {QLIE_LOG_LINE(<<"PENDING-IMAGE-TWEEN mode="<<m->second<<"\n");mode=0;}
  }
  float power=layer.params.count("movepow")?numeric(layer.params.at("movepow")):100;
@@ -1195,12 +1215,14 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  std::string colorTime,moveTime;
  std::map<std::string,std::string> beginPosition;
  if(std::any_of(args.begin(),args.end(),[](const std::string&arg){return arg.rfind("file:",0)==0;})){
-  l.scriptReplacement.reset();l.params.erase("@replacement");for(unsigned i=0;i<4;i++)l.params.erase("rep"+std::to_string(i));
+  l.replacementVideo.reset();l.scriptReplacement.reset();l.params.erase("@replacement");for(unsigned i=0;i<4;i++)l.params.erase("rep"+std::to_string(i));
  }
  for(auto&s:args){if(s.empty())continue;
  auto c=s.find(58);
  if(c==s.npos)throw std::runtime_error("Unknown image template "+s);
  auto key=s.substr(0,c),v=s.substr(c+1);
+ // Imo_Image_Excute keeps only the first value after the property name.
+ if(key=="file"&&!chara)v=split(v,':').front();
  if(multipart&&characterPart(key)){
   if(v=="none")l.params.erase(key);
   else l.params[key]=v;
@@ -1255,7 +1277,7 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
   l.params[key]=v;
   continue;
  }
- if(key=="clear"){l.filtered={};l.params.erase("@portrait");l.params.erase("@replacement");l.scriptReplacement.reset();l.path.clear();
+ if(key=="clear"){l.filtered={};l.params.erase("@portrait");l.params.erase("@replacement");l.replacementVideo.reset();l.scriptReplacement.reset();l.path.clear();
  l.pixels.reset();
  l.composite.reset();
  l.params["show"]="false";
@@ -1288,8 +1310,8 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  for(unsigned i=0;i<4;i++)if(replacementChanged[i]){
   auto replacement=l.params.at("rep"+std::to_string(i));std::string path;
   if(!replacement.empty()&&replacement!="none"){
-   path="image/"+replacement;
-   if(!assets.exists(path)){if(assets.exists(path+".png"))path+=".png";else if(assets.exists(path+".b"))path+=".b";else throw std::runtime_error("Missing replacement image "+path);}
+   path=sceneResource(assets,"image/"+replacement,false);
+   if(path.empty())throw std::runtime_error("Missing replacement image "+replacement);
   }loadReplacement(l,path);
  }
  if(!beginPosition.empty()){
@@ -1341,7 +1363,7 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  };
  if(baseChanged&&!file){if(!loadBase()){l.composite.reset();auto portrait=l.params.find("@portrait");l.path=portrait==l.params.end()?"":portrait->second;}return true;}
  if(file){std::string f=l.params["file"];
- if(f=="none"||f=="none:none"){l.params.erase("@portrait");l.params.erase("@replacement");l.scriptReplacement.reset();l.path.clear();
+ if(f=="none"||f=="none:none"){l.params.erase("@portrait");l.params.erase("@replacement");l.replacementVideo.reset();l.scriptReplacement.reset();l.path.clear();
  l.pixels.reset();
  l.composite.reset();
  return true;
@@ -1506,7 +1528,8 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
  float ax=align.rfind("center",0)==0?0.5f:align.rfind("right",0)==0?1.f:0.f,ay=align.find(":bottom")!=align.npos?1.f:align.find(":center")!=align.npos?0.5f:0.f;
  // Shared composite instances can be sampled at different times in one frame.
  // Keep those ordered on the caller, and queue ordinary single-owner playback.
- const bool asyncVideo=l->composite&&l->composite.use_count()<=2;
+ const bool asyncVideo=l->composite&&l->composite.use_count()<=2&&
+  (!l->replacementVideo||l->replacementVideo.use_count()<=2);
  const auto [w,h]=l->composite?l->composite->dimensions(readAhead,l->milliseconds,liveVideo,queue.supportsVideoSurfaces(),asyncVideo):std::make_pair(l->pixels->width,l->pixels->height);
  if(l->composite&&l->composite->standaloneVideo&&(!w||!h))continue;
  const auto blend=l->params.find("blend");
@@ -1559,7 +1582,7 @@ void SceneImages::enqueue(RenderQueue&queue,unsigned pass,float maxPriority,bool
  if(l->composite){auto m=l->params.find("motion");
   std::optional<const Image*> messageSurface;
   if(messageLayer)messageSurface=l->pixels.get();
-  l->composite->enqueue(queue,l->milliseconds,m==l->params.end()?"":m->second,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),blendMode,l->params.count("@portrait")?l->pixels.get():nullptr,messageSurface,windowAlpha,uiSlots.empty()?nullptr:&uiSlots,&external,spatial?&matrix:nullptr,unsigned(get(l,"texfilter",0)),liveVideo,readAhead,asyncVideo);
+  l->composite->enqueue(queue,l->milliseconds,m==l->params.end()?"":m->second,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),blendMode,l->params.count("@portrait")?l->pixels.get():nullptr,messageSurface,windowAlpha,uiSlots.empty()?nullptr:&uiSlots,&external,spatial?&matrix:nullptr,unsigned(get(l,"texfilter",0)),liveVideo,readAhead,asyncVideo,l->replacementVideo.get());
  }
  else if(spatial){transform.alpha=get(l,"alpha",255);transform.addColor=uint32_t(get(l,"addcolor",0));transform.mulColor=uint32_t(get(l,"mulcolor",0xffffff));transform.flags=blendMode;transform.textureFilter=unsigned(get(l,"texfilter",0));quad(queue,*plain,matrix,transform,get(l,"pri",0));}
  else queue.image(*plain,placement,get(l,"pri",0),get(l,"alpha",255),uint32_t(get(l,"addcolor",0)),uint32_t(get(l,"mulcolor",0xffffff)),blendMode,unsigned(get(l,"texfilter",0)));

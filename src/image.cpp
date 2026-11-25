@@ -251,6 +251,7 @@ Image imageFilterChain(const Image&source,std::string_view expression){
   else if(fields.size()==5&&fields[0]=="huechroma")result=hueChromaImage(*current,fields);
   else if(fields.size()==3&&fields[0]=="bright")result=brightnessImage(*current,fields);
   else if(operation=="blur,10,10")result=boxBlur<5>(*current);
+  else if(operation=="blur,12,12")result=boxBlur<6>(*current);
   else if(operation=="blur,15,15")result=boxBlur<7>(*current);
   else if(operation=="blur,20,20")result=boxBlur<10>(*current);
   else throw std::runtime_error("Unsupported image filter "+std::string(operation));

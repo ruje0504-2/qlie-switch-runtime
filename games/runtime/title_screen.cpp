@@ -35,7 +35,8 @@ bool TitleScreen::prepareOpening(AssetReadAhead*loader,bool unlocked){
  if(unlocked&&layout.buttonArt[0]!=std::string_view(layout.buttonArt[1]))scene.warmFile(layout.buttonArt[1]);
  if(std::string_view(layout.quitButton)!="script/title/button.b")scene.warmFile(layout.quitButton);
  std::vector<std::string> paths;
- auto add=[&](const char*item){for(auto state:{layout.buttonOff,layout.buttonOn})paths.push_back(std::string("script/title/")+item+state);};
+ auto add=[&](const char*item){for(auto state:{layout.buttonOff,layout.buttonOn,layout.buttonPush})
+  if(state)paths.push_back(std::string("script/title/")+item+state);};
  for(auto item:layout.mainFiles)add(item);
  if(unlocked||layout.albumAlwaysAvailable)for(auto item:layout.extraFiles)add(item);
  scene.warmUiBitmaps(titleBitmaps,std::move(paths));
@@ -64,6 +65,7 @@ std::string TitleScreen::buttonPosition(unsigned index,bool extra)const{
 }
 void TitleScreen::reset(bool alternate,bool unlocked){scene.clear(true);scene.takeUiBitmaps(titleBitmaps);elapsed=0;shown=hover=false;selected=0;buttonMotions.fill("");extras=unlocked||layout.albumAlwaysAvailable;extraPage=false;
  shownButtons=0;
+ pressed=-1;
  backdropExitRemaining=-1;
  if(layout.alternateRequiresExtras&&!extras)alternate=false;
  setBackdrop(alternate);
@@ -74,15 +76,17 @@ void TitleScreen::reset(bool alternate,bool unlocked){scene.clear(true);scene.ta
   scene.command("^"+id+",file:"+(i==4?layout.quitButton:layout.buttonArt[0])+buttonPosition(i,false)+",pri:100,show:false");
   scene.uiSlot(id,0,asset+layout.buttonOff);
   scene.uiSlot(id,1,asset+layout.buttonOn);
+  if(layout.buttonPush)scene.uiSlot(id,2,asset+layout.buttonPush);
  }
 }
-void TitleScreen::setExtraPage(bool extra){if(extra&&!extras)return;extraPage=extra;selected=0;buttonMotions.fill("");shown=true;hover=false;elapsed=layout.introMs;shownButtons=5;
+void TitleScreen::setExtraPage(bool extra){if(extra&&!extras)return;extraPage=extra;selected=0;pressed=-1;buttonMotions.fill("");shown=true;hover=false;elapsed=layout.introMs;shownButtons=5;
  for(int i=0;i<5;i++){auto id="ui_button"+std::to_string(i);if(extra&&i==4){scene.command("^"+id+",show:false");continue;}
   std::string command="^"+id;
   if(layout.buttonArt[0]!=std::string_view(layout.buttonArt[1]))
    command+=std::string(",file:")+layout.buttonArt[extra];
   scene.command(command+buttonPosition(unsigned(i),extra)+",show:true,motion:"+entryMotion(i));
   auto file=std::string("script/title/")+(extra?layout.extraFiles[i]:layout.mainFiles[i]);scene.uiSlot(id,0,file+layout.buttonOff);scene.uiSlot(id,1,file+layout.buttonOn);
+  if(layout.buttonPush)scene.uiSlot(id,2,file+layout.buttonPush);
  }
  if(!layout.frameBackdrop)scene.command("^ui_frame,motion:*Enable"+(layout.extraFrameXOffset?
   ",x:"+std::to_string(layout.frameX[0]+(extra?layout.extraFrameXOffset:0)):std::string()));
@@ -102,6 +106,7 @@ void TitleScreen::enable(){
  while(shownButtons<count)showNextButton();
 }
 void TitleScreen::highlight(){hover=true;for(int i=0;i<(extraPage?4:5);i++){
+ if(i==pressed)continue;
  const char*motion=!extraPage&&i==2&&!extras?layout.lockedIdle:i==selected?"*OnMouse":"*OffMouse";
  if(buttonMotions[i]==motion)continue;
  scene.command("^ui_button"+std::to_string(i)+",motion:"+motion);buttonMotions[i]=motion;
@@ -156,4 +161,17 @@ int TitleScreen::move(int direction){if(!ready())return selected;int next=select
 bool TitleScreen::select(int index){if(!ready()||index<0||index>=(extraPage?4:5)||(!extraPage&&index==2&&!extras))return false;if(selected!=index){selected=index;highlight();}return true;}
 int TitleScreen::hit(float x,float y)const{if(!ready())return -1;for(int i=0;i<(extraPage?4:5);i++)if(scene.uiHit("ui_button"+std::to_string(i),x,y))return i;return -1;}
 TitleScreen::Action TitleScreen::confirm(){if(!ready()){if(elapsed<layout.introMs)update(layout.introMs-elapsed);return None;}if(!extraPage&&selected==2&&!extras)return None;return Action(extraPage?int(CG)+selected:selected+1);}
+void TitleScreen::press(float x,float y){
+ if(!layout.buttonPush)return;
+ const auto index=hit(x,y);
+ if(index<0||(!extraPage&&index==2&&!extras))return;
+ pressed=index;
+ scene.setUiMotion("ui_button"+std::to_string(index),"*OnMouseDown");
+}
+void TitleScreen::release(){
+ if(pressed<0)return;
+ buttonMotions[pressed].clear();
+ pressed=-1;
+ highlight();
+}
 }

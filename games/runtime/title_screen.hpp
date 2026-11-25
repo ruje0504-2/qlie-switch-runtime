@@ -10,6 +10,7 @@ class TitleScreen {
  std::array<std::string,5> buttonMotions{};
  unsigned shownButtons=0;
  double backdropExitRemaining=-1;
+ int pressed=-1;
  TitleLayout layout;
  std::mt19937 random;
  void setBackdrop(bool alternate);
@@ -34,5 +35,7 @@ public:
  int selection()const{return selected;}int move(int);bool select(int);int hit(float,float)const;
  void draw(RenderTarget&)const;
  Action confirm();void draw(qlie::Bytes&)const;
+ void press(float,float);
+ void release();
 };
 }

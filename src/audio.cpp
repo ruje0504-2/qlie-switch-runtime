@@ -123,7 +123,7 @@ void Audio::callback(void*context,Uint8*stream,int bytes){auto&a=*static_cast<Au
  unsigned activeCount=0;
  for(unsigned i=0;i<ChannelCount;++i){
   auto&channel=a.channels[i];
-  if(!channel.pcm.empty())
+  if(!channel.pcm.empty()&&!channel.paused)
    active[activeCount++]={&channel,a.userGains[channel.category]*a.channelUserGains[i]};
  }
  unsigned audibleFrames=0;
@@ -462,6 +462,13 @@ void Audio::seek(unsigned ch,uint64_t milliseconds){if(ch>=channels.size())throw
 }
 void Audio::setLoop(unsigned ch,bool loop){if(ch>=channels.size())throw std::runtime_error("Audio channel index");if(pending[ch]){pending[ch]->channel.loop=loop;return;}SDL_LockAudioDevice(device);channels[ch].loop=loop;SDL_UnlockAudioDevice(device);}
 void Audio::stop(unsigned ch){if(ch>=channels.size())throw std::runtime_error("Audio channel index");cancelPending(ch);clearChannel(ch);}
+void Audio::pause(unsigned ch,bool paused){
+ if(ch>=channels.size())throw std::runtime_error("Audio channel index");
+ if(pending[ch])pending[ch]->channel.paused=paused;
+ SDL_LockAudioDevice(device);
+ channels[ch].paused=paused;
+ SDL_UnlockAudioDevice(device);
+}
 
 bool Audio::playing(unsigned n){if(n>=channels.size())throw std::runtime_error("Audio channel index");
  if(pending[n])return true;

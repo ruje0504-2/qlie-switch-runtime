@@ -40,5 +40,7 @@ struct TitleLayout {
  bool frameBackdrop=false,albumAlwaysAvailable=false;
  bool holdIntroLastFrame=false;
  double startBlackFadeAtMs=0,startBlackFadeMs=0;
+ const char* buttonPush=nullptr;
+ const char* confirmSound=nullptr;
 };
 }

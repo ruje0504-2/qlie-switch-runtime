@@ -21,9 +21,22 @@ constexpr const char* sliderKeys[]={"WindowAlpha","TextSpeed","MasterVolume","BG
  "VoiceVolume","SEVolume","SysSEVolume","MovieVolume","AutoTextWait"};
 struct SettingToggle{const char*key;const char*yes;const char*no;float y;bool leftValue;};
 constexpr SettingToggle toggles[]={
+#ifdef QLIE_PROFILE_WHJ6
+ {"ClickVoiceStop","on","off",whj6::ui::to720(500),false},
+ {"AutoPlayVoiceWait","on","off",whj6::ui::to720(963),true},
+ {"SkipMode","既読のみ","全て",whj6::ui::to720(700),true}
+#else
  {"ClickVoiceStop","する","しない",353,!gameSettingsLayout.classic},
  {"AutoPlayVoiceWait","待つ","待たない",412,true},
- {"SkipMode","既読","未読",442,true}};
+ {"SkipMode","既読","未読",442,true}
+#endif
+};
+#ifdef QLIE_PROFILE_WHJ6
+constexpr float testButtonX=whj6::ui::to720(1727);
+constexpr int toggleX(int i,int column){return (i==0?1335:585)+240*column;}
+#else
+constexpr float testButtonX=1070;
+#endif
 constexpr int SettingsFocusCount=22;
 struct CharacterVoiceButton{float x,y;const char* label;};
 constexpr CharacterVoiceButton voiceButtons[]={
@@ -42,7 +55,9 @@ int historyOffsetAt(float y,int maximum){
  const float position=std::clamp((y-HistoryBarY-HistoryThumbCenter)/HistoryThumbTravel,0.f,1.f);
  return maximum-int(std::round(position*maximum));
 }
+#ifndef QLIE_PROFILE_WHJ6
 const float deleteButtonX[]={615,615,615,615,1248,1248,1249,1249};
+#endif
 int sliderPosition(const whj2::Settings&s,int i){int value=s.get(sliderKeys[i]);return i==0?(value*20+127)/255:(i==1||i==8)?20-value/5:value/5;}
 void setPosition(whj2::Settings&s,int i,int step){step=std::clamp(step,0,20);s.set(sliderKeys[i],i==0?step*255/20:(i==1||i==8)?100-step*5:step*5);if(i==8)s.set("AutoClickWait",5000-step*250);}
 }
@@ -70,9 +85,12 @@ void GameMenu::loadHistoryTracks(){
 }
 void GameMenu::prepareHistory(bool jumps){
 #ifdef QLIE_PROFILE_WHJ6
+ resource("script/log/bg_mask.png");
  resource("script/log/frame.png");
- resource("script/log/button_voice.b#0");
- if(jumps)resource("script/log/button_jump.b#0");
+ for(const char* path:{"line.b","button_voice.b","scroll_bar_log.b","scroll_button.b"})
+  for(unsigned state=0;state<2;++state)resource("script/log/"+std::string(path)+"#"+std::to_string(state));
+ if(jumps)for(unsigned state=0;state<2;++state)resource("script/log/button_jump.b#"+std::to_string(state));
+ resource("script/log/戻る_off.png");
  return;
 #endif
  loadHistoryTracks();
@@ -233,12 +251,12 @@ GameMenu::Action GameMenu::jumpHistory()const{
 }
 int GameMenu::volumeTestAt(float x,float y){
 #ifdef QLIE_PROFILE_WHJ6
- constexpr float halfWidth=34,halfHeight=13;
+ constexpr float halfWidth=12,halfHeight=12;
 #else
  const auto&button=resource("script/config/音量テスト_off.png");
  const float halfWidth=button.width*.5f,halfHeight=button.height*.5f;
 #endif
- for(int i=0;i<5;i++)if(std::abs(x-1070)<=halfWidth&&std::abs(y-testButtonY[i])<=halfHeight)return i;
+ for(int i=0;i<5;i++)if(std::abs(x-testButtonX)<=halfWidth&&std::abs(y-testButtonY[i])<=halfHeight)return i;
  return -1;
 }
 bool GameMenu::beginDrag(float x,float y){
@@ -247,7 +265,13 @@ bool GameMenu::beginDrag(float x,float y){
  panelPoint(x,y);
  if(panel==History){
   if(historyMaxOffset>0&&inHistoryScrollbar(x,y)){historyDragRow=-2;historyOffset=historyOffsetAt(y,historyMaxOffset);return true;}
+#ifdef QLIE_PROFILE_WHJ6
+  for(int row=0;row<historyRows;++row)if(whj6::ui::contains(x,y,454,whj6::ui::historyY(row),1170,162)){
+   focus=row;historyDragRow=row;historyDragY=y;historyDragOffset=historyTextOffset[row];return true;
+  }
+#else
   if(x>=230&&x<=1150&&y>=64&&y<656){int visual=std::clamp(int((y-64)/149),0,3),row=3-visual;if(row<historyRows){focus=row;historyDragRow=row;historyDragY=y;historyDragOffset=historyTextOffset[row];return true;}}
+#endif
   return false;
  }
  if(panel!=Settings||volumeTestAt(x,y)>=0)return false;
@@ -261,9 +285,16 @@ bool GameMenu::drag(float x,float y){
 GameMenu::Action GameMenu::tap(float x,float y){
  if(panelClosing||panelTransitioning())return Nothing;
  panelPoint(x,y);
- if(asking){if(std::abs(y-325)<=20){if(std::abs(x-550)<=60){focus=0;return Yes;}if(std::abs(x-730)<=60){focus=1;return No;}}return Nothing;}
 #ifdef QLIE_PROFILE_WHJ6
- if(panel==Load&&choiceBackupAvailable&&y>=668&&x>=32&&x<=266){focus=ChoiceBackupFocus;return LoadChoiceBackup;}
+ using namespace whj6::ui;
+ if(asking){
+  if(contains(x,y,650,550,300,50)){focus=0;return Yes;}
+  if(contains(x,y,970,550,300,50)){focus=1;return No;}
+  return Nothing;
+ }
+ if(panel==Load&&choiceBackupAvailable&&contains(x,y,30,1012,351,46)){focus=ChoiceBackupFocus;return LoadChoiceBackup;}
+#else
+ if(asking){if(std::abs(y-325)<=20){if(std::abs(x-550)<=60){focus=0;return Yes;}if(std::abs(x-730)<=60){focus=1;return No;}}return Nothing;}
 #endif
  if(panel==Settings){
   int test=volumeTestAt(x,y);if(test>=0){focus=17+test;return confirm();}
@@ -274,9 +305,28 @@ GameMenu::Action GameMenu::tap(float x,float y){
    }
   }
  }
+#ifdef QLIE_PROFILE_WHJ6
+ if(panel==Save||panel==Load){
+  for(int i=0;i<15;++i)if(contains(x,y,1139+50*i,119,42,52)){
+   requestedPage=i;return PageChange;
+  }
+  for(int i=0;i<8;++i){
+   if(populatedSlots[i]&&contains(x,y,slotX(i)+816,slotY(i)-12,66,42)){focus=8+i;return DeleteSlot;}
+   if(contains(x,y,slotX(i),slotY(i),910,160)){focus=i;return Slot;}
+  }
+ }
+#else
  if(panel==Save||panel==Load){for(int i=0;i<8;i++)if(populatedSlots[i]&&std::abs(x-deleteButtonX[i])<=15&&std::abs(y-(148+(i%4)*135))<=15){focus=8+i;return DeleteSlot;}if(y>=72&&y<=108&&x>=674){requestedPage=std::clamp(int((x-674)/40),0,14);return PageChange;}if(y>=128&&y<=651){int col=x>=645?1:0;int row=int((y-128)/135);if(row<4){focus=col*4+row;return Slot;}}}
+#endif
  if(panel==History){
   if(inHistoryScrollbar(x,y)){if(historyMaxOffset>0)historyOffset=historyOffsetAt(y,historyMaxOffset);return Nothing;}
+#ifdef QLIE_PROFILE_WHJ6
+  for(int row=0;row<historyRows;++row){
+   const int top=historyY(row);
+   if(historyJumps[row]&&contains(x,y,379,top+90,42,42)){focus=row;return JumpHistory;}
+   if(historyVoices[row]&&contains(x,y,379,top+30,42,42)){focus=historyVoiceRow=row;return ReplayVoice;}
+  }
+#else
   const auto&voice=resource("script/log/button_voice.b#0");
   for(int row=0;row<historyRows;++row){
    const float distance=std::abs(y-(585-row*150));
@@ -286,6 +336,7 @@ GameMenu::Action GameMenu::tap(float x,float y){
    }
    if(historyVoices[row]&&std::abs(x-210)<=voice.width*.5f&&distance<=voice.height*.5f){focus=historyVoiceRow=row;return ReplayVoice;}
   }
+#endif
  }
  if(panel==Settings){
   for(int i=0;i<9;i++){
@@ -297,13 +348,33 @@ GameMenu::Action GameMenu::tap(float x,float y){
   }
   for(int i=0;i<3;i++){
    const auto& option=toggles[i];
+#ifdef QLIE_PROFILE_WHJ6
+   for(int column=0;column<2;++column)if(std::abs(y-option.y)<=11&&std::abs(x-to720(float(toggleX(i,column))))<=70){
+    focus=13+i;settings.set(option.key,(column==0)==option.leftValue);
+    settingsDirty=true;return SettingsChanged;
+   }
+#else
    if(std::abs(y-option.y)<=15&&(std::abs(x-410)<=56||std::abs(x-534)<=56)){
     focus=13+i;settings.set(option.key,(x<472)==option.leftValue);
     settingsDirty=true;return SettingsChanged;
    }
+#endif
   }
  }
+#ifdef QLIE_PROFILE_WHJ6
+ if(y>=678&&y<=702){
+  if(std::abs(x-1110)<=70)return Close;
+  if(panel==Settings||panel==Save||panel==Load){
+   if(std::abs(x-to720(975))<=70)return Quit;
+   if(std::abs(x-to720(1205))<=70)return Title;
+   if(panel==Settings&&std::abs(x-to720(1435))<=70)return ResetSettings;
+   if((panel==Save||(panel==Load&&allowSavePanel))&&std::abs(x-to720(1435))<=70)return SwitchSavePanel;
+   if(panel==Settings&&allowSceneReturn&&x>=490&&x<=630)return SceneReturn;
+  }
+ }
+#else
  if(y>=670){if(x>1145)return Close;if(panel==Settings){if(x>1015)return ResetSettings;if(x>885)return Title;if(x>755)return Quit;if(allowSceneReturn&&x>=490)return SceneReturn;}else if(panel==Save||panel==Load){if(x>1015)return Title;if(x>885)return Quit;}}
+#endif
  return Nothing;
 }
 namespace {
@@ -330,62 +401,133 @@ void GameMenu::draw(qlie::Bytes&pixels,const PanelContent&content,const PanelCon
 void GameMenu::draw(RenderTarget&target,const PanelContent&content,const PanelContent&prompt){render(nullptr,&target,content,prompt);}
 #ifdef QLIE_PROFILE_WHJ6
 void GameMenu::drawWhj6Panel(RenderQueue& q){
- using whj6::ui::bitmap;
- using whj6::ui::rectangle;
+ using namespace whj6::ui;
+ auto art=[&](const std::string& path,float x,float y,bool centered=false,unsigned opacity=255){
+  const auto& image=resource(path);
+  bitmap(q,image,to720(x),to720(y),to720(float(image.width)),to720(float(image.height)),centered,opacity);
+ };
+ auto button=[&](const std::string& path,int x,int y,bool highlighted=false){
+  art(path+(highlighted?"_on.png":"_off.png"),float(x),float(y),true);
+ };
  if(panel==Save||panel==Load){
-  const char* dir="script/saveload/";
-  bitmap(q,resource(std::string(dir)+(panel==Save?"bg_save.png":"bg_load.png")),0,0,1280,720);
+  const std::string dir="script/saveload/";
+  art(dir+(panel==Save?"bg_save.png":"bg_load.png"),0,0);
   for(int i=0;i<15;++i){
    char number[3];std::snprintf(number,sizeof(number),"%02d",i+1);
-   const auto path=std::string(dir)+"list_"+number+(i==page?"_on.png":"_off.png");
-   bitmap(q,resource(path),694+i*40,90,34,30,true);
+   art(dir+"list_"+number+(i==page?"_hold.png":"_off.png"),1160+i*50,145,true);
   }
   for(int i=0;i<8;++i){
-   const float x=i<4?16.f:649.f,y=125.f+(i%4)*135;
-   rectangle(q,x,y,609,111,focus==i?0x476979:0x182c38,242);
-   rectangle(q,x+11,y+12,160,90,0x10202a);
-   if(populatedSlots[i])bitmap(q,resource("script/saveload/file_del_off.png"),deleteButtonX[i],148+(i%4)*135,38,30,true);
-   if(focus==8+i)rectangle(q,deleteButtonX[i]-18,131+(i%4)*135,35,3,0xc0f0ff);
+   art(dir+"button_data.b#"+(focus==i?"1":"0"),slotX(i),slotY(i));
+   art(dir+"file_sel_thumbnail.png",slotX(i)+20,slotY(i)+10);
+   const auto number=std::to_string(page*8+i+1);
+   for(unsigned digit=0;digit<number.size();++digit)
+    art(dir+"num_"+number[digit]+".png",slotX(i)+360+int(digit)*18,slotY(i)+24);
+   if(populatedSlots[i])button(dir+"file_del",slotX(i)+849,slotY(i)+9,focus==8+i);
   }
+  button(dir+"ゲームの終了",975,1035);
+  button(dir+"タイトルへ戻る",1205,1035);
+  art(dir+(panel==Save?"ロード_off.png":"セーブ_off.png"),1435,1035,true,
+      panel==Save||allowSavePanel?255:127);
+  button(dir+"戻る",1665,1035);
   if(panel==Load&&choiceBackupAvailable)
-   rectangle(q,32,668,234,38,focus==ChoiceBackupFocus?0x517181:0x365564);
+   rectangle(q,20,675,234,30,focus==ChoiceBackupFocus?0x59697f:0x374861);
   return;
  }
  if(panel==History){
-  rectangle(q,0,0,1280,720,0x15232c,245);
-  bitmap(q,resource("script/log/frame.png"),0,0,1280,720);
+  const std::string dir="script/log/";
+  art(dir+"bg_mask.png",0,0);
+  art(dir+"frame.png",0,0);
   for(int row=0;row<historyRows;++row){
-   const float y=510-row*150;
-   rectangle(q,42,y,1125,139,(asking?promptFocus:focus)==row?0x304b5b:0x182c38,237);
-   if(historyVoices[row])put(q,"script/log/button_voice.b#0",210,585-row*150,true);
-   if(historyJumps[row])put(q,"script/log/button_jump.b#0",51,585-row*150,true);
+   const bool selected=(asking?promptFocus:focus)==row;
+   const auto state=selected?"1":"0";
+   const auto y=historyY(row);
+   art(dir+"line.b#"+state,349,y);
+   if(historyVoices[row])art(dir+"button_voice.b#"+state,400,y+51,true);
+   if(historyJumps[row])art(dir+"button_jump.b#"+state,400,y+111,true);
   }
-  rectangle(q,1193,95,18,528,0x162934);
+  art(dir+"scroll_bar_log.b#0",1773,115);
   const float ratio=historyMaxOffset?float(historyMaxOffset-historyOffset)/historyMaxOffset:0;
-  rectangle(q,1193,95+ratio*482,18,46,0x83aebf);
+  art(dir+"scroll_button.b#"+(historyDragRow==-2?"1":"0"),1799,156+ratio*780,true);
+  button(dir+"戻る",1665,1035);
   return;
  }
  if(panel==Settings){
-  bitmap(q,resource("script/config/bg1.png"),0,0,1280,720);
-  rectangle(q,132,115,1016,541,0x142835,238);
-  if(!windowPreview.pixels.empty())bitmap(q,windowPreview,363,230,300,38);
+  const std::string dir="script/config/";
+  art(dir+"bg1.png",0,0);
+  const char* display[3][2]={{"ウィンドウ","フルスクリーン"},{"高画質","低画質"},{"on","off"}};
+  for(int row=0;row<3;++row)for(int column=0;column<2;++column){
+   const bool active=column==(row==0);
+   art(dir+display[row][column]+(active?"_hold.png":"_off.png"),585+column*240,220+row*40,true,180);
+  }
+  art(dir+"hscroll_bar.b#2",480,330,false,180);
+  art(dir+"scroll_button.b#2",480,340,true,180);
+  constexpr const char* prompts[]={"クイックロード","データロード","データ上書き","データ入替え",
+   "データ削除","ログジャンプ","設定初期化","タイトルへ戻る","ゲーム終了"};
+  for(int i=0;i<9;++i)
+   art(dir+"表示_"+prompts[i]+std::string(i==0||i==3?"_off.png":"_hold.png"),585+(i%2)*240,380+(i/2)*40,true,180);
+  art(dir+"変更する_off.png",585,740,true,180);
+  art(dir+"priview_windowalpha.b#1",482,812,false,unsigned(settings.get("WindowAlpha")));
+  if(!windowPreview.pixels.empty())bitmap(q,windowPreview,to720(496),to720(826),270,38);
   for(int i=0;i<9;++i){
    const auto&slider=sliders[i];
-   rectangle(q,slider.x,slider.y-3,slider.width,6,0x678091);
-   rectangle(q,slider.x+sliderPosition(settings,i)*slider.width/20-5,slider.y-9,10,18,focus==i+3?0xffea99:0xc7edf8);
+   const auto state=focus==3+i?"1":"0";
+   const auto& track=resource(dir+"hscroll_bar.b#"+state);
+   const auto& thumb=resource(dir+"scroll_button.b#"+state);
+   bitmap(q,track,slider.x,slider.y+slider.trackY,slider.width,to720(float(track.height)));
+   bitmap(q,thumb,slider.x+sliderPosition(settings,i)*slider.width/20,slider.y,16,16,true);
   }
   for(int i=0;i<3;++i){
-   const auto&toggle=toggles[i];const bool left=bool(settings.get(toggle.key))==toggle.leftValue;
-   rectangle(q,left?370:493,toggle.y-13,82,26,focus==13+i?0x517181:0x365564);
+   const auto& option=toggles[i];
+   const bool left=bool(settings.get(option.key))==option.leftValue;
+   for(int column=0;column<2;++column){
+    const bool checked=column==!left;
+    const char*label=((column==0)==option.leftValue)?option.yes:option.no;
+    const bool highlighted=focus==13+i;
+    const auto* suffix=checked?(highlighted?"_hold_on.png":"_hold.png"):(highlighted?"_on.png":"_off.png");
+    art(dir+label+suffix,toggleX(i,column),option.y*1.5f,true);
+   }
   }
-  for(int i=0;i<5;++i)rectangle(q,1038,testButtonY[i]-12,68,25,focus==17+i?0x517181:0x365564);
+  for(int i=0;i<5;++i)
+   art(dir+"button_stest.b#"+(focus==17+i?"1":"0"),1727,testButtonY[i]*1.5f,true);
+  for(int i=0;i<6;++i)art(dir+"button_mute.b#4",1697,225+i*40,true);
+  art(dir+"hscroll_bar.b#2",1230,440,false,180);
+  art(dir+"scroll_button.b#2",1410,450,true,180);
+  constexpr const char* pictures[]={"hide_01_雪女","hide_03_兄弟子","hide_04_師匠","hide_05_ふぶき",
+   "hide_06_荒鷹","hide_07_冬将軍","08_その他男性","09_その他女性"};
+  for(int i=0;i<8;++i){
+   const int x=1015+(i%4)*185,y=560+(i/4)*180;
+   art(dir+"キャラアイコン_"+pictures[i]+".png",x,y);
+   art(dir+"scroll_bar.b#2",x+145,y);
+   art(dir+"scroll_button.b#2",x+157,y+12,true);
+   art(dir+"button_mute.b#4",x+87,y+145,true);
+   art(dir+"button_stest.b#4",x+117,y+145,true);
+  }
+  const char* names[]={"ゲームの終了","タイトルへ戻る","設定の初期化","戻る"};
+  const int controls[]={2,1,12,0};
+  for(int i=0;i<4;++i)button(dir+names[i],975+i*230,1035,focus==controls[i]);
  }
 }
 void GameMenu::drawWhj6Prompt(RenderQueue&q){
- using whj6::ui::rectangle;
- rectangle(q,402,254,476,116,0x182c38);
- rectangle(q,493,310,114,39,focus==0?0x517181:0x365564);
- rectangle(q,673,310,114,39,focus==1?0x517181:0x365564);
+ using namespace whj6::ui;
+ const std::string dir="script/dialog/";
+ auto art=[&](const std::string& path,int x,int y){
+  const auto& image=resource(dir+path);
+  bitmap(q,image,to720(x),to720(y),to720(float(image.width)),to720(float(image.height)),true);
+ };
+ art("frame_yesno.b#1",960,540);
+ art(focus==0?"button_yes.b#1":"button_yes.b#0",800,575);
+ art(focus==1?"button_no.b#1":"button_no.b#0",1120,575);
+ const char* message=nullptr;
+ switch(requested){
+ case Quit:message="ゲームを終了";break;
+ case Title:message="タイトルへ戻る";break;
+ case ResetSettings:message="設定初期化";break;
+ case JumpHistory:message="ログジャンプ";break;
+ case DeleteSlot:message="データ削除";break;
+ case Slot:message=panel==Load?"データロード":"データ上書き";break;
+ default:break;
+ }
+ if(message)art(std::string("mes_")+message+".png",960,495);
 }
 #endif
 void GameMenu::drawHistory(RenderQueue&q){

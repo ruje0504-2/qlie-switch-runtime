@@ -15,6 +15,10 @@ class CgScreen {
  std::string displayedCount;
  bool prepared=false,opened=false,viewing=false,viewReady=false;unsigned page=0,group=0,variant=0,zoom=1;int selected=0;double elapsed=0;float pointerX=640,pointerY=360;
  unsigned requestedVariant=0;
+#ifdef QLIE_PROFILE_WHJ6
+ bool viewControls=true;
+ void setViewControls(bool);
+#endif
  void prepareLayout();void setup();void highlight();void requestView(unsigned);void cancelViewRequest();void closeView();void loadView();void positionView();bool exists(int)const;
  int pageCount()const;int pageButtons()const;int navigationStart()const;
 public:

@@ -10,25 +10,36 @@ namespace whj2 {
 namespace {
 constexpr auto openingBitmaps="@cg/opening-bitmaps";
 #ifdef QLIE_PROFILE_WHJ6
-constexpr auto lockedThumbnail="script/albummode/thumcg_hide.png";
-constexpr const char* whj6ViewAssets[]={"前へ_off.png","拡大_off.png","閉じる_off.png","次へ_off.png"};
+constexpr auto lockedThumbnail="script/albummode/cg_hide.png";
+constexpr const char* whj6ViewAssets[]={"前へ","拡大","閉じる","次へ","戻る"};
+constexpr int whj6ViewY[]={965,825,755,895,1035};
+constexpr int albumX(unsigned index){return 55+int(index%6)*305;}
+constexpr int albumY(unsigned index){return 170+int(index/6)*200;}
 #else
 constexpr auto lockedThumbnail="script/albummode/サムネイル_no_image.png";
 #endif
 }
 void CgScreen::prepareLayout(){
 #ifdef QLIE_PROFILE_WHJ6
- using whj6::ui::sprite;
- sprite(menuScene,"ui_cg_bg","script/albummode/bg.png",0,0,100,66.6667f,false);
+ using namespace whj6::ui;
+ picture(menuScene,"ui_cg_bg","script/albummode/bg.png",0,0,100);
  for(unsigned i=0;i<24;++i)
-  sprite(menuScene,"ui_cg_item"+std::to_string(i),lockedThumbnail,164+int(i%6)*190,186+int(i/6)*125,110,60);
- for(int i=0;i<pageButtons();++i)
-  sprite(menuScene,"ui_cg_page"+std::to_string(i),"script/albummode/cs_0"+std::to_string(i+1)+"_off.png",860+i*148,90,110);
+  button(menuScene,"ui_cg_item"+std::to_string(i),"script/albummode/button_album.b",albumX(i),albumY(i),110);
+ for(int i=0;i<pageButtons();++i){
+  const auto id="ui_cg_page"+std::to_string(i);
+  button(menuScene,id,"script/albummode/button_page.b",1285+i*230,130,110);
+  slots(menuScene,id,"script/albummode/cs_0"+std::to_string(i+1),{"_off","_on","_hold_off","_hold_on"});
+ }
  for(unsigned i=0;i<4;++i)
-  sprite(menuScene,"ui_cg_nav"+std::to_string(i),std::string("script/modecommon/")+whj6::ui::extraNav[i],int(whj6::ui::navX(i)),690,120,58);
- for(int i=0;i<4;++i)
-  sprite(viewScene,"ui_cg_viewbutton"+std::to_string(i),std::string("script/albummode/")+whj6ViewAssets[i],930+i*90,685,120);
- viewScene.command("^ui_cg_count,x:25,y:685,pri:120");
+  navButton(menuScene,"ui_cg_nav"+std::to_string(i),i);
+ for(int i=0;i<5;++i){
+  const auto id="ui_cg_viewbutton"+std::to_string(i);
+  button(viewScene,id,"script/albummode/button_view.b",1875,whj6ViewY[i],120);
+  slots(viewScene,id,std::string("script/albummode/")+whj6ViewAssets[i],{"_off","_on"});
+ }
+ picture(viewScene,"ui_cg_diff","script/albummode/diff.png",0,0,119);
+ viewScene.command("^ui_cg_diff,x:1250,y:456.6667,align:center:center");
+ viewScene.command("^ui_cg_count,x:1233,y:447,pri:120");
 #else
  auto add=[&](const std::string&id,const std::string&file,int x,int y,int pri){menuScene.command("^"+id+",file:script/albummode/"+file+",x:"+std::to_string(x)+",y:"+std::to_string(y)+",pri:"+std::to_string(pri));};
  add("ui_cg_bg","背景.png",0,0,100);add("ui_cg_upper","アッパーフレーム.png",0,0,100);add("ui_cg_lower","アンダーフレーム.png",0,656,100);
@@ -94,11 +105,7 @@ void CgScreen::setup(){
   const auto index=page*24+i;const auto id="ui_cg_item"+std::to_string(i);
   if(index>=catalog.items().size()){menuScene.command("^"+id+",show:false");continue;}
   const auto file=catalog.unlocked(index,progress)?catalog.items()[index].thumbnail:lockedThumbnail;
-#ifdef QLIE_PROFILE_WHJ6
-  menuScene.command("^"+id+",show:true,file:"+file);
-#else
   menuScene.command("^"+id+",show:true,motion:*Enable");menuScene.uiSlot(id,0,file);
-#endif
  }
  highlight();
 }
@@ -111,7 +118,7 @@ void CgScreen::highlight(){
  for(int i=0;i<24&&exists(i);++i)
   whj6::ui::focus(menuScene,"ui_cg_item"+std::to_string(i),selected==i,!catalog.unlocked(page*24+unsigned(i),progress));
  for(int i=0;i<pageButtons();++i)
-  whj6::ui::focus(menuScene,"ui_cg_page"+std::to_string(i),selected==24+i||page==unsigned(i));
+  whj6::ui::focus(menuScene,"ui_cg_page"+std::to_string(i),selected==24+i,false,page==unsigned(i));
  for(int i=0;i<4;++i)whj6::ui::focus(menuScene,"ui_cg_nav"+std::to_string(i),selected==navigationStart()+i,i==0);
 #else
  for(unsigned i=0;i<24;i++){auto index=page*24+i;if(index>=catalog.items().size())continue;auto mode=!catalog.unlocked(index,progress)?"*OnLock":selected==int(i)?"*OnMouse":"*OffMouse";menuScene.setUiMotion("ui_cg_item"+std::to_string(i),mode);}
@@ -150,11 +157,10 @@ void CgScreen::loadView(){
  auto count=std::to_string(variant+1)+"/"+std::to_string(files.size());
  if(count!=displayedCount){
   countText.start("[spd,0]"+count);
-  auto countImage=countText.render(font,MessageStyle{100,50,16,16,0xffffff});
 #ifdef QLIE_PROFILE_WHJ6
-  viewScene.setUiBitmap("ui_cg_count",std::move(countImage));
+  viewScene.setUiBitmap("ui_cg_count",countText.render(font,MessageStyle{43,24,14,14,0xffffff}));
 #else
-  viewScene.uiSlot("ui_cg_count",0,countImage);
+  viewScene.uiSlot("ui_cg_count",0,countText.render(font,MessageStyle{100,50,16,16,0xffffff}));
 #endif
   displayedCount=std::move(count);
  }
@@ -171,7 +177,22 @@ void CgScreen::positionView(){
  const auto percent=std::to_string(scale*100);
  viewScene.command("^ui_cg_view,x:"+std::to_string(x)+",y:"+std::to_string(y)+",scalex:"+percent+",scaley:"+percent);
 }
-void CgScreen::closeView(){cancelViewRequest();viewFade.reset();viewing=viewReady=false;viewScene.removeUiLayer("ui_cg_view",true);}
+void CgScreen::closeView(){cancelViewRequest();viewFade.reset();viewing=viewReady=false;viewScene.removeUiLayer("ui_cg_view",true);
+#ifdef QLIE_PROFILE_WHJ6
+ setViewControls(true);
+ if(prepared)whj6::ui::focus(viewScene,"ui_cg_viewbutton1",false);
+#endif
+}
+#ifdef QLIE_PROFILE_WHJ6
+void CgScreen::setViewControls(bool visible){
+ viewControls=visible;
+ if(!prepared)return;
+ const std::string show=visible?",show:true":",show:false";
+ for(int i=0;i<5;++i)viewScene.command("^ui_cg_viewbutton"+std::to_string(i)+show);
+ viewScene.command("^ui_cg_count"+show);
+ viewScene.command("^ui_cg_diff"+show);
+}
+#endif
 void CgScreen::close(){closeView();opened=false;}
 void CgScreen::update(double ms){
  if(!opened)return;
@@ -185,8 +206,12 @@ void CgScreen::draw(qlie::Bytes&out,const Affine2D*view)const{if(viewing&&viewRe
 void CgScreen::draw(RenderTarget&out,const Affine2D*view)const{if(viewing&&viewReady){viewScene.draw(out,readAhead!=nullptr);viewFade.blend(out);}else menuScene.draw(out,false,view);}
 void CgScreen::pan(float x,float y){pointerX=std::clamp(x,0.f,1280.f);pointerY=std::clamp(y,0.f,720.f);if(viewing&&viewReady)positionView();}
 void CgScreen::panDelta(float x,float y){pan(pointerX+x,pointerY+y);}
-void CgScreen::toggleZoom(){if(viewing&&viewReady){zoom=zoom==1?2:1;positionView();}}
-CgScreen::Action CgScreen::back(){if(viewing){if(zoom==2){zoom=1;positionView();}else closeView();}else return Back;return None;}
+void CgScreen::toggleZoom(){if(viewing&&viewReady){zoom=zoom==1?2:1;positionView();
+#ifdef QLIE_PROFILE_WHJ6
+ whj6::ui::focus(viewScene,"ui_cg_viewbutton1",false,false,zoom==2);
+#endif
+}}
+CgScreen::Action CgScreen::back(){if(viewing){if(zoom==2)toggleZoom();else closeView();}else return Back;return None;}
 void CgScreen::move(int x,int y){if(!opened||elapsed<250)return;if(viewing){if(x){auto count=catalog.items()[group].files.size();requestView(unsigned((int(requestedVariant)+x+int(count))%int(count)));}if(y)panDelta(0,y*40);return;}
  const int navigation=navigationStart();
  if(selected<24){
@@ -208,9 +233,36 @@ void CgScreen::move(int x,int y){if(!opened||elapsed<250)return;if(viewing){if(x
 }
 CgScreen::Action CgScreen::confirm(){if(!opened||elapsed<250)return None;if(viewing){move(1,0);return None;}if(selected<24){auto index=page*24+unsigned(selected);if(index<catalog.items().size()&&catalog.unlocked(index,progress)){group=index;variant=0;zoom=1;pointerX=640;pointerY=360;viewing=true;requestView(0);}return None;}
  if(selected<navigationStart()){page=unsigned(selected-24);selected=0;setup();return None;}return selected==navigationStart()+1?Replay:selected==navigationStart()+2?Music:selected==navigationStart()+3?Back:None;}
-CgScreen::Action CgScreen::tap(float x,float y){if(!opened||elapsed<250)return None;if(viewing){for(int i=0;i<4;i++)if(viewScene.uiHit("ui_cg_viewbutton"+std::to_string(i),x,y)){if(i==0)move(-1,0);else if(i==1)toggleZoom();else if(i==2)return back();else move(1,0);return None;}return confirm();}
+CgScreen::Action CgScreen::tap(float x,float y){
+ if(!opened||elapsed<250)return None;
+ if(viewing){
+#ifdef QLIE_PROFILE_WHJ6
+  if(!viewControls){setViewControls(true);return None;}
+  for(int i=0;i<5;++i)if(viewScene.uiHit("ui_cg_viewbutton"+std::to_string(i),x,y)){
+   if(i==0)move(-1,0);else if(i==1)toggleZoom();else if(i==2)setViewControls(false);
+   else if(i==3)move(1,0);else return back();
+   return None;
+  }
+#else
+  for(int i=0;i<4;i++)if(viewScene.uiHit("ui_cg_viewbutton"+std::to_string(i),x,y)){
+   if(i==0)move(-1,0);else if(i==1)toggleZoom();else if(i==2)return back();else move(1,0);
+   return None;
+  }
+#endif
+  return confirm();
+ }
+#ifdef QLIE_PROFILE_WHJ6
+ using whj6::ui::contains;
+ for(int i=0;i<24;++i)if(exists(i)&&contains(x,y,albumX(i),albumY(i),285,190)){
+  selected=i;highlight();return confirm();
+ }
+ for(int i=0;i<pageButtons();++i)if(contains(x,y,1179+i*230,109,212,42)){
+  selected=24+i;return confirm();
+ }
+#else
  for(int i=0;i<24;i++)if(exists(i)&&menuScene.uiHit("ui_cg_item"+std::to_string(i),x,y)){selected=i;highlight();return confirm();}
  for(int i=0;i<pageButtons();i++)if(menuScene.uiHit("ui_cg_page"+std::to_string(i),x,y)){selected=24+i;return confirm();}
+#endif
  for(int i=game_profile::story.legacyAvg?3:1;i<4;i++)if(menuScene.uiHit("ui_cg_nav"+std::to_string(i),x,y)){selected=navigationStart()+i;return confirm();}
  return None;}
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
 #include "story.hpp"
+#include "profiles/settings_layout.hpp"
 #include "profiles/title_layout.hpp"
 #include <string_view>
 
@@ -8,6 +9,12 @@ namespace whj6::profile {
 inline constexpr unsigned sceneReadAheadBytes=52u*1024*1024;
 inline constexpr std::array<unsigned,2> sceneSize{1920,1080};
 inline constexpr int sceneVideoMaxHeight=2700;
+inline constexpr whj2::SettingsLayout settingsLayout{{{
+ {320,520,300,0,-6,0},{320,413.33f,300,0,-6,0},
+ {820,146.67f,300,0,-6,0},{820,173.33f,300,0,-6,0},{820,200,300,0,-6,0},
+ {820,226.67f,300,0,-6,0},{820,253.33f,300,0,-6,0},{820,280,300,0,-6,0},
+ {320,440,300,0,-6,0}
+}}, {176.67f,203.33f,230,256.67f,283.33f}};
 inline const qlie::ArchiveLayout archives{
  qlie::PackVersion::v31,8,"GameData/data","","","","ボイス/","patch.dat",
  {{"image/","画像/"},{"chara/","立ち絵/"},{"music/","音楽/"},{"se/","効果音/"},
@@ -27,8 +34,9 @@ inline const whj2::StoryProfile story{
 };
 inline void applySentenceTiming(whj2::Event&){}
 inline bool emptyAnimationSlot(std::string_view path,unsigned slot,size_t slots){
- // Character effects use the index after their last bitmap as a blank frame.
- return path.rfind("image/effect_c/",0)==0&&slot==slots;
+ // These animations use the index after their last bitmap for an empty layer.
+ return slot==slots&&(path.rfind("image/effect_c/",0)==0||
+  path=="script/albummode/button_album.b"||path=="script/memorymode/button_memory.b");
 }
 inline constexpr char gameName[]="美少女万華鏡異聞 雪女";
 inline constexpr char gameEnv[]="WHJ6_GAME",saveEnv[]="WHJ6_SAVES",
@@ -51,6 +59,7 @@ inline constexpr auto title=[] {
  layout.alternateHits=0;layout.alternateRange=1;
  layout.lockedEnter="*OnLockEnable";layout.lockedIdle="*OnLockOffMouse";
  layout.buttonOff="_off.png";layout.buttonOn="_on.png";
+ layout.buttonPush="_push.png";layout.confirmSound="misc/Sys_OnClickTitle.ogg";
  return layout;
 }();
 inline constexpr double cautionFade=450,cautionExitWait=500;

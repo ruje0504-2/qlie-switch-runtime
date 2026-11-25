@@ -18,7 +18,7 @@ MusicScreen::MusicScreen(qlie::Assets&a,Audio&sound,Settings&config,KFont*f,cons
   if(row.size()!=3)throw std::runtime_error("WHJ6 track list fields");
   const auto path="music/"+row[2]+".ogg";
   if(!a.exists(path))throw std::runtime_error("WHJ6 music track missing: "+path);
-  tracks.push_back({row[2],path,"thumbnail/sound/"+row[0]+"_off.png"});
+  tracks.push_back({row[2],path,"thumbnail/sound/"+row[0],"thumbnail/sound/"+row[1]+".png"});
  }
  if(trackCount()!=expectedTracks)throw std::runtime_error("WHJ6 music track count");
 }
@@ -36,28 +36,43 @@ void MusicScreen::text(const std::string&id,unsigned slot,const std::string&valu
 #endif
 }
 #ifdef QLIE_PROFILE_WHJ6
+namespace {
+constexpr int trackX(int index){return 360+index/7*400;}
+constexpr int trackY(int index){return 350+index%7*90;}
+constexpr int controlX[]={195,315,375,455,255,515,575};
+constexpr auto seekX=whj6::ui::to720(639),seekTop=whj6::ui::to720(184),seekWidth=whj6::ui::to720(292);
+constexpr auto volumeX=whj6::ui::to720(169),volumeTop=whj6::ui::to720(227);
+}
 void MusicScreen::prepareWhj6(){
- using whj6::ui::sprite;
- sprite(scene,"ui_music_bg","script/soundmode/bg.png",0,0,100,66.6667f,false);
- for(int i=0;i<trackCount();++i)
-  sprite(scene,"ui_track"+std::to_string(i),tracks[i].button,352+i/8*288,194+(i%8)*54,110);
- constexpr const char*controls[]={"op_prev_off.png","op_play_off.png","op_next_off.png","op_onerepeat_off.png"};
- for(int i=0;i<4;++i)sprite(scene,"ui_music_control"+std::to_string(i),
-  std::string("script/soundmode/")+controls[i],990+i*60,98,150);
- for(unsigned i=0;i<3;++i)sprite(scene,"ui_music_nav"+std::to_string(i),
-  std::string("script/modecommon/")+whj6::ui::extraNav[i],int(whj6::ui::navX(i)),690,150,58);
- sprite(scene,"ui_music_back","script/modecommon/戻る_off.png",1210,690,150,58);
- whj6::ui::focus(scene,"ui_music_nav2",false,true);
- auto bar=[&](const char* id,int x,unsigned width,bool filled){
-  scene.command(std::string("^")+id+",x:"+std::to_string(x)+",y:"+std::to_string(seekY()+8)+",pri:"+std::to_string(filled?120:110));
-  Image image{width,6,qlie::Bytes(width*24)};
-  const std::array<uint8_t,4> color=filled?std::array<uint8_t,4>{0xe9,0xbc,0x8b,0xff}:std::array<uint8_t,4>{0x5e,0x4c,0x3a,0xff};
-  for(size_t i=0;i<image.pixels.size();i+=4)std::copy(color.begin(),color.end(),image.pixels.begin()+i);
-  scene.setUiBitmap(id,std::move(image));
- };
- bar("ui_music_seek",210,399,false);bar("ui_music_seekknob",210,399,true);
- bar("ui_music_volume",700,196,false);bar("ui_music_volknob",700,196,true);
- scene.command("^ui_music_caption,x:160,y:60,pri:150");
+ using namespace whj6::ui;
+ picture(scene,"ui_music_bg","script/soundmode/bg.png",0,0,100);
+ for(int i=0;i<trackCount();++i){
+  const auto id="ui_track"+std::to_string(i);
+  button(scene,id,"script/soundmode/button_music.b",trackX(i),trackY(i),110);
+  slots(scene,id,tracks[i].button,{"_off","_on","_hold_off","_hold_on"});
+ }
+ constexpr const char*controls[]={"op_prev","op_play","op_next","op_onerepeat","op_stop","op_allrepeat","op_shuffle"};
+ for(int i=0;i<7;++i){
+  const auto id="ui_music_control"+std::to_string(i);
+  button(scene,id,"script/soundmode/button_mode.b",controlX[i],180,150);
+  const auto prefix=std::string("script/soundmode/")+controls[i];
+  slots(scene,id,prefix,{"_off","_on"});
+  if(i==0||i==2||i==4)scene.uiSlot(id,4,prefix+"_hide.png");
+  else{
+   scene.uiSlot(id,2,prefix+"_off_hold.png");
+   scene.uiSlot(id,3,prefix+"_on_hold.png");
+  }
+ }
+ for(unsigned i=0;i<3;++i)
+  navButton(scene,"ui_music_nav"+std::to_string(i),i);
+ navButton(scene,"ui_music_back",3);
+ focus(scene,"ui_music_nav2",false,true);
+ button(scene,"ui_music_seek","script/soundmode/seek_scroll_bar.b",639,184,110);
+ button(scene,"ui_music_seekknob","script/soundmode/seek_scroll_prog.b",639,184,120);
+ button(scene,"ui_music_volume","script/soundmode/seek_scroll_bar.b",169,227,110);
+ button(scene,"ui_music_volknob","script/soundmode/seek_scroll_prog.b",169,227,120);
+ scene.command("^ui_music_caption,x:906.667,y:120,pri:150,show:false");
+ scene.command("^ui_music_time,x:538.667,y:101,pri:150");
 }
 #endif
 void MusicScreen::prepare(){
@@ -102,6 +117,10 @@ void MusicScreen::prepare(){
  prepared=true;
 }
 void MusicScreen::open(){opened=true;selected=0;playing=-1;audible=false;loop=false;clearSeek();volumeValue=settings.get("MusicModeVolume");audio.setMusicModeGain((volumeValue*settings.get("MasterVolume")/100)/100.f);audio.stop(0);
+#ifdef QLIE_PROFILE_WHJ6
+ repeat=Repeat::Off;
+ scene.command("^ui_music_caption,show:false");
+#endif
  prepare();
  motions.clear();
  scene.resetUiAnimations();
@@ -124,16 +143,7 @@ void MusicScreen::showPage(int value){
 void MusicScreen::close(){audio.stop(0);clearSeek();opened=false;}
 void MusicScreen::setMotion(const std::string&id,const char*motion){
  auto&previous=motions[id];if(previous==motion)return;
-#ifdef QLIE_PROFILE_WHJ6
- const std::string_view state(motion);
- if(id=="ui_music_control1")
-  scene.command("^"+id+",file:script/soundmode/"+(audible?"op_play_on_hold.png":"op_play_off.png"));
- if(id=="ui_music_control3")
-  scene.command("^"+id+",file:script/soundmode/"+(loop?"op_onerepeat_on_hold.png":"op_onerepeat_off.png"));
- whj6::ui::focus(scene,id,state=="*OnMouse"||state=="*OnCheck"||state=="*OnCheckOnMouse");
-#else
  scene.setUiMotion(id,motion);
-#endif
  previous=motion;
 }
 void MusicScreen::highlight(){
@@ -142,8 +152,19 @@ void MusicScreen::highlight(){
  setMotion("ui_music_seek",selected==control(Seek)?"*OnMouse":"*OffMouse");
  setMotion("ui_music_volume",selected==control(Volume)?"*OnMouse":"*OffMouse");
  setMotion("ui_music_back",selected==control(Return)?"*OnMouse":"*OffMouse");
+#ifdef QLIE_PROFILE_WHJ6
+ const Control controls[]={Previous,Play,Next,Loop,Stop,RepeatAll,Shuffle};
+ const bool active[]={false,audible,false,repeat==Repeat::One,false,repeat==Repeat::All,repeat==Repeat::Random};
+ for(int i=0;i<7;++i){
+  const bool locked=(i==0||i==2||i==4)&&playing<0;
+  const bool hovering=selected==control(controls[i]);
+  setMotion("ui_music_control"+std::to_string(i),locked?"*OnLock":
+   active[i]?(hovering?"*OnCheckOnMouse":"*OnCheckOffMouse"):(hovering?"*OnMouse":"*OffMouse"));
+ }
+#else
  for(int i=0;i<3;i++){const char*motion=selected==control(Previous)+i?"*OnMouse":"*OffMouse";if(i==1&&audible)motion=selected==control(Play)?"*OnCheckOnMouse":"*OnCheckOffMouse";setMotion("ui_music_control"+std::to_string(i),motion);}
  setMotion("ui_music_control3",loop?"*OnCheck":"*OffCheck");
+#endif
  for(int i=page*perPage();i<=lastTrackOnPage();++i)
   setMotion("ui_track"+std::to_string(i),i==selected?"*OnMouse":i==playing?"*OnCheck":"*OffMouse");
  if(paged())for(int i=0;i<pageCount();++i)
@@ -151,7 +172,46 @@ void MusicScreen::highlight(){
 }
 
 void MusicScreen::uiSound(const char*name){auto path=std::string("misc/")+name+".wav";audio.playFile(assets,Audio::SystemChannel,path,false,255.f/256,0,3);}
-void MusicScreen::play(int n){clearSeek();playing=(n+trackCount())%trackCount();selected=playing;if(paged()&&playing/perPage()!=page)showPage(playing/perPage());audio.playFile(assets,0,tracks[playing].path,false,255.f/256,0,5);audible=true;highlight();refresh();}
+void MusicScreen::play(int n){
+ clearSeek();
+ playing=(n+trackCount())%trackCount();
+#ifdef QLIE_PROFILE_WHJ6
+ scene.command("^ui_music_caption,file:"+tracks[playing].caption+",align:center:center,scalex:66.6667,scaley:66.6667,show:true");
+#else
+ selected=playing;
+#endif
+ if(paged()&&playing/perPage()!=page)showPage(playing/perPage());
+ audio.playFile(assets,0,tracks[playing].path,false,255.f/256,0,5);
+ audible=true;
+ highlight();
+ refresh();
+}
+#ifdef QLIE_PROFILE_WHJ6
+void MusicScreen::stopWhj6(){
+ audio.stop(0);clearSeek();playing=-1;audible=false;
+ scene.command("^ui_music_caption,show:false");
+ highlight();refresh();
+}
+int MusicScreen::nextWhj6(bool automatic){
+ if(repeat==Repeat::Random)return std::uniform_int_distribution<int>(0,trackCount()-1)(shuffle);
+ if(automatic&&repeat==Repeat::One)return playing;
+ if(automatic&&repeat==Repeat::Off&&playing+1==trackCount())return -1;
+ return (playing+1)%trackCount();
+}
+bool MusicScreen::moveWhj6(int x,int y){
+ constexpr Control order[]={Previous,Stop,Play,Next,Loop,RepeatAll,Shuffle,Seek,Volume};
+ constexpr int boxes=sizeof(order)/sizeof(order[0]);
+ auto found=std::find_if(std::begin(order),std::end(order),[&](Control c){return selected==control(c);});
+ if(found==std::end(order)||(x&&(*found==Seek||*found==Volume)))return false;
+ const auto offset=int(found-std::begin(order));
+ if(x)selected=control(order[(offset+x+boxes)%boxes]);
+ else if(y>0)selected=0;
+ else if(y<0)selected=control(*found==Seek?Volume:Seek);
+ highlight();
+ uiSound("Sys_OnMouse");
+ return true;
+}
+#endif
 MusicScreen::Destination MusicScreen::confirm(){
  if(selected==control(Seek)||selected==control(Volume))return NoDestination;
  uiSound(selected==control(Return)?"Sys_Cancel":"Sys_OnClick");
@@ -165,19 +225,38 @@ MusicScreen::Destination MusicScreen::confirm(){
  }
  if(selected<trackCount())play(selected);
  else{
+#ifdef QLIE_PROFILE_WHJ6
+  if(selected==control(Previous)&&playing>=0)play(playing-1);
+  else if(selected==control(Play)){
+   if(playing<0)play(0);else{audible=!audible;audio.pause(0,!audible);}
+  }else if(selected==control(Next)&&playing>=0)play(nextWhj6(false));
+  else if(selected==control(Stop))stopWhj6();
+  else if(selected==control(Loop)||selected==control(RepeatAll)||selected==control(Shuffle)){
+   const auto next=selected==control(Loop)?Repeat::One:selected==control(RepeatAll)?Repeat::All:Repeat::Random;
+   repeat=repeat==next?Repeat::Off:next;
+  }
+#else
   if(selected==control(Previous)){if(playing>=0)play(playing-1);}
   else if(selected==control(Play)){if(playing<0)play(0);else{audible=!audible;audio.volume(0,audible?255.f/256:0,250);}}
   else if(selected==control(Next)){if(playing>=0)play(playing+1);}
   else if(selected==control(Loop))loop=!loop;
+#endif
   highlight();refresh();
  }
  return NoDestination;
 }
 MusicScreen::Destination MusicScreen::back(){
+#ifdef QLIE_PROFILE_WHJ6
+ if(playing>=0){stopWhj6();return NoDestination;}
+#else
  if(playing>=0){audio.volume(0,0,250,true);clearSeek();playing=-1;audible=false;highlight();refresh();return NoDestination;}
+#endif
  uiSound("Sys_Cancel");return Title;
 }
 void MusicScreen::move(int x,int y){
+#ifdef QLIE_PROFILE_WHJ6
+ if(moveWhj6(x,y))return;
+#endif
  const int old=selected,n=trackCount(),rows=trackRows(),pageFirst=page*perPage(),
            pageLast=lastTrackOnPage(),columns=(pageLast-pageFirst+rows)/rows;
  if(selected==control(Seek)||selected==control(Volume)){
@@ -216,14 +295,40 @@ void MusicScreen::move(int x,int y){
 }
 MusicScreen::Destination MusicScreen::tap(float x,float y){
  if(paged())for(int i=0;i<pageCount();++i)if(scene.uiHit("ui_music_page"+std::to_string(i),x,y)){selected=control(Page)+i;return confirm();}
+#ifdef QLIE_PROFILE_WHJ6
+ using whj6::ui::contains;
+ for(int i=0;i<trackCount();++i)if(contains(x,y,trackX(i)-190,trackY(i)-20,380,40)){
+  selected=i;return confirm();
+ }
+ const Control controls[]={Previous,Play,Next,Loop,Stop,RepeatAll,Shuffle};
+ for(int i=0;i<7;++i)if(contains(x,y,controlX[i]-26,154,52,52)){
+  selected=control(controls[i]);return confirm();
+ }
+#else
  for(int i=page*perPage();i<=lastTrackOnPage();++i)if(scene.uiHit("ui_track"+std::to_string(i),x,y)){selected=i;return confirm();}
  for(int i=0;i<4;i++)if(scene.uiHit("ui_music_control"+std::to_string(i),x,y)){selected=control(Previous)+i;return confirm();}
+#endif
  if(!game_profile::story.legacyAvg)
   for(int i=0;i<2;i++)if(scene.uiHit("ui_music_nav"+std::to_string(i),x,y)){selected=control(Album)+i;return confirm();}
  if(scene.uiHit("ui_music_back",x,y)){selected=control(Return);return confirm();}
  drag(x,y);return NoDestination;
 }
-bool MusicScreen::drag(float x,float y){if(y>=seekY()-8&&y<=seekY()+20&&x>=210&&x<=609&&playing>=0){seekFraction=std::clamp((x-210)/399,0.f,1.f);seekOffsetMs=0;refresh();return true;}if(y>=seekY()-8&&y<=seekY()+20&&x>=700&&x<=896){volumeValue=int(std::clamp((x-700)/196,0.f,1.f)*100);settings.set("MusicModeVolume",volumeValue);dirty=true;audio.setMusicModeGain((volumeValue*settings.get("MasterVolume")/100)/100.f);refresh();return true;}return false;}
+bool MusicScreen::drag(float x,float y){
+#ifdef QLIE_PROFILE_WHJ6
+ const float sx=seekX,sy=seekTop,sw=seekWidth,vx=volumeX,vy=volumeTop,vw=seekWidth;
+#else
+ const float sx=210,sy=seekY(),sw=399,vx=700,vy=seekY(),vw=196;
+#endif
+ if(y>=sy-8&&y<=sy+20&&x>=sx&&x<=sx+sw&&playing>=0){
+  seekFraction=std::clamp((x-sx)/sw,0.f,1.f);seekOffsetMs=0;refresh();return true;
+ }
+ if(y>=vy-8&&y<=vy+20&&x>=vx&&x<=vx+vw){
+  volumeValue=int(std::clamp((x-vx)/vw,0.f,1.f)*100);
+  settings.set("MusicModeVolume",volumeValue);dirty=true;
+  audio.setMusicModeGain((volumeValue*settings.get("MasterVolume")/100)/100.f);refresh();return true;
+ }
+ return false;
+}
 void MusicScreen::refresh(){
  auto p=playing<0?AudioPosition{}:audio.position(0);
  // An asynchronously queued track has no duration until its PCM is ready.
@@ -234,15 +339,21 @@ void MusicScreen::refresh(){
   p=audio.position(0);
  }
  auto current=p.frame*1000/44100,total=p.length*1000/44100;char time[64];std::snprintf(time,sizeof(time)," %02llu:%02llu (%02llu:%02llu)",(unsigned long long)(current/60000),(unsigned long long)(current/1000%60),(unsigned long long)(total/60000),(unsigned long long)(total/1000%60));
+#ifdef QLIE_PROFILE_WHJ6
+ if(caption!=time){caption=time;text("ui_music_time",0,caption,110,24,13);}
+ constexpr float scale=2.f/3;
+#else
  if(game_profile::story.legacyAvg){
   if(caption!=time){caption=time;labelText.start("[spd,0]"+caption);legacyCaption=labelText.render(font,{200,50,14,14});}
  }else{
   auto next=playing<0?std::string("no select"):tracks[playing].title+time;
   if(next!=caption){caption=next;text("ui_music_caption",0,"[pc,"+caption+"]",500,40,14);}
  }
+ constexpr float scale=1;
+#endif
  const float seek=p.length?100.f*p.frame/p.length:0;
- if(seek!=shownSeek){scene.command("^ui_music_seekknob,scalex:"+std::to_string(seek));shownSeek=seek;}
- if(volumeValue!=shownVolume){scene.command("^ui_music_volknob,scalex:"+std::to_string(volumeValue));shownVolume=volumeValue;}
+ if(seek!=shownSeek){scene.command("^ui_music_seekknob,scalex:"+std::to_string(seek*scale));shownSeek=seek;}
+ if(volumeValue!=shownVolume){scene.command("^ui_music_volknob,scalex:"+std::to_string(volumeValue*scale));shownVolume=volumeValue;}
 }
 void MusicScreen::draw(qlie::Bytes&out,const Affine2D*view)const{
  scene.draw(out,false,view);
@@ -260,5 +371,12 @@ void MusicScreen::draw(RenderTarget&out,const Affine2D*view)const{
   queue.draw(out,1280,720);
  }
 }
-void MusicScreen::update(double ms){if(!opened)return;scene.update(ms);if(playing>=0&&audible&&!audio.playing(0)){if(loop){audio.seek(0,0);audio.volume(0,255.f/256);}else play(playing+1);}refresh();}
+void MusicScreen::update(double ms){if(!opened)return;scene.update(ms);if(playing>=0&&audible&&!audio.playing(0)){
+#ifdef QLIE_PROFILE_WHJ6
+ const auto next=nextWhj6(true);
+ if(next<0)stopWhj6();else play(next);
+#else
+ if(loop){audio.seek(0,0);audio.volume(0,255.f/256);}else play(playing+1);
+#endif
+ }refresh();}
 }

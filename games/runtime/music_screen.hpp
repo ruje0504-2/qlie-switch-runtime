@@ -5,10 +5,13 @@
 #include "settings.hpp"
 #include <optional>
 #include <algorithm>
+#ifdef QLIE_PROFILE_WHJ6
+#include <random>
+#endif
 namespace whj2 {
 class MusicScreen {
  qlie::Assets& assets;Audio& audio;Settings& settings;SceneImages scene;MessageText labelText;KFont*font;
- struct Track {std::string title,path,button{};};std::vector<Track> tracks;
+ struct Track {std::string title,path,button{},caption{};};std::vector<Track> tracks;
  bool prepared=false,opened=false,loop=false,audible=false,dirty=false;int selected=0,playing=-1,volumeValue=100,page=0;std::string caption;
  float shownSeek=-1;
  int shownVolume=-1;
@@ -16,10 +19,20 @@ class MusicScreen {
  int64_t seekOffsetMs=0;
  std::map<std::string,std::string> motions;
  std::optional<Image> legacyCaption;
- enum Control { Previous,Play,Next,Loop,Return,Seek,Volume,Album,Memory,Page };
+ enum Control { Previous,Play,Next,Loop,Return,Seek,Volume,Album,Memory,
+#ifdef QLIE_PROFILE_WHJ6
+  Stop,RepeatAll,Shuffle,
+#endif
+  Page };
  int trackCount()const{return int(tracks.size());}
  bool paged()const{return trackCount()==37;}
- int trackRows()const{return paged()?7:trackCount()==18?6:8;}
+ int trackRows()const{
+#ifdef QLIE_PROFILE_WHJ6
+  return 7;
+#else
+  return paged()?7:trackCount()==18?6:8;
+#endif
+ }
  int perPage()const{return paged()?21:trackCount();}
  int pageCount()const{return (trackCount()+perPage()-1)/perPage();}
  int lastTrackOnPage()const{return std::min(trackCount(),(page+1)*perPage())-1;}
@@ -31,7 +44,13 @@ class MusicScreen {
  void clearSeek(){seekFraction.reset();seekOffsetMs=0;}
  void uiSound(const char*);
 #ifdef QLIE_PROFILE_WHJ6
+ enum class Repeat {Off,One,All,Random};
+ Repeat repeat=Repeat::Off;
+ std::mt19937 shuffle{static_cast<unsigned>(SDL_GetPerformanceCounter())};
+ void stopWhj6();
  void prepareWhj6();
+ bool moveWhj6(int,int);
+ int nextWhj6(bool automatic);
 #endif
 public:
  enum Destination {NoDestination,Title,CG,Replay};

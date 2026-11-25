@@ -15,6 +15,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Incremental native frontend: graphics/audio integration remains in progress.
 #include "profile.hpp"
+#ifdef QLIE_PROFILE_WHJ6
+#include "profiles/whj6/ui.hpp"
+#endif
 #include "ui_locale.hpp"
 #include "story.hpp"
 #ifdef WHJ2_MAC_GAME_PICKER
@@ -413,7 +416,7 @@ struct Frontend {
  }
 #endif
  voices=std::make_unique<whj2::VoiceResolver>(assets);
-#if defined(__SWITCH__) && defined(QLIE_PROFILE_WHJ5)
+#if defined(__SWITCH__) && (defined(QLIE_PROFILE_WHJ5)||defined(QLIE_PROFILE_WHJ6))
  upperMenu=std::make_unique<whj2::UpperMenu>(assets,false);
 #else
  upperMenu=std::make_unique<whj2::UpperMenu>(assets);
@@ -1061,10 +1064,16 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }
  template<typename Target>
  void drawUpperMenu(Target&target){
+#ifdef QLIE_PROFILE_WHJ6
+  upperMenu->saveLoadAvailable(!replayActive);
+  constexpr int skipX=310,skipY=4;
+#else
+  constexpr int skipX=744,skipY=12;
+#endif
   upperMenu->draw(target);
   if(!upperMenu->sectionSkipVisible())return;
   whj2::RenderQueue queue;
-  line(ui.simplified()?"跳过场景":"シーンスキップ",744,12,16,
+  line(ui.simplified()?"跳过场景":"シーンスキップ",skipX,skipY,16,
        upperMenu->sectionSkipSelected()?0xffff88:0xffffff,&queue);
   queue.draw(target,1280,720);
  }
@@ -1639,7 +1648,10 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  auto action=title->confirm();
  if(introActive)updateTitleAudio(0,true);
  if(action==whj2::TitleScreen::None)return;
- uiSound("Sys_OnClick");
+ if constexpr(game_profile::title.confirmSound){
+  const auto* sound=action==whj2::TitleScreen::Back?"misc/Sys_Cancel.wav":game_profile::title.confirmSound;
+  audio->playFile(assets,whj2::Audio::SystemChannel,sound,false,1,0,3);
+ }else uiSound("Sys_OnClick");
  if(action==whj2::TitleScreen::Start){beginTitleStart();}
  else if(action==whj2::TitleScreen::Load)openPanel(whj2::GameMenu::Load);
  else if(action==whj2::TitleScreen::Settings)openPanel(whj2::GameMenu::Settings);
@@ -1667,6 +1679,11 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(action==UI::PageChange){changeSlotPage(gameMenu.requestedPage,0);return;}
 #ifdef QLIE_PROFILE_WHJ6
  if(action==UI::LoadChoiceBackup){startLoad(ChoiceBackupSlot);return;}
+ if(action==UI::SwitchSavePanel){
+  uiSound("Sys_OnClick");
+  openPanel(gameMenu.panel==UI::Save?UI::Load:UI::Save);
+  return;
+ }
 #endif
  if(action==UI::TestVolume){
 #ifdef QLIE_PROFILE_WHJ6
@@ -1738,9 +1755,14 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   refreshSlotFlags();
  }
  void openPanel(whj2::GameMenu::Panel panel){if(movie->playing()||(replayActive&&(panel==whj2::GameMenu::Save||panel==whj2::GameMenu::Load)))return;if(panel==whj2::GameMenu::Save&&menu)return;
+#ifdef QLIE_PROFILE_WHJ6
+ gameMenu.allowSavePanel=!menu&&!replayActive;
+#endif
  // Reuse slot previews across panels. Save and delete invalidate their slot.
  upperMenu->close();normalSkip=false;status.clear();gameMenu.allowSceneReturn=replayActive;gameMenu.open(panel);if(panel==whj2::GameMenu::Save||panel==whj2::GameMenu::Load){auto slot=newestManualSlot()-1;gameMenu.page=int(slot/8);gameMenu.focus=int(slot%8);}refreshSlotFlags();historyVoicePlayed=false;historyViewOffset=-1;gameMenu.setHistorySize(history.size());}
  void upperAction(whj2::UpperMenu::Action action){if(action==whj2::UpperMenu::None)return;upperMenu->close();
+ if(action==whj2::UpperMenu::Save){openPanel(whj2::GameMenu::Save);return;}
+ if(action==whj2::UpperMenu::Load){openPanel(whj2::GameMenu::Load);return;}
  if(action==whj2::UpperMenu::Quit){performUi(whj2::GameMenu::Quit);return;}
  if(action==whj2::UpperMenu::Title){performUi(whj2::GameMenu::Title);return;}
  if(action==whj2::UpperMenu::SectionSkip){if(sceneSkipAvailable())gameMenu.ask(whj2::GameMenu::SectionSkip);return;}
@@ -1756,7 +1778,13 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   if(startingReplay()){
    qlie::Bytes captured(1280*720*4,0);
    replayScreen->draw(captured);
+#ifdef QLIE_PROFILE_WHJ6
+   // This game's archive has no memory-mode rule image. Keep the existing
+   // fade duration and use the captured frame for the fade to black.
+   transition->command("^sentence,fade:overlap:250",captured);
+#else
    transition->command("^sentence,fade:rule:250:script/memorymode/fade.png:134",captured);
+#endif
    transition->present();
    return;
   }
@@ -1854,33 +1882,6 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  if(preview.damaged){preview.thumbnail={};preview.excerpt=utf8(ui.text("保存データが不完全です"));}
  return slotPreviews.emplace(slot,std::move(preview)).first->second;
  }
-#ifdef QLIE_PROFILE_WHJ6
- void drawWhj6PanelLabels(whj2::RenderQueue&queue){
-  using UI=whj2::GameMenu;
-  auto label=[&](const char*str,int x,int y,int focus=-1){
-   line(str,x,y,20,focus>=0&&gameMenu.focus==focus?0xffea99:0xffffff,&queue);
-  };
-  if(gameMenu.asking){label("はい",528,313,0);label("いいえ",700,313,1);return;}
-  if(gameMenu.panel==UI::Settings){
-   label("設定",142,67);
-   constexpr const char*labels[]={"ウィンドウ透明度","表示速度","全体音量","音楽","音声","効果音","システム音","動画","自動送り速度"};
-   for(int i=0;i<9;++i){
-    const auto&slider=gameSettingsLayout.sliders[i];
-    label(labels[i],int(slider.x)-(i<2||i==8?173:120),int(slider.y)-13,3+i);
-   }
-   for(int i=0;i<5;++i)label("試聴",1050,int(gameSettingsLayout.testButtonY[i])-12,17+i);
-   label("音声を止める",180,342);label("する",378,342,13);label("しない",503,342,13);
-   label("音声待ち",180,401);label("待つ",378,401,14);label("待たない",503,401,14);
-   label("スキップ対象",180,431);label("既読",378,431,15);label("全て",503,431,15);
-   label("終了",786,678,2);label("タイトル",895,678,1);label("初期化",1042,678,12);
-  }else if(gameMenu.panel==UI::Load||gameMenu.panel==UI::Save){
-   label(gameMenu.panel==UI::Save?"セーブ":"ロード",70,68);
-   label("終了",925,678);label("タイトル",1030,678);
-   if(gameMenu.choiceBackupAvailable)label("直前の選択肢",49,676,UI::ChoiceBackupFocus);
-  }
-  label("戻る",1176,678,gameMenu.panel==UI::Settings?0:-1);
- }
-#endif
  void drawPanel(){if constexpr (qlie::diagnostics) ++panelDraws;using UI=whj2::GameMenu;
  using PanelContent=std::function<void(whj2::RenderQueue&)>;
  auto submit=[&](const PanelContent&content,const PanelContent&prompt={}){
@@ -1914,7 +1915,11 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
    cached->lastUse=++historyRowUse;
    const int firstLine=gameMenu.historyTextOffset[row];
    if(cached->firstLine!=firstLine){
+#ifdef QLIE_PROFILE_WHJ6
+    static constexpr whj2::MessageStyle style{780,76,24,24,0xffffff};
+#else
     static constexpr whj2::MessageStyle style{920,104,26,26,0xffffff};
+#endif
     historyText->start(entry.text);
     historyText->reveal();
     if(needsRow)cached->maxOffset=int(historyText->lastPageOffset(style));
@@ -1929,30 +1934,46 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   }
   submit([&](whj2::RenderQueue&queue){
 #ifdef QLIE_PROFILE_WHJ6
-   if(!gameMenu.asking)drawWhj6PanelLabels(queue);
-#endif
+   constexpr int bodyX=303;
+#else
+   constexpr int bodyX=230;
    static constexpr int rowY[]={516,367,218,64};
+#endif
    for(int row=0;row<gameMenu.historyRows;row++){
     const auto&entry=history[visible[row]->entry];
+#ifdef QLIE_PROFILE_WHJ6
+    const int y=int(whj6::ui::to720(float(whj6::ui::historyY(row)+6)));
+    constexpr int nameHeight=26;
+#else
     const int y=rowY[row];
-    line(whj2::messageDisplayName(entry.speaker),230,y,26,0x69faff,&queue,historyFace);
-    queue.image(visible[row]->body,whj2::Affine2D{1,0,0,1,230.f,float(y+30)},0,255,0,0xffffff);
+    constexpr int nameHeight=30;
+#endif
+    line(whj2::messageDisplayName(entry.speaker),bodyX,y,26,0x69faff,&queue,historyFace);
+    queue.image(visible[row]->body,whj2::Affine2D{1,0,0,1,float(bodyX),float(y+nameHeight)},0,255,0,0xffffff);
    }
    if(!status.empty())line(status,30,677,18,0xffffff,&queue);
-  },[&](whj2::RenderQueue&queue){
 #ifdef QLIE_PROFILE_WHJ6
-   drawWhj6PanelLabels(queue);
-#endif
+  },[](whj2::RenderQueue&){});
+#else
+  },[&](whj2::RenderQueue&queue){
    line(ui.simplified()?"是否跳转到该文字处？":"この文章まで戻りますか？",440,275,28,0xffffff,&queue);
   });
+#endif
   return;
  }
  refreshSlotFlags();
  submit([&](whj2::RenderQueue&queue){
 #ifdef QLIE_PROFILE_WHJ6
-  drawWhj6PanelLabels(queue);
-#endif
+  if(gameMenu.asking){
+   if(gameMenu.requested==UI::SectionSkip)line("このシーンをスキップしますか？",475,317,24,0xffffff,&queue);
+   return;
+  }
+  if(gameMenu.panel==UI::Settings)line("等待语音",217,632,19,0xffffff,&queue);
+  if(gameMenu.panel==UI::Load&&gameMenu.choiceBackupAvailable)
+   line("上一个选项",37,679,20,gameMenu.focus==UI::ChoiceBackupFocus?0xffea99:0xffffff,&queue);
+#else
   if(gameMenu.asking){auto prompt=gameMenu.requested==UI::Quit?ui.text("ゲームを終了しますか？"):gameMenu.requested==UI::Title?ui.text("タイトルに戻りますか？"):gameMenu.requested==UI::ResetSettings?ui.text("設定を初期状態に戻しますか？"):gameMenu.requested==UI::SectionSkip?(ui.simplified()?"跳过这个场景吗？":"このシーンをスキップしますか？"):gameMenu.requested==UI::DeleteSlot?ui.text("データを削除しますか？"):gameMenu.panel==UI::Load?ui.text("データをロードしますか？"):ui.text("データを上書き保存しますか？");line(prompt,440,275,28,0xffffff,&queue);return;}
+#endif
   if(gameMenu.panel==UI::Settings){
    if(gameSettingsLayout.classic)line(ui.simplified()?"快进范围":"スキップ対象",165,431,17,0xffffff,&queue);
    if(gameMenu.allowSceneReturn)line(ui.text("回想を終了"),520,680,26,
@@ -1960,12 +1981,25 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   }
   if(gameMenu.panel==UI::Save||gameMenu.panel==UI::Load)for(int i=0;i<8;i++){
    unsigned slot=unsigned(gameMenu.page*8+i+1);
-   int x=i<4?198:834,y=136+(i%4)*135;
+#ifdef QLIE_PROFILE_WHJ6
+   const auto slotX=whj6::ui::slotX(i),slotY=whj6::ui::slotY(i);
+   const int x=int(whj6::ui::to720(float(slotX+292))),y=int(whj6::ui::to720(float(slotY+37)));
+   const auto&preview=slotPreview(slot);
+   if(!preview.exists)continue;
+#else
+   const int x=i<4?198:834,y=136+(i%4)*135;
    line("No."+std::to_string(slot),x,y,16,0xff5555,&queue);
    const auto&preview=slotPreview(slot);
    if(!preview.exists){line(ui.text("NO DATA"),x,y+24,18,0x999999,&queue);continue;}
-   if(!preview.thumbnail.pixels.empty())
+#endif
+   if(!preview.thumbnail.pixels.empty()){
+#ifdef QLIE_PROFILE_WHJ6
+    whj6::ui::bitmap(queue,preview.thumbnail,whj6::ui::to720(float(slotX+20)),whj6::ui::to720(float(slotY+10)),
+                     whj6::ui::to720(249),whj6::ui::to720(140));
+#else
     queue.image(preview.thumbnail,whj2::imagePlacement(i<4?27:660,137+(i%4)*135,1,1,0,0,0,160,90),0,255,0,0xffffff);
+#endif
+   }
    int px=x;
    for(size_t n=0;n<std::min(preview.excerpt.size(),size_t(23));n++){
     auto cp=preview.excerpt[n];drawGlyph(cp,px,y+22,18,18,0xffffff,&queue);px+=cp<128?9:18;
@@ -2203,6 +2237,12 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
   if(storyView){images->pointViewPan(lx,ly);return;}
   titlePointer=std::clamp(lx,0.f,1280.f);title->view(titlePointer);
  }
+ void pressTitleTouch(float x,float y){
+  if(!game_profile::title.buttonPush||!titleViewActive())return;
+  int w,h;windowSize(&w,&h);float lx,ly;
+  windowToLogical(int(x*w),int(y*h),&lx,&ly);
+  title->press(lx,ly);
+ }
  void touchDrag(float x,float y,bool start){if(menuFadeLocksInput()||(extrasVisible()&&!extrasReady())){if(start)fingerUiDrag=false;return;}int w,h;windowSize(&w,&h);float lx,ly;windowToLogical(int(x*w),int(y*h),&lx,&ly);if(cgScreen->visible()){if(start)fingerUiDrag=false;if(cgScreen->inView())cgScreen->pan(lx,ly);return;}if(replayScreen->visible()){if(start)fingerUiDrag=false;return;}if(musicScreen->visible()){bool moved=musicScreen->drag(lx,ly);if(start)fingerUiDrag=moved;return;}if(start)fingerUiDrag=gameMenu.beginDrag(lx,ly);else gameMenu.drag(lx,ly);if(fingerUiDrag&&gameMenu.settingsDirty){applySettings(false);uiSound("Sys_OnMouse");}}
  void pointer(int px,int py){if(cgOpening||menuFadeLocksInput()||sceneSkipRunning())return;float x,y;
  windowToLogical(px,py,&x,&y);
@@ -2348,11 +2388,12 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
  }if(opening){nextMakerLogo();}else next();
  }}SDL_Event e;
  while(SDL_PollEvent(&e)){if(e.type==SDL_QUIT)done=true;
-else if(e.type==SDL_FINGERDOWN){if(!fingerActive){fingerActive=true;fingerId=e.tfinger.fingerId;fingerX=e.tfinger.x;fingerY=e.tfinger.y;touchTitleView(fingerX,fingerY);touchDrag(fingerX,fingerY,true);}}
+else if(e.type==SDL_FINGERDOWN){if(!fingerActive){fingerActive=true;fingerId=e.tfinger.fingerId;fingerX=e.tfinger.x;fingerY=e.tfinger.y;touchTitleView(fingerX,fingerY);pressTitleTouch(fingerX,fingerY);touchDrag(fingerX,fingerY,true);}}
  else if(e.type==SDL_FINGERMOTION&&fingerActive&&e.tfinger.fingerId==fingerId&&cgScreen->visible()&&cgScreen->inView()){touchDrag(e.tfinger.x,e.tfinger.y,false);}
  else if(e.type==SDL_FINGERMOTION&&fingerActive&&e.tfinger.fingerId==fingerId&&(titleViewActive()||images->hasViewPan())&&!fingerUiDrag){touchTitleView(e.tfinger.x,e.tfinger.y);}
  else if(e.type==SDL_FINGERMOTION&&fingerActive&&e.tfinger.fingerId==fingerId&&fingerUiDrag){touchDrag(e.tfinger.x,e.tfinger.y,false);}
  else if(e.type==SDL_FINGERUP&&fingerActive&&e.tfinger.fingerId==fingerId){fingerActive=false;
+ title->release();
  float dx=(e.tfinger.x-fingerX)*1280,dy=(e.tfinger.y-fingerY)*720;
  if(fingerUiDrag){touchDrag(e.tfinger.x,e.tfinger.y,false);gameMenu.endDrag();fingerUiDrag=false;if(gameMenu.panel==whj2::GameMenu::Settings)applySettings();}
  else if(!menu&&!sceneSkipRunning()&&!gameMenu.visible()&&!menuFadeLocksInput()&&upperMenu->swipe(dx,dy)){upperMenu->offerSectionSkip(sceneSkipAvailable());QLIE_LOG_LINE(<<"INPUT downward swipe upper menu\n");}

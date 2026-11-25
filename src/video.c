@@ -328,7 +328,7 @@ static int prepare_nv12_download(AVFrame *dst,const AVFrame *src,const AVHWFrame
 static int describe_surface(const AVFrame *frame,KVideoSurface *out){
 #ifdef __SWITCH__
     if(!frame||frame->format!=AV_PIX_FMT_NVTEGRA||!frame->hw_frames_ctx||!frame->buf[0]||
-       frame->width!=1280||frame->height!=720||frame->crop_left||frame->crop_right||
+       !kvideo_scene_surface_size(frame->width,frame->height)||frame->crop_left||frame->crop_right||
        frame->crop_top||frame->crop_bottom)return 0;
     const AVHWFramesContext *ctx=(const AVHWFramesContext *)frame->hw_frames_ctx->data;
     if(ctx->sw_format!=AV_PIX_FMT_NV12||frame->linesize[0]<frame->width||frame->linesize[1]<frame->width)return 0;

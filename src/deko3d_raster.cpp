@@ -39,6 +39,7 @@ class DekoScene final : public Scene {
   const VideoMapping* mapping=nullptr;
   Span span;
   uint64_t identity=0,lastUsed=0;
+  unsigned height=0;
   bool converted=false;
  };
  dk::UniqueDevice device;
@@ -203,7 +204,7 @@ class DekoScene final : public Scene {
  }
  bool supportsVideoSurfaces()const override{return true;}
  std::optional<uint32_t> videoTexture(const KVideoSurface& s,uint64_t& identity) override {
-  if(s.width!=Width||s.height!=Height||s.pitch[0]<Width||s.pitch[1]<Width||
+  if(!kvideo_scene_surface_size(s.width,s.height)||s.pitch[0]<s.width||s.pitch[1]<s.width||
      s.pitch[1]%2||!s.frame||!s.frame->hw_frames_ctx||!s.storage||!s.storage_size||
      (reinterpret_cast<uintptr_t>(s.storage)|s.storage_size)%DK_MEMBLOCK_ALIGNMENT||
      s.chroma_offset>=s.storage_size||!s.version)return std::nullopt;
@@ -246,7 +247,8 @@ class DekoScene final : public Scene {
   texture.frame.reset(av_frame_clone(s.frame));
   if(!texture.frame)throw std::runtime_error("deko3d video frame reference");
   texture.mapping=&found->second;
-  texture.span=allocateSpan(CanvasBytes);
+  texture.height=s.height;
+  texture.span=allocateSpan(size_t(s.width)*s.height*sizeof(uint32_t));
   texture.identity=identity=nextUploadId++;
   texture.lastUsed=frames+1;
   const auto address=uint32_t(texture.span.offset/sizeof(uint32_t));
@@ -254,6 +256,7 @@ class DekoScene final : public Scene {
   return address;
  }
  bool beginVideoSurface(const KVideoSurface& s) override {
+  if(s.width!=Width||s.height!=Height)return false;
   uint64_t identity=0;
   auto address=videoTexture(s,identity);
   if(!address)return false;
@@ -290,8 +293,8 @@ class DekoScene final : public Scene {
    const std::array<DkResHandle,2> handles{{dkMakeImageHandle(0),dkMakeImageHandle(1)}};
    cmd.bindImages(DkStage_Compute,0,handles);
    // The video kernel uses 16x8 threads, each converting a 2x2 NV12 block.
-   static_assert(Width%32==0&&Height%16==0);
-   cmd.dispatchCompute(Width/32,Height/16,1);
+   static_assert(Width%32==0);
+   cmd.dispatchCompute(Width/32,texture.height/16,1);
    texture.converted=true;
    if constexpr (qlie::diagnostics) ++dispatches;
    ++slot;

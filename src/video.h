@@ -22,6 +22,9 @@ void kvideo_release_hardware(void);
 /* GPU players can borrow a decoded NV12 surface until the next
    video advance. Clone the AVFrame to use it after that point. */
 void kvideo_enable_surface(KVideo *v);
+static inline int kvideo_scene_surface_size(unsigned width,unsigned height){
+    return width==1280 && (height==720 || height==1440);
+}
 int kvideo_get_surface(const KVideo *v,KVideoSurface *surface);
 int kvideo_copy_surface(KVideo *v,KImage *screen);
 struct AVFrame *kvideo_clone_frame(const struct AVFrame *frame);

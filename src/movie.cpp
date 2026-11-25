@@ -65,7 +65,8 @@ std::shared_ptr<PreparedMovie> prepare(qlie::Bytes bytes,const std::string&name,
  movie->source=name;
  movie->video.reset(kvideo_open(movie->bytes.data(),movie->bytes.size()));
  if(!movie->video)throw std::runtime_error("Cannot open movie "+name);
- if(nativeSurfaces)kvideo_enable_surface(movie->video.get());
+ if(nativeSurfaces&&kvideo_source_width(movie->video.get())==movie->frame.width&&
+    kvideo_source_height(movie->video.get())==movie->frame.height)kvideo_enable_surface(movie->video.get());
  const bool audio=kvideo_has_audio(movie->video.get());
  if(audio)kvideo_disable_audio(movie->video.get());
  do{movie->advance(movie->tick);}while(!movie->ended&&!kvideo_written_frames(movie->video.get())&&movie->tick<60);

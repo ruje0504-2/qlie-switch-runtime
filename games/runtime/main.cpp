@@ -823,6 +823,9 @@ cgScreen.reset();replayScreen.reset();musicScreen.reset();movie.reset();
               int(match->source.loose));
  }
  void refreshMessage(bool show=false){
+  // A branch may clear the old message layer and defer loading the next
+  // one. Rebuilding it here would consume the file its command awaits.
+  if(pendingScene)return;
   const auto started=qlie::diagnostics?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
   images->setMessageImage(messageText->renderIncremental(storyFont(),images->messageStyle(),messageSurface),show);
   lastMessageVisible=messageText->visible();

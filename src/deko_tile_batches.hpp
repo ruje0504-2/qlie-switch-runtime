@@ -52,7 +52,7 @@ inline bool axisBitmap(const Push& p){
 inline bool fogDraw(const DrawData& draw,const DrawSources& sources){
  const auto& p=draw.image;
  // At this scale a tile's linear filter visits at most 17 source rows.
- return sources.opaque&&sources.monochrome&&axisBitmap(p)&&((p.meta[2]>>8)&255u)==2&&
+ return sources.opaque&&sources.monochrome&&axisBitmap(p)&&(p.meta[2]&0xffffu)==((2u<<8)|2u)&&
         p.p[0][3]>=1.0625f&&p.colors[0]==0&&p.colors[1]==0xffffff;
 }
 #endif

@@ -21,42 +21,11 @@ vec2 bitmapPosition(Draw p,ivec2 q){
  return vec2(divide(p.p0.w*d.x,p.p1.z),divide(p.p0.x*d.y,p.p1.z));
 }
 
-uint fogGray(Draw p,ivec2 origin){
- uint x=gl_LocalInvocationID.x,y=gl_LocalInvocationID.y;
- bool linear=(p.meta.z&255u)==2u;
- if(y==0u){
-  precise vec2 uv=bitmapPosition(p,origin+ivec2(int(x)));
-  if(linear){
-   precise vec2 f=uv-.5;
-   ivec2 i=ivec2(floor(f)),last=ivec2(p.meta.xy)-1;
-   ivec2 lo=clamp(i,ivec2(0),last),hi=clamp(i+1,ivec2(0),last);
-   taps[x]=ivec4(lo.x,hi.x,lo.y,hi.y);
-   weights[x]=f-vec2(i);
-  }else{
-   ivec2 i=ivec2(floor(uv));
-   taps[x]=ivec4(i.x,0,i.y,0);
-  }
- }
- barrier();
- if(!linear)return source[p.colors.z+uint(taps[y].z)*p.meta.x+uint(taps[x].x)]&255u;
-
- // The fog is monochrome and enlarged. Compute each horizontal tap once
- // and share it between adjacent output rows with the original filter order.
- int first=taps[0].z,rows=taps[15].w-first+1;
- ivec2 cols=taps[x].xy;
- float fx=weights[x].x;
- for(int r=int(y);r<rows;r+=16){
-  uint row=p.colors.z+uint(first+r)*p.meta.x;
-  precise float value=float(source[row+uint(cols.x)]&255u);
-  if(fx!=0.0)value=value*(1.0-fx)+float(source[row+uint(cols.y)]&255u)*fx;
-  horizontal[r*16+int(x)]=value;
- }
- barrier();
- ivec2 lines=taps[y].zw-ivec2(first);
- float fy=weights[y].y;
- precise float value=horizontal[lines.x*16+int(x)];
- if(fy!=0.0)value=value*(1.0-fy)+horizontal[lines.y*16+int(x)]*fy;
- return uint(floor(value+.5));
+float horizontalTap(Draw p,int row,ivec2 cols,float fx){
+ uint address=p.colors.z+uint(row)*p.meta.x;
+ precise float value=float(source[address+uint(cols.x)]&255u);
+ if(fx!=0.0)value=value*(1.0-fx)+float(source[address+uint(cols.y)]&255u)*fx;
+ return value;
 }
 
 void overBitmap(Draw p,ivec2 q,inout uvec4 color){
@@ -79,7 +48,28 @@ void main(){
  ivec2 q=origin+ivec2(gl_LocalInvocationID.xy);
  uint index=uint(q.y)*frame.meta.x+uint(q.x);
  Draw fog=draws[tiles[first]];
- uint gray=fogGray(fog,origin),alpha=fog.meta.w;
+ uint x=gl_LocalInvocationID.x,y=gl_LocalInvocationID.y;
+ if(y==0u){
+  precise vec2 f=bitmapPosition(fog,origin+ivec2(int(x)))-.5;
+  ivec2 i=ivec2(floor(f)),last=ivec2(fog.meta.xy)-1;
+  ivec2 lo=clamp(i,ivec2(0),last),hi=clamp(i+1,ivec2(0),last);
+  taps[x]=ivec4(lo.x,hi.x,lo.y,hi.y);
+  weights[x]=f-vec2(i);
+ }
+ barrier();
+ // The linear fog batch is limited to 17 source rows per tile. All lanes
+ // reach both barriers without crossing a variable-trip loop or filter branch.
+ int firstRow=taps[0].z,rows=taps[15].w-firstRow+1;
+ ivec2 cols=taps[x].xy;
+ float fx=weights[x].x;
+ if(int(y)<rows)horizontal[y*16u+x]=horizontalTap(fog,firstRow+int(y),cols,fx);
+ if(y==0u&&rows==17)horizontal[16u*16u+x]=horizontalTap(fog,firstRow+16,cols,fx);
+ barrier();
+ ivec2 lines=taps[y].zw-ivec2(firstRow);
+ float fy=weights[y].y;
+ precise float value=horizontal[lines.x*16+int(x)];
+ if(fy!=0.0)value=value*(1.0-fy)+horizontal[lines.y*16+int(x)]*fy;
+ uint gray=uint(floor(value+.5)),alpha=fog.meta.w;
  uvec4 b=unpack(destination[index+frame.meta.x*frame.meta.y]);
  uvec4 w=(uvec4(gray,gray,gray,alpha)*(alpha+(alpha>>7u)))>>8u;
  uvec4 color=min(uvec4(255),w+b-((w*b)>>8u));

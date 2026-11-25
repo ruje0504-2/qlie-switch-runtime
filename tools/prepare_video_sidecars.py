@@ -48,6 +48,7 @@ def main():
             return
         input_options = []
         picture_options = []
+        encoding_metadata = []
         rate_options = ["-crf", "16"]
         if args.whj6_dynamic_cg:
             source_info = json.loads(subprocess.check_output([
@@ -58,11 +59,12 @@ def main():
             stream, = source_info["streams"]
             duration = source_info["format"]["duration"]
             if output.exists():
-                encoded_duration = subprocess.check_output([
-                    probe, "-v", "error", "-show_entries", "format=duration",
-                    "-of", "default=noprint_wrappers=1:nokey=1", str(output)
-                ], text=True).strip()
-                if abs(float(encoded_duration) - float(duration)) <= 0.05:
+                encoded_info = json.loads(subprocess.check_output([
+                    probe, "-v", "error", "-show_entries", "format=duration:format_tags=QLIE_THEORA_THREADS",
+                    "-of", "json", str(output)
+                ]))["format"]
+                if (encoded_info.get("tags", {}).get("QLIE_THEORA_THREADS") == "1"
+                        and abs(float(encoded_info["duration"]) - float(duration)) <= 0.05):
                     print(f"{output} (existing)", flush=True)
                     return
             width, height = stream["width"], stream["height"]
@@ -75,8 +77,11 @@ def main():
             # drop them during transcode, so pad the picture to the source clock.
             filters.append(f"tpad=stop_mode=clone:stop_duration={duration}")
             picture_options = ["-vf", ",".join(filters), "-t", duration]
-            input_options = ["-threads", "2", "-filter_threads", "1"]
+            # Some Theora interframes lose both chroma planes with frame
+            # threading. Match the serial decoder used by the runtime.
+            input_options = ["-threads", "1", "-filter_threads", "1"]
             rate_options = ["-crf", "18", "-maxrate", "6M", "-bufsize", "12M", "-threads", "2"]
+            encoding_metadata = ["-metadata", "QLIE_THEORA_THREADS=1"]
         with tempfile.TemporaryDirectory(prefix=".convert-", dir=args.output_dir) as tmp:
             encoded = Path(tmp) / "video.mkv"
             subprocess.run([
@@ -84,7 +89,8 @@ def main():
                 *input_options, "-i", str(source), "-map", "0:v:0", "-map", "0:a:0?",
                 *picture_options, "-c:v", "libx264", "-preset", "fast", *rate_options,
                 "-bf", "0", "-pix_fmt", "yuv420p", "-fps_mode", "passthrough",
-                "-c:a", "copy", "-map_metadata", "-1", "-map_chapters", "-1", str(encoded)
+                "-c:a", "copy", "-map_metadata", "-1", "-map_chapters", "-1",
+                *encoding_metadata, str(encoded)
             ], check=True)
             encoded.replace(output)
         print(output, flush=True)

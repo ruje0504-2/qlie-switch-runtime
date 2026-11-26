@@ -137,6 +137,8 @@ QLIE_GAME=whj6 python3 tools/package_nsp.py \
   --output /absolute/path/to/WHJ6-01007F8E5C160000-1.0.1.nsp
 ```
 
+雪女 `1.0.2` 更新使用 Update Title ID `01007F8E5C160800`，针对已包含上述正文字体的 `1.0.1` 本体。更新修复立绘的持续动作跨场景残留，只替换 ExeFS 程序，RomFS 通过补丁映射沿用本体资源。制作更新需读取对应本体的头部及元数据。
+
 这组版本修复了剧情切换时短暂出现的文字占位图，覆盖普通对白、全屏字幕和遮罩字卡。该修复已通过 macOS 定点回归与本地 NSP 校验。
 
 ## 许可

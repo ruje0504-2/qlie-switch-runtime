@@ -1703,6 +1703,27 @@ bool SceneImages::command(const std::string&line){auto p=line.find(44);
  if(face&&l.params.empty())l.params=faceDefaults;
  if(message&&l.params.empty())l.params={{"mode","cls"},{"show","false"},{"x","0"},{"y",std::to_string(canvas[1])},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri","1100"},{"align","left:top"},{"textarea","920:300"},{"fontsize","26:26"},{"fontcolor","$FFFFFF"}};
  if(l.params.empty())l.params={{"x",std::to_string(ui?0:canvas[0]/2)},{"y",std::to_string(ui?0:chara?canvas[1]:canvas[1]/2)},{"scalex","100"},{"scaley","100"},{"alpha","255"},{"pri",chara?"500":"0"},{"show","true"},{"align",chara?"center:bottom":(ui||cmd=="effect")?"left:top":"center:center"}};
+#ifdef QLIE_PROFILE_WHJ6
+ if(multipart){
+  const auto supplied=[&](const char* key){
+   const auto prefix=std::string(key)+":";
+   return std::any_of(args.begin(),args.end(),[&](const auto& field){
+    return field.rfind(prefix,0)==0&&field.size()>prefix.size();
+   });
+  };
+  // Imo_Chara8e_Refresh_Main resets retained motions before merging fields.
+  // Explicit motions in this command must survive regardless of field order.
+  const bool show=supplied("show");
+  if(show||supplied("base")){
+   l.params["motion"]="def";l.params["motionkeep"]="false";l.params["speed"]="100";
+   l.milliseconds=0;l.audioMilliseconds=-1;
+  }
+  if(show){
+   l.params["extmotion"]="def";l.params["extmotionkeep"]="false";
+   l.extension.reset();l.extensionMilliseconds=0;
+  }
+ }
+#endif
  auto resetsMotion=[&](const char*key,const char*keep){
   const auto motion=l.params.find(key);
   return motion!=l.params.end()&&motion->second!="def"&&motion->second!="0"&&

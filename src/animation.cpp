@@ -155,11 +155,11 @@ constexpr auto wideKeyOffsets=[]{
   {4,4},{5,8},{6,0x24},{7,0x28},{0x8,0x50},{0xa,0x54},{0xc,0x58},{0xe,0x5c},
   {0x10,0x34},{0x14,0x38},{0x18,0x84},{0x1a,0x88},{0x1c,0x90},{0x1e,0x94},
   {0x20,0xa8},{0x22,0xa4},{0x24,0xbc},{0x28,0xc0},{0x2d,0x48},{0x2e,0x4c},
-  {0x30,0x7c},{0x31,0x80},{0x33,0xb4},{0x34,0xd0},{0x35,0xc4},{0x37,0xc8},
+  {0x30,0x7c},{0x31,0x80},{0x32,0x1c},{0x33,0xb4},{0x34,0xd0},{0x35,0xc4},{0x37,0xc8},
   {0x3a,0xcc},{0x3b,0xb8},{0x3c,0x2c},{0x3d,0x30},
   {0x40,0x60},{0x42,0x64},{0x44,0x68},{0x46,0x6c},{0x48,0x9c},{0x4a,0xa0},{0x4d,0x8c},
   {0x81,0x3c},{0x83,0x40},{0x85,0x70},{0x87,0x74},{0x89,0xd4},{0x8b,0xd8},
-  {0x8d,0xdc},{0x8f,0xe0},{0x91,0x0c},{0x93,0xb0},{0x96,0x98}
+  {0x8d,0xdc},{0x8f,0xe0},{0x91,0x0c},{0x92,0x20},{0x93,0xb0},{0x96,0x98}
  };
  for(const auto&field:fields)offsets[field.first]=uint16_t(field.second);
  for(unsigned wave=0;wave<4;++wave){
@@ -304,6 +304,9 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
  out.resource=keyCode(a,6);
  auto number=[&](const qlie::Bytes&key,size_t offset){
   int v=keyI16(key,offset);
+  // Legacy opacity fields reserve 0x100..0x10f for external values.
+  // The WHJ1 zoom overlay ends at opacity 0x105, supplied by value[5].
+  if(!wideKey(key)&&(offset==0x35||offset==0x37)&&v>=256&&v<272)v=32700+v-256;
   if(v>=32700&&v<32716&&(context.externalMask&(1u<<(v-32700))))return context.external[size_t(v-32700)];
   switch(v){case 32727:if(context.imageWidth!=UINT32_MAX)return float(context.imageWidth);break;
    case 32728:if(context.imageHeight!=UINT32_MAX)return float(context.imageHeight);break;
@@ -320,6 +323,13 @@ AnimationSample sampleAnimation(const AnimationLayer&layer,double ms,const Anima
   if(mode==2)return sampleSpline(read(previous),read(a),read(b),read(following),power,t);
   return sampleValue(read(a),read(b),mode,power,t,out.unsupported,randomCursor);
  };
+ if(layer.version==25&&keyCode(a,0x32)){
+  // Modern flipbooks interpolate the image slot independently of child time.
+  // Their first slot may be the empty index just beyond the bitmap list.
+  const auto frame=interpolate([&](const qlie::Bytes& key){return float(keyCode(key,6));},
+                               keyCode(a,0x32),keyCode(a,0x92)/100.f);
+  out.resource=unsigned(std::clamp(std::lround(frame),0l,255l));
+ }
  auto val=[&](size_t offset,unsigned mode,float power){
   return interpolate([&](const qlie::Bytes& key){return number(key,offset);},mode,power);
  };

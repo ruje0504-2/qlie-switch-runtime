@@ -4,13 +4,16 @@
 #include "render_queue.hpp"
 #include <cmath>
 #include <iostream>
+#include <set>
 #include <stdexcept>
 
 namespace {
 struct Capture final : whj2::RenderTarget {
  std::vector<float> pose;
+ std::set<const whj2::Image*> images;
  void image(const whj2::Image& image,const whj2::Affine2D& at,float alpha,
             uint32_t,uint32_t,unsigned,unsigned) override {
+  images.insert(&image);
   pose.insert(pose.end(),{float(image.width),float(image.height),at.a,at.b,at.c,at.d,at.x,at.y,alpha});
  }
  void triangle(const whj2::Image&,const std::array<whj2::TextureVertex,3>& points,
@@ -83,5 +86,19 @@ int main(int argc,char** argv){
   scene.command("^chara01,base:motion/motion_BasicSet");
   stationary(scene,reference,"base refresh retained previous motion");
   std::cout<<"PASS show/base resets and explicit motion field order\n";
+
+  for(const auto& effect:std::vector<std::pair<const char*,size_t>>{{"08",4},{"09",3}}){
+   whj2::SceneImages overlay(assets,whj6::profile::sceneSize);
+   overlay.command(std::string("^ef03,file:effect_c/エフェクト_")+effect.first+",x:1347,y:527,show:true");
+   std::set<const whj2::Image*> frames;
+   for(unsigned i=0;i<64;++i){
+    Capture target;overlay.draw(target);frames.insert(target.images.begin(),target.images.end());
+    overlay.update(25);
+   }
+   require(frames.size()==effect.second,"pet emotion flipbook omitted authored frames");
+   overlay.command("^ef03,show:false");
+   require(pose(overlay).empty(),"hidden pet emotion still rendered");
+  }
+  std::cout<<"PASS pet emotion 08/09 authored frames, repeated playback and hide\n";
  }catch(const std::exception& error){std::cerr<<"FAIL "<<error.what()<<'\n';return 1;}
 }
